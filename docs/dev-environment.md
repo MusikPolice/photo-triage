@@ -15,7 +15,7 @@ How photo-triage is built, run, and verified. Companion to [plan.md](plan.md).
 
 ```
 # /etc/fstab
-//192.168.2.21/pictures  /mnt/pictures  cifs  ro,credentials=/etc/smb-pictures.cred,uid=1000,gid=1000,iocharset=utf8,noserverino,_netdev  0  0
+//192.168.2.21/pictures  /mnt/pictures  cifs  ro,credentials=/etc/smb-pictures.cred,uid=1000,gid=1000,iocharset=utf8,noserverino,_netdev,nofail  0  0
 ```
 
 The curated sample on the Windows host is exposed the same way:
