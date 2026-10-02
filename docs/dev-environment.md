@@ -58,7 +58,14 @@ Libraries of note (exact versions live in the lockfiles): FastAPI, SQLAlchemy 2,
 
 ### Claude Code session check
 
-A `SessionStart` hook in the project's `.claude/settings.json` runs `scripts/bootstrap.sh --check` (about 3 s) at the start of every Claude Code session. It is silent when the environment is OK. On failure it prints the problems list, which lands in Claude's context. The session then starts already knowing that, say, Docker Desktop isn't running or the SMB share didn't mount after a reboot, instead of discovering it mid-task. The hook only reports; fixing is left to the developer (or Claude, when asked), using the advice each problem carries.
+`.claude/settings.json` (committed, so every clone gets it) has a `SessionStart` hook that runs `scripts/bootstrap.sh --check --quiet` when a Claude Code session starts, resumes, or is cleared. It takes about 2 s. `--quiet` prints nothing when the environment is OK and only the problems list when it isn't. Each problem carries its own fix, for example:
+
+```
+Dev environment problems (from scripts/bootstrap.sh --check):
+  - Docker is running, but this session isn't in the 'docker' group yet. Run 'wsl --shutdown' from Windows and reopen Ubuntu (or 'newgrp docker' for one shell).
+```
+
+That output lands in Claude's context, so the session starts already knowing that, say, Docker Desktop isn't running or the SMB share didn't mount after a reboot, instead of discovering it mid-task. The hook command ends in `|| true` because Claude Code only adds a SessionStart hook's output to context when it exits 0. The hook only reports; fixing is left to the developer, or to Claude when asked.
 
 ## 3. Repository layout
 

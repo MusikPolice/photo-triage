@@ -8,6 +8,9 @@
 #   ./scripts/bootstrap.sh --check   report problems only; changes nothing, needs no
 #                                    sudo or network; exits 1 if anything needs fixing
 #                                    (this is what `just doctor` runs)
+#   ./scripts/bootstrap.sh --check --quiet
+#                                    print only the problems list, nothing when OK
+#                                    (used by the Claude Code SessionStart hook)
 #
 # What it does (docs/dev-environment.md §2):
 #   1. apt prerequisites (curl, build-essential, cifs-utils, libheif, ...)
@@ -26,13 +29,21 @@
 set -euo pipefail
 
 CHECK=0
+QUIET=0
 for arg in "$@"; do
   case "$arg" in
     --check) CHECK=1 ;;
+    --quiet) QUIET=1 ;;
     -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "Unknown argument: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
+((CHECK || !QUIET)) || { echo "--quiet only works with --check" >&2; exit 2; }
+
+# --quiet: silence the step-by-step report; fd 3 keeps the real stdout for the
+# final problems list (and for die, so a fatal error is never swallowed).
+exec 3>&1
+if ((QUIET)); then exec >/dev/null 2>&1; fi
 
 # ---------------------------------------------------------------------------
 # Pinned versions. Bumping one means updating its checksum too.
@@ -84,7 +95,7 @@ BASHRC_MARKER="# >>> photo-triage bootstrap >>>"
 # Helpers
 # ---------------------------------------------------------------------------
 
-if [[ -t 1 ]]; then
+if [[ -t 1 ]] && ! ((QUIET)); then
   BOLD=$'\e[1m'; GREEN=$'\e[32m'; YELLOW=$'\e[33m'; RED=$'\e[31m'; RESET=$'\e[0m'
 else
   BOLD=""; GREEN=""; YELLOW=""; RED=""; RESET=""
@@ -93,7 +104,11 @@ fi
 step() { printf '\n%s==> %s%s\n' "$BOLD" "$*" "$RESET"; }
 ok()   { printf '%s  ✓ %s%s\n' "$GREEN" "$*" "$RESET"; }
 warn() { printf '%s  ! %s%s\n' "$YELLOW" "$*" "$RESET" >&2; WARNINGS+=("$*"); }
-die()  { printf '%s  ✗ %s%s\n' "$RED" "$*" "$RESET" >&2; exit 1; }
+die()  {
+  if ((QUIET)); then printf 'Dev environment check failed (scripts/bootstrap.sh --check): %s\n' "$*" >&3
+  else printf '%s  ✗ %s%s\n' "$RED" "$*" "$RESET" >&2; fi
+  exit 1
+}
 # fail: a problem that needs fixing. Recorded so --check can list them and exit 1.
 fail() { printf '%s  ✗ %s%s\n' "$RED" "$*" "$RESET" >&2; FAILURES+=("$*"); }
 
@@ -216,7 +231,7 @@ HAVE_RUNTIMES=0
 if [[ ! -x "$MISE" ]]; then
   fail "Runtimes not checked: mise is missing"
 elif ((CHECK)); then
-  if ! "$MISE" trust --show "$REPO_ROOT/mise.toml" 2>/dev/null | grep -q ": trusted"; then
+  if ! (cd "$REPO_ROOT" && "$MISE" trust --show 2>/dev/null) | grep -q ": trusted"; then
     fail "mise.toml is not trusted ($FIX_HINT)"
   else
     absent="$(cd "$REPO_ROOT" && "$MISE" ls --current --missing 2>/dev/null | awk '{print $1"@"$2}' | xargs)"
@@ -446,7 +461,13 @@ if ((${#FAILURES[@]})); then
   for f in "${FAILURES[@]}"; do echo "    - $f"; done
 fi
 
-if ((CHECK)); then
+if ((QUIET)); then
+  if ((${#FAILURES[@]})); then
+    echo "Dev environment problems (from scripts/bootstrap.sh --check):" >&3
+    for f in "${FAILURES[@]}"; do echo "  - $f" >&3; done
+    exit 1
+  fi
+elif ((CHECK)); then
   if ((${#FAILURES[@]})); then
     echo
     echo "  ${#FAILURES[@]} problem(s) found."

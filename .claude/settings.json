@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/bootstrap.sh --check --quiet || true",
+            "timeout": 30,
+            "statusMessage": "Checking dev environment"
+          }
+        ]
+      }
+    ]
+  }
+}
