@@ -1,0 +1,10 @@
+# LF everywhere, including for checkouts on Windows (docs/dev-environment.md §8).
+* text=auto eol=lf
+
+*.jpg binary
+*.jpeg binary
+*.heic binary
+*.png binary
+*.mov binary
+*.mp4 binary
+*.onnx binary

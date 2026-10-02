@@ -1,0 +1,63 @@
+# Local checks that run on every commit (docs/dev-environment.md §8).
+# Install with `pre-commit install` (scripts/bootstrap.sh does this);
+# run on everything with `just pre-commit`.
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-executables-have-shebangs
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      # Family photos (tier 2) must never be committed. Only generated
+      # synthetic fixtures may be media files.
+      - id: no-media
+        name: no photos or videos outside synthetic fixtures
+        language: fail
+        entry: "Media files may only be committed under backend/tests/fixtures/synthetic/"
+        files: '(?i)\.(jpe?g|heic|heif|png|gif|bmp|tiff?|webp|dng|cr2|cr3|nef|arw|orf|rw2|raw|mov|mp4|m4v|avi|mkv|3gp|mts)$'
+        exclude: '^backend/tests/fixtures/synthetic/'
+
+      - id: ruff-format
+        name: ruff format --check
+        language: system
+        entry: scripts/backend-run.sh ruff format --check
+        files: '^backend/.*\.py$'
+        pass_filenames: false
+
+      - id: ruff-check
+        name: ruff check
+        language: system
+        entry: scripts/backend-run.sh ruff check
+        files: '^backend/.*\.py$'
+        pass_filenames: false
+
+      - id: file-mutation-guard
+        name: file mutation only in photo_triage.files
+        language: system
+        entry: python3 scripts/check_file_mutation.py
+        files: '^backend/src/.*\.py$'
+
+      - id: uv-lock
+        name: uv.lock matches pyproject.toml
+        language: system
+        entry: scripts/backend-run.sh uv lock --check --offline
+        files: '^backend/(pyproject\.toml|uv\.lock)$'
+        pass_filenames: false

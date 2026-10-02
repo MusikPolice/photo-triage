@@ -5,7 +5,7 @@ A self-hosted tool for exploring and cleaning up a family photo library: a zooma
 - [docs/plan.md](docs/plan.md): product spec and architecture
 - [docs/dev-environment.md](docs/dev-environment.md): toolchain, testing strategy, and build-time checks
 
-> **Status:** planning complete; the Phase 1 scaffold is in progress. Steps marked 🚧 depend on files that Phase 1 adds (`mise.toml`, `justfile`, `scripts/bootstrap.sh`, `.env.example`).
+> **Status:** the dev environment and its checks are in place; the Phase 1 app scaffold is next. Steps marked 🚧 depend on files that the scaffold adds (`.env.example` and the app's `just` recipes).
 
 ---
 
@@ -135,7 +135,7 @@ gh repo clone MusikPolice/photo-triage
 cd photo-triage
 ```
 
-### 7. Toolchain via mise 🚧
+### 7. Toolchain via mise
 
 [mise](https://mise.jdx.dev/) installs the pinned versions of Python, uv, Node, pnpm, and just listed in `mise.toml`.
 
@@ -199,6 +199,9 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just check` | Everything CI runs: format, lint, pyright, import contracts, tests, coverage, frontend checks |
 | `just dry-run-full` | Scale test against `/mnt/pictures` with metadata writes disabled |
 | `just doctor` | Verify the environment |
+| `just fmt` | Format and auto-fix lint |
+
+Available today: `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 

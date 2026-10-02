@@ -147,8 +147,10 @@ Determinism: fixed seeds for UMAP (`random_state`) and any sampling; injected cl
 File mutation is confined to `photo_triage.files`. These are enforced both statically and by tests:
 
 **Static (fail the build):**
-- Ruff `flake8-tidy-imports` banned-API rules: `os.remove`, `os.unlink`, `os.rename`, `os.replace`, `shutil.move`, `shutil.rmtree`, `Path.unlink`, `Path.rename`, `Path.replace`, and `subprocess` calls to exiftool are banned everywhere **except** `photo_triage/files/`.
-- `import-linter` contracts: `api` and `pipeline` may not import `files` internals directly (only its public service interface); `ml` imports nothing from `db`/`api`.
+- Ruff `flake8-tidy-imports` banned-API rules (TID251, in `backend/pyproject.toml`): `os.remove`, `os.unlink`, `os.rmdir`, `os.removedirs`, `os.rename`, `os.renames`, `os.replace`, `os.utime`, `shutil.move`, and `shutil.rmtree` are banned in `backend/src` **except** `photo_triage/files/`.
+- Ruff can't resolve method calls on `Path` objects or the arguments to `subprocess`, so `scripts/check_file_mutation.py` covers those by syntax, with the same scope: `.unlink()`, `.rename()`, `.rmdir()`, one-argument `.replace()` (`Path.replace`; `str.replace` takes two), and any string literal naming the `exiftool` executable. It runs in pre-commit and `just lint`.
+- `import-linter` contracts: `api` and `pipeline` may import `photo_triage.files` (its public interface) but none of its submodules; `ml` imports nothing from `db`/`api`.
+- Tests are exempt from both, since they build and tear down fixture copies in temp dirs.
 
 **Tests (`tests/safety/`, run on every PR):**
 - **Dry run is inert:** with `EXIF_WRITES_ENABLED=false`, run every pipeline and every UI action over a fixture copy; every file's bytes and mtime are identical afterwards.
@@ -166,19 +168,22 @@ File mutation is confined to `photo_triage.files`. These are enforced both stati
 - `prettier --check`, `eslint`
 - `uv lock --check`, pnpm lockfile consistency
 - **Media guard:** reject any image/video file added outside `backend/tests/fixtures/synthetic/`; reject files > 1 MB — prevents family photos (tier 2) from ever being committed
+- File-mutation guard (`scripts/check_file_mutation.py`, §7)
 - `gitleaks` (secrets, e.g. SMB credentials)
 - Trailing whitespace / EOF / merge-conflict markers; LF line endings enforced via `.gitattributes`
+
+Config: `.pre-commit-config.yaml`. The ruff and uv hooks run through `scripts/backend-run.sh`, which finds mise even when the shell hasn't activated it (commits from an editor), and uses the existing `.venv` without syncing. `just pre-commit` runs every hook on every file; `just check` runs that plus lint, pyright, and the tests — everything CI runs except the audit.
 
 ### CI on every push / PR (GitHub Actions, ubuntu-24.04)
 
 | Job | Checks |
 |---|---|
-| backend | `uv sync --locked`; ruff; **pyright strict** (tests at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt) |
+| backend | `uv sync --locked --no-group export`; pre-commit (all hooks); ruff; **pyright strict** (tests at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt) |
 | migrations | upgrade from empty → downgrade → upgrade; `alembic check` |
 | frontend | `pnpm install --frozen-lockfile`; svelte-check; eslint; prettier; Vitest; `vite build` |
 | contract | Export OpenAPI from the app, regenerate TS types (`openapi-typescript`); fail if the committed types differ |
 | docker | hadolint; build image; image smoke test (container starts, `/api/health` ok, `exiftool -ver` / `ffmpeg -version` match pinned versions) |
-| audit | `pip-audit`, `pnpm audit --prod` — fail on high/critical |
+| audit | `pip-audit` on the runtime dependencies (`just audit`; fails on any known vulnerability, since pip-audit has no severity filter), `pnpm audit --prod` — fail on high/critical |
 
 ### CI on `main` and nightly
 
@@ -195,4 +200,9 @@ File mutation is confined to `photo_triage.files`. These are enforced both stati
    - **umap-learn 0.5.12** with numba JIT, and **scikit-learn 1.9** `HDBSCAN`, both work on 3.13.
    - **open_clip 3.3 → ONNX:** `torch.onnx.export(..., dynamo=True)` needs `onnxscript`. A dynamic batch axis needs `dynamic_shapes` with an example batch of at least 2, because `dynamic_axes` gets specialised to the example. The onnxruntime output matches torch to within 3e-6.
    - Also resolved: numpy 2.5, onnxruntime 1.30, OpenCV 5.0 (headless), Pillow 12.3, torch 2.14 (CPU).
-4. Write `mise.toml`, `justfile`, `scripts/bootstrap.sh`, pre-commit config, and the CI workflow skeleton before any feature code, so every subsequent change lands with the checks already in place.
+4. ~~Write `mise.toml`, `justfile`, `scripts/bootstrap.sh`, pre-commit config, and the CI workflow skeleton before any feature code, so every subsequent change lands with the checks already in place.~~ Done on 2026-10-02. The backend checks from §7–8 are live: pre-commit, `just lint`/`typecheck`/`test`/`audit`/`check`, and the `backend` and `audit` CI jobs in `.github/workflows/ci.yml`. The `backend/src/photo_triage` subpackages from §3 exist as empty packages so the import contracts apply from the first line of feature code. Still to add as their code lands:
+   - CI jobs: migrations, frontend, contract, docker; model tier and e2e on `main`/nightly.
+   - Pre-commit: prettier, eslint, and pnpm lockfile checks (with the frontend).
+   - The ≥ 90% branch-coverage gates on `files/`, identity/move detection, and purge (the 75% overall gate is live).
+   - Pinned exiftool and ffmpeg in CI, once tests call them.
+   - The `.env` check in `just doctor`, and the app recipes in §5 (`dev`, `api`, `worker`, `web`, `stack`, ...).

@@ -59,3 +59,77 @@ explicit = true
 [build-system]
 requires = ["uv_build>=0.10,<0.11"]
 build-backend = "uv_build"
+
+# ---------------------------------------------------------------------------
+# Checks (docs/dev-environment.md §7–8)
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F",  # pycodestyle, pyflakes
+    "I",            # isort
+    "B",            # bugbear
+    "UP",           # pyupgrade
+    "SIM",          # simplify
+    "RUF",
+    "TID",          # tidy-imports, including the banned-api list below
+]
+
+# Only photo_triage.files may move, delete, or rewrite files. Path methods and
+# exiftool invocations are caught by scripts/check_file_mutation.py, since Ruff
+# can't resolve those.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"os.remove".msg = "Only photo_triage.files may delete files."
+"os.unlink".msg = "Only photo_triage.files may delete files."
+"os.rmdir".msg = "Only photo_triage.files may delete files."
+"os.removedirs".msg = "Only photo_triage.files may delete files."
+"os.rename".msg = "Only photo_triage.files may move files."
+"os.renames".msg = "Only photo_triage.files may move files."
+"os.replace".msg = "Only photo_triage.files may move files."
+"os.utime".msg = "Only photo_triage.files may change file times."
+"shutil.move".msg = "Only photo_triage.files may move files."
+"shutil.rmtree".msg = "Only photo_triage.files may delete files."
+
+[tool.ruff.lint.per-file-ignores]
+"src/photo_triage/files/**" = ["TID251"]
+"tests/**" = ["TID251"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"  # tests
+strict = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "-m", "not models"]
+markers = ["models: runs real ML models on cached weights (slow; `just test-models`)"]
+
+[tool.coverage.run]
+branch = true
+source = ["photo_triage"]
+omit = ["src/photo_triage/ml/*"]  # real adapters are covered by the model tier
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
+skip_covered = true
+
+[tool.importlinter]
+root_package = "photo_triage"
+
+[[tool.importlinter.contracts]]
+name = "api and pipeline use only the public interface of files"
+type = "forbidden"
+source_modules = ["photo_triage.api", "photo_triage.pipeline"]
+forbidden_modules = ["photo_triage.files.**"]
+
+[[tool.importlinter.contracts]]
+name = "ml adapters don't depend on db or api"
+type = "forbidden"
+source_modules = ["photo_triage.ml"]
+forbidden_modules = ["photo_triage.db", "photo_triage.api"]

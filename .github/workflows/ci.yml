@@ -1,0 +1,74 @@
+# CI on every push and PR (docs/dev-environment.md §8).
+# Jobs still to come as their code lands: migrations, frontend, contract, docker,
+# and (on main/nightly) the model tier and e2e.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PRE_COMMIT_VERSION: "4.6.2"  # keep in sync with scripts/bootstrap.sh
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: python uv just
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/uv
+            ~/.cache/pre-commit
+          key: backend-${{ hashFiles('backend/uv.lock', '.pre-commit-config.yaml') }}
+          restore-keys: backend-
+
+      # The export group (torch, open_clip) is only for the one-off CLIP export.
+      # TODO(Phase 2): install the pinned exiftool and ffmpeg once tests use them.
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          uv sync --locked --no-group export
+          uv tool install "pre-commit==$PRE_COMMIT_VERSION"
+
+      - name: pre-commit (format, lint, file-mutation guard, secrets, media guard)
+        run: pre-commit run --all-files --show-diff-on-failure
+
+      - name: Import contracts
+        working-directory: backend
+        run: uv run --no-sync lint-imports
+
+      - name: pyright
+        run: just typecheck
+
+      - name: Tests and coverage
+        run: just test
+
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: python uv just
+
+      - name: Install pip-audit
+        working-directory: backend
+        run: uv sync --locked --only-group dev
+
+      - name: pip-audit (runtime dependencies)
+        run: just audit
