@@ -13,7 +13,7 @@
 #                                    (used by the Claude Code SessionStart hook)
 #
 # What it does (docs/dev-environment.md §2):
-#   1. apt prerequisites (curl, build-essential, cifs-utils, libheif, ...)
+#   1. apt prerequisites (curl, build-essential, cifs-utils, ...)
 #   2. mise, plus shell activation in ~/.bashrc
 #   3. `mise install` for the runtimes pinned in mise.toml (Python, uv, Node, pnpm, just)
 #   4. pinned exiftool and ffmpeg into ~/.local/bin (apt versions are too old)
@@ -77,8 +77,8 @@ APT_PACKAGES=(
   ca-certificates curl git unzip xz-utils perl
   build-essential pkg-config
   cifs-utils
-  libheif1 libheif-dev
 )
+# No libheif: the pillow-heif wheel bundles its own.
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -323,18 +323,19 @@ if [[ ! -f "$REPO_ROOT/backend/pyproject.toml" ]]; then
   warn "backend/pyproject.toml not found yet; skipped uv sync"
 elif ! ((HAVE_RUNTIMES)); then
   fail "backend not checked: mise runtimes are missing"
+elif [[ ! -f "$REPO_ROOT/backend/uv.lock" ]]; then
+  fail "backend: uv.lock is missing. Run 'uv lock' in backend/ and commit it."
+elif ! (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv lock --check --offline >/dev/null 2>&1); then
+  fail "backend: uv.lock is out of date with pyproject.toml. Run 'uv lock' in backend/ and commit it."
 elif ((CHECK)); then
-  if (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv sync --locked --check >/dev/null 2>&1); then
+  if (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv sync --locked --check --offline >/dev/null 2>&1); then
     ok "backend: environment matches uv.lock"
   else
     fail "backend: .venv is missing or out of date with uv.lock ($FIX_HINT)"
   fi
 else
-  if [[ -f "$REPO_ROOT/backend/uv.lock" ]]; then
-    (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv sync --locked)
-  else
-    (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv sync)
-  fi
+  # Default groups (dev, export) included; torch comes from the CPU-only index.
+  (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv sync --locked)
   ok "backend: uv sync"
 fi
 
@@ -404,8 +405,10 @@ fi
 
 # CLIP is exported from open_clip to ONNX, which needs the backend's Python deps.
 clip_dir="$MODELS_DIR/clip"
-if [[ ! -f "$REPO_ROOT/scripts/export_clip_onnx.py" || ! -f "$REPO_ROOT/backend/pyproject.toml" ]]; then
-  warn "CLIP ONNX export skipped (scripts/export_clip_onnx.py and the backend are added in Phase 1/2)"
+if [[ ! -f "$REPO_ROOT/scripts/export_clip_onnx.py" ]]; then
+  warn "CLIP ONNX export skipped (scripts/export_clip_onnx.py is added in Phase 2)"
+elif [[ ! -f "$REPO_ROOT/backend/pyproject.toml" ]]; then
+  warn "CLIP ONNX export skipped (needs backend/pyproject.toml)"
 elif compgen -G "$clip_dir/*.onnx" >/dev/null; then
   ok "CLIP ONNX"
 elif needs_fix "CLIP ONNX model not exported ($FIX_HINT)"; then

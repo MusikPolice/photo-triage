@@ -34,7 +34,7 @@ All versions are pinned. `mise.toml` pins the language runtimes and CLI tools; l
 | Tool | Version | Pinned in | Purpose |
 |---|---|---|---|
 | mise | latest | — (installed once) | Installs/activates the tools below per-directory |
-| Python | 3.13.x | `mise.toml` | Backend. Not 3.14: ML wheels (onnxruntime, numba/UMAP, InsightFace) lag new releases. Fall back to 3.12 if the Phase 1 dependency spike finds a gap. |
+| Python | 3.13.x | `mise.toml` | Backend. Not 3.14: ML wheels (onnxruntime, numba/UMAP, InsightFace) lag new releases. The Phase 1 dependency spike confirmed every ML library below works on 3.13 (§9). |
 | uv | 0.10.x | `mise.toml` | Python deps, venv, lockfile (`uv.lock`) |
 | Node.js | 24.x LTS | `mise.toml` | Frontend tooling |
 | pnpm | 10.x | `mise.toml` + `packageManager` | Frontend deps, lockfile (`pnpm-lock.yaml`) |
@@ -44,15 +44,23 @@ All versions are pinned. `mise.toml` pins the language runtimes and CLI tools; l
 | Docker Engine + Compose | 29.x / v2 plugin | Docker Desktop (WSL integration) | Integration stack, e2e |
 | Ollama | pinned image tag | `compose.yaml` | LLM tagging service |
 
-Libraries of note (exact versions live in the lockfiles): FastAPI, SQLAlchemy 2, Alembic, Pydantic 2, onnxruntime, open_clip (export to ONNX), insightface, umap-learn, hdbscan/scikit-learn, Pillow + pillow-heif, OpenCV (headless); Svelte 5, Vite, TypeScript, deck.gl.
+Libraries of note (exact versions live in the lockfiles): FastAPI, SQLAlchemy 2, Alembic, Pydantic 2, onnxruntime, open_clip (export to ONNX), insightface, umap-learn, scikit-learn (including its HDBSCAN), Pillow + pillow-heif, OpenCV (headless); Svelte 5, Vite, TypeScript, deck.gl.
+
+`backend/pyproject.toml` has three dependency sets:
+
+- **Runtime** (`[project.dependencies]`): what the app and worker import. This set goes into the Docker image.
+- **`dev`** group: pytest, Hypothesis, ruff, pyright, import-linter, pip-audit.
+- **`export`** group: open_clip, torch, torchvision, onnx, onnxscript. These are only for the one-off CLIP→ONNX export (`scripts/export_clip_onnx.py`) and stay out of the image (`uv sync --no-group export`).
+
+Both groups are `default-groups`, so a plain `uv sync` installs everything locally, which comes to about 2 GB. torch and torchvision come from the PyTorch CPU-only index, and both must be listed directly, because uv applies an index source only to direct dependencies. A torchvision pulled from PyPI fails at import with `operator torchvision::nms does not exist`.
 
 ### Bootstrap (fresh WSL)
 
-`scripts/bootstrap.sh` — idempotent, and assumes nothing on a fresh Ubuntu 24.04 but git: installs apt prerequisites (curl, build-essential, cifs-utils, libheif), mise (plus `~/.bashrc` activation), and the pinned exiftool, ffmpeg, and pre-commit; runs `mise install`, `uv sync`, `pnpm install`, `pre-commit install`; downloads model weights to `~/.cache/photo-triage/models`. Downloads are verified against pinned SHA-256 checksums. It also checks what it can't install: Docker is reachable, and the photo mounts are present and read-only.
+`scripts/bootstrap.sh` — idempotent, and assumes nothing on a fresh Ubuntu 24.04 but git: installs apt prerequisites (curl, build-essential, cifs-utils; no libheif, since the pillow-heif wheel bundles its own), mise (plus `~/.bashrc` activation), and the pinned exiftool, ffmpeg, and pre-commit; runs `mise install`, `uv sync`, `pnpm install`, `pre-commit install`; downloads model weights to `~/.cache/photo-triage/models`. Downloads are verified against pinned SHA-256 checksums. It also checks what it can't install: Docker is reachable, and the photo mounts are present and read-only.
 
 ### Verifying the environment: `--check` and `just doctor`
 
-`scripts/bootstrap.sh --check` runs the same detection as a bootstrap but changes nothing: no sudo, no network. It prints each problem with its fix and exits 1 if anything needs fixing. That includes a missing or wrong-version tool, missing weights, a `.venv` or `node_modules` out of date with its lockfile, missing git hooks, Docker unreachable, or `/mnt/sample-pictures` absent. A photo mount that is **read-write** is always a failure. Steps whose project files don't exist yet (e.g. `backend/pyproject.toml` before Phase 1) are warnings, not failures.
+`scripts/bootstrap.sh --check` runs the same detection as a bootstrap but changes nothing: no sudo, no network. It prints each problem with its fix and exits 1 if anything needs fixing. That includes a missing or wrong-version tool, missing weights, a `uv.lock` out of date with `pyproject.toml`, a `.venv` or `node_modules` out of date with its lockfile, missing git hooks, Docker unreachable, or `/mnt/sample-pictures` absent. A photo mount that is **read-write** is always a failure. Steps whose project files don't exist yet (e.g. `backend/pyproject.toml` before Phase 1) are warnings, not failures.
 
 `just doctor` runs `scripts/bootstrap.sh --check`, followed by app-level checks that need `.env` (e.g. `PHOTO_DIR` isn't writable when it points at `/mnt/pictures`). The tool and version checks live only in the bootstrap script, so installing and verifying can't drift apart.
 
@@ -181,5 +189,10 @@ File mutation is confined to `photo_triage.files`. These are enforced both stati
 
 1. Push `main`, then clone into WSL at `~/src/photo-triage` and start Claude Code there.
 2. Set up the read-only `/mnt/pictures` (CIFS) and `/mnt/sample-pictures` (drvfs) mounts in WSL.
-3. Phase 1 dependency spike: confirm Python 3.13 wheels for onnxruntime, insightface, umap-learn/numba, open_clip, pillow-heif; lock versions.
+3. ~~Phase 1 dependency spike: confirm Python 3.13 wheels for onnxruntime, insightface, umap-learn/numba, open_clip, pillow-heif; lock versions.~~ Done on 2026-10-02 (`backend/pyproject.toml`, `backend/uv.lock`). Every library has a cp313 or pure-Python wheel, so nothing compiles. Each was exercised on the curated sample:
+   - **insightface 2.0** (pure Python; previously 0.7.3, which shipped only as source): `model_zoo.get_model` on the bootstrap's `buffalo_l` ONNX files detects faces and returns 512-d embeddings. The new major version adds a GUI and a "PrivateFrame" CLI we don't use. Load models through `model_zoo` instead of `FaceAnalysis`, which expects its own directory layout.
+   - **pillow-heif 1.8** (bundles libheif 1.23.4) decodes the sample HEIC with its EXIF intact.
+   - **umap-learn 0.5.12** with numba JIT, and **scikit-learn 1.9** `HDBSCAN`, both work on 3.13.
+   - **open_clip 3.3 → ONNX:** `torch.onnx.export(..., dynamo=True)` needs `onnxscript`. A dynamic batch axis needs `dynamic_shapes` with an example batch of at least 2, because `dynamic_axes` gets specialised to the example. The onnxruntime output matches torch to within 3e-6.
+   - Also resolved: numpy 2.5, onnxruntime 1.30, OpenCV 5.0 (headless), Pillow 12.3, torch 2.14 (CPU).
 4. Write `mise.toml`, `justfile`, `scripts/bootstrap.sh`, pre-commit config, and the CI workflow skeleton before any feature code, so every subsequent change lands with the checks already in place.

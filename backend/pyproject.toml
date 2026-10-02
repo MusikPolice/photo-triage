@@ -1,0 +1,61 @@
+[project]
+name = "photo-triage"
+version = "0.1.0"
+description = "Self-hosted photo library explorer and triage tool"
+readme = "../README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    # API and storage
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    # Images and video
+    "pillow>=11",
+    "pillow-heif>=0.20",
+    "opencv-python-headless>=4.10",
+    # ML inference (CPU)
+    "numpy>=2.1",
+    "onnxruntime>=1.20",
+    "insightface>=0.7.3",
+    "umap-learn>=0.5.7",
+    "scikit-learn>=1.5", # includes HDBSCAN
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6",
+    "hypothesis>=6.115",
+    "httpx>=0.28",
+    "ruff>=0.8",
+    "pyright>=1.1.390",
+    "import-linter>=2.1",
+    "pip-audit>=2.7",
+]
+# One-off CLIP export to ONNX (scripts/export_clip_onnx.py). Not in the runtime image.
+export = [
+    "open-clip-torch>=2.29",
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "onnx>=1.17",
+    "onnxscript>=0.2", # torch.onnx.export backend
+]
+
+[tool.uv]
+default-groups = ["dev", "export"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
