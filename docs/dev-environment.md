@@ -40,7 +40,7 @@ All versions are pinned. `mise.toml` pins the language runtimes and CLI tools; l
 | pnpm | 10.x | `mise.toml` + `packageManager` | Frontend deps, lockfile (`pnpm-lock.yaml`) |
 | just | 1.x | `mise.toml` | Task runner (`justfile`) |
 | exiftool | 13.x | Dockerfile (tarball from exiftool.org, by version); local via `scripts/bootstrap.sh` | Metadata read/write. Ubuntu's apt version is too old for reliable HEIC/MWG writes. |
-| ffmpeg | 7.x | Dockerfile (Debian trixie); local via apt/static build | Video frames, posters |
+| ffmpeg | 7.x | Dockerfile (Debian trixie); local static build via `scripts/bootstrap.sh` (Ubuntu 24.04's apt version is 6.1) | Video frames, posters |
 | Docker Engine + Compose | 29.x / v2 plugin | Docker Desktop (WSL integration) | Integration stack, e2e |
 | Ollama | pinned image tag | `compose.yaml` | LLM tagging service |
 
@@ -48,7 +48,17 @@ Libraries of note (exact versions live in the lockfiles): FastAPI, SQLAlchemy 2,
 
 ### Bootstrap (fresh WSL)
 
-`scripts/bootstrap.sh` — idempotent: installs apt prerequisites (build-essential, cifs-utils, libheif, ffmpeg), mise, and the pinned exiftool; runs `mise install`, `uv sync`, `pnpm install`, `pre-commit install`; downloads model weights to `~/.cache/photo-triage/models`.
+`scripts/bootstrap.sh` — idempotent, and assumes nothing on a fresh Ubuntu 24.04 but git: installs apt prerequisites (curl, build-essential, cifs-utils, libheif), mise (plus `~/.bashrc` activation), and the pinned exiftool, ffmpeg, and pre-commit; runs `mise install`, `uv sync`, `pnpm install`, `pre-commit install`; downloads model weights to `~/.cache/photo-triage/models`. Downloads are verified against pinned SHA-256 checksums. It also checks what it can't install: Docker is reachable, and the photo mounts are present and read-only.
+
+### Verifying the environment: `--check` and `just doctor`
+
+`scripts/bootstrap.sh --check` runs the same detection as a bootstrap but changes nothing: no sudo, no network. It prints each problem with its fix and exits 1 if anything needs fixing. That includes a missing or wrong-version tool, missing weights, a `.venv` or `node_modules` out of date with its lockfile, missing git hooks, Docker unreachable, or `/mnt/sample-pictures` absent. A photo mount that is **read-write** is always a failure. Steps whose project files don't exist yet (e.g. `backend/pyproject.toml` before Phase 1) are warnings, not failures.
+
+`just doctor` runs `scripts/bootstrap.sh --check`, followed by app-level checks that need `.env` (e.g. `PHOTO_DIR` isn't writable when it points at `/mnt/pictures`). The tool and version checks live only in the bootstrap script, so installing and verifying can't drift apart.
+
+### Claude Code session check
+
+A `SessionStart` hook in the project's `.claude/settings.json` runs `scripts/bootstrap.sh --check` (about 3 s) at the start of every Claude Code session. It is silent when the environment is OK. On failure it prints the problems list, which lands in Claude's context. The session then starts already knowing that, say, Docker Desktop isn't running or the SMB share didn't mount after a reboot, instead of discovering it mid-task. The hook only reports; fixing is left to the developer (or Claude, when asked), using the advice each problem carries.
 
 ## 3. Repository layout
 
@@ -96,7 +106,7 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 | `just dry-run-full` | Stack against `/mnt/pictures` (read-only), writes disabled — for scale testing |
 | `just db-reset` | Drop and re-migrate the dev database |
 | `just fixtures` | Regenerate tier-1 synthetic fixtures |
-| `just doctor` | Verify tool versions, model weights, mounts, and that `PHOTO_DIR` isn't writable when it points at `/mnt/pictures` |
+| `just doctor` | `scripts/bootstrap.sh --check` (tool versions, lockfile sync, model weights, Docker, mounts read-only), plus `PHOTO_DIR` isn't writable when it points at `/mnt/pictures` (§2) |
 
 Worker-specific dev affordances: `WORKER_WINDOW` unset (always on), a `--once` flag to drain the queue and exit, and a controllable clock (`FAKE_NOW`) for exercising quiet-hours and ETA logic.
 

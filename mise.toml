@@ -1,0 +1,13 @@
+# Pinned language runtimes and CLI tools. See docs/dev-environment.md §2.
+# Install with `mise install` (scripts/bootstrap.sh does this for you).
+
+[tools]
+python = "3.13.15"
+uv = "0.10.12"
+node = "24.21.0"
+pnpm = "10.34.6"
+just = "1.58.0"
+
+[env]
+# Make uv use the mise-managed Python above rather than downloading its own.
+UV_PYTHON_DOWNLOADS = "never"
