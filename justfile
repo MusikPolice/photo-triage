@@ -18,18 +18,18 @@ sync:
 # Format and auto-fix lint where possible
 [working-directory: 'backend']
 fmt:
-    uv run --no-sync ruff format .
-    uv run --no-sync ruff check --fix .
+    uv run --no-sync ruff format . ../scripts
+    uv run --no-sync ruff check --fix . ../scripts
 
 # Formatting, lint, file-mutation guard, import contracts
 [working-directory: 'backend']
 lint:
-    uv run --no-sync ruff format --check .
-    uv run --no-sync ruff check .
+    uv run --no-sync ruff format --check . ../scripts
+    uv run --no-sync ruff check . ../scripts
     python3 ../scripts/check_file_mutation.py
     uv run --no-sync lint-imports
 
-# pyright (strict for src/, basic for tests/)
+# pyright (strict for src/, basic for tests/ and scripts/)
 [working-directory: 'backend']
 typecheck:
     uv run --no-sync pyright

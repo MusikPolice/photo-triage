@@ -1,0 +1,41 @@
+# Same sections as the drafts filed by scripts/tracker.py, so `status` and
+# `finish` can read issues filed from the web too. Set the phase milestone and
+# an area label after filing.
+name: Deliverable
+description: A piece of work toward the spec that one PR can close
+body:
+  - type: textarea
+    id: spec
+    attributes:
+      label: Spec
+      description: Sections this implements, as "plan §6.11" or "dev-environment §7".
+      placeholder: "- plan §6.11"
+    validations:
+      required: true
+  - type: textarea
+    id: deliverable
+    attributes:
+      label: Deliverable
+      description: What exists when this is done.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: Checkable statements, one per line.
+      value: "- [ ] "
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What a reader might expect here that comes later.
+    validations:
+      required: true
+  - type: textarea
+    id: depends-on
+    attributes:
+      label: Depends on
+      description: Issues that must merge first, as "#N". Leave empty if none.

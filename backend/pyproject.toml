@@ -99,9 +99,9 @@ select = [
 "tests/**" = ["TID251"]
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "tests", "../scripts"]
 pythonVersion = "3.13"
-typeCheckingMode = "basic"  # tests
+typeCheckingMode = "basic"  # tests and scripts
 strict = ["src"]
 
 [tool.pytest.ini_options]

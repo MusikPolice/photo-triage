@@ -38,15 +38,15 @@ repos:
       - id: ruff-format
         name: ruff format --check
         language: system
-        entry: scripts/backend-run.sh ruff format --check
-        files: '^backend/.*\.py$'
+        entry: scripts/backend-run.sh ruff format --check . ../scripts
+        files: '^(backend|scripts)/.*\.py$'
         pass_filenames: false
 
       - id: ruff-check
         name: ruff check
         language: system
-        entry: scripts/backend-run.sh ruff check
-        files: '^backend/.*\.py$'
+        entry: scripts/backend-run.sh ruff check . ../scripts
+        files: '^(backend|scripts)/.*\.py$'
         pass_filenames: false
 
       - id: file-mutation-guard
