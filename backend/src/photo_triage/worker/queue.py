@@ -8,8 +8,10 @@ A job's life:
                         │
                         └─(after `max_attempts` failures)─► parked ─retry─► pending
 
-Every state lives in SQLite, so nothing is lost when the process stops. Methods
-take the caller's `Session` and don't commit, so enqueueing can share a
+Every state lives in SQLite, so nothing is lost when the process stops. Only the
+latest done job is kept for each stage and item (see `complete`).
+
+Methods take the caller's `Session` and don't commit, so enqueueing can share a
 transaction with the change that caused it. Keep transactions short: SQLite has
 one write lock, so the worker commits a claim before running the job (see `claim`).
 """
@@ -100,6 +102,11 @@ def describe_error(exc: BaseException) -> str:
     return "…" + text[-(LAST_ERROR_MAX_CHARS - 1) :]
 
 
+def _same_item(item_id: int | None) -> sa.ColumnElement[bool]:
+    """Jobs for `item_id`, or batch jobs when it's None."""
+    return Job.item_id.is_(None) if item_id is None else Job.item_id == item_id
+
+
 class JobQueue:
     def __init__(self, clock: Clock = utc_now, retry_policy: RetryPolicy | None = None) -> None:
         self._clock = clock
@@ -165,9 +172,23 @@ class JobQueue:
         )
 
     def complete(self, session: Session, job_id: int) -> None:
+        """Mark a running job done, and delete older done jobs for the same stage
+        and item (or batch stage).
+
+        Counting done jobs then counts items finished, not runs, and the table can't
+        grow past one done row per stage per item. `job_stats` keeps the history.
+        """
         job = self._get(session, job_id, JobStatus.RUNNING)
         job.status = JobStatus.DONE
         job.finished_at = self._clock()
+        session.execute(
+            sa.delete(Job).where(
+                Job.status == JobStatus.DONE,
+                Job.stage == job.stage,
+                _same_item(job.item_id),
+                Job.id != job.id,
+            )
+        )
         session.flush()
 
     def fail(self, session: Session, job_id: int, exc: BaseException) -> JobStatus:
@@ -215,7 +236,7 @@ class JobQueue:
             sa.select(Job.id).where(
                 sa.text(JOB_IS_OPEN),
                 Job.stage == stage,
-                Job.item_id.is_(None) if item_id is None else Job.item_id == item_id,
+                _same_item(item_id),
             )
         )
 

@@ -182,6 +182,29 @@ def test_a_completed_job_is_done(queue: JobQueue, session: Session, clock: FakeC
     assert queue.claim(session) is None
 
 
+def _run(queue: JobQueue, session: Session, stage: Stage, item_id: int | None = None) -> int:
+    job_id = queue.enqueue(session, stage, item_id)
+    assert _claim_id(queue, session) == job_id
+    queue.complete(session, job_id)
+    return job_id
+
+
+def test_only_the_latest_done_job_per_stage_and_item_is_kept(
+    queue: JobQueue, session: Session
+) -> None:
+    a, b = _items(session, 2)
+    _run(queue, session, Stage.THUMBNAIL, a)
+    other_item = _run(queue, session, Stage.THUMBNAIL, b)
+    other_stage = _run(queue, session, Stage.CLIP, a)
+    _run(queue, session, Stage.LAYOUT)
+    latest = _run(queue, session, Stage.THUMBNAIL, a)
+    latest_batch = _run(queue, session, Stage.LAYOUT)
+    waiting = queue.enqueue(session, Stage.THUMBNAIL, a)  # open jobs are never pruned
+
+    remaining = session.scalars(sa.select(Job.id).order_by(Job.id)).all()
+    assert remaining == sorted([other_item, other_stage, latest, latest_batch, waiting])
+
+
 def test_a_failed_job_waits_out_its_backoff_then_parks(
     queue: JobQueue, session: Session, clock: FakeClock
 ) -> None:
