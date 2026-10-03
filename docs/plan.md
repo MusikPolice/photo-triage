@@ -121,7 +121,7 @@ Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MO
 
 **Identity.** Each item is identified by a **content hash** of its decoded pixel data (for video: hash of the media stream, excluding metadata atoms). This is stable across metadata writes (ours and others') and across elodie moving/renaming files. `(path, mtime, size)` is used as a cheap "maybe changed?" pre-check; only when it changes is the content hash recomputed. A known content hash at a new path is treated as a move, not a new item — all history is preserved.
 
-**Per item, the scanner records:** path, type, dimensions, duration (video), `taken_at` (`DateTimeOriginal` → `CreateDate` → `DateTime` → file mtime), existing keywords/people/regions/review markers already in the file.
+**Per item, the scanner records:** path, type, dimensions, duration (video), `taken_at_local` (`DateTimeOriginal` → `CreateDate` → `DateTime` → file mtime), existing keywords/people/regions/review markers already in the file.
 
 The scanner itself is cheap; heavy per-item work (thumbnails, CLIP, quality, faces, tagging) is enqueued as separate pipeline stages (§6.11).
 
@@ -295,8 +295,8 @@ The initial processing of a large library will take **weeks** (LLM tagging possi
 ```
 items
   id, content_hash (unique), path, media_type (photo | video)
-  file_size, file_mtime, width, height, duration_s
-  taken_at, first_seen_at, last_seen_at, missing_since
+  file_size_bytes, file_mtime_ns, width, height, duration_s
+  taken_at_local, first_seen_at, last_seen_at, missing_since
   status (active | trashed | purged | missing)
 
 item_frames                       -- videos only
@@ -353,6 +353,8 @@ trash
 ```
 
 Every human decision records an `actor` (see §10).
+
+Column names say what their values mean. Every `*_at` column is a UTC timestamp, except `taken_at_local`, which is the capture time as the camera recorded it, with no timezone. Sizes, durations and raw timestamps carry their unit in the name (`file_size_bytes`, `duration_s`, `file_mtime_ns`). Image dimensions are in pixels.
 
 ---
 

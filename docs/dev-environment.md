@@ -81,14 +81,14 @@ That output lands in Claude's context, so the session starts already knowing tha
 photo-triage/
   mise.toml  justfile  compose.yaml  compose.dev.yaml  .env.example
   backend/
-    pyproject.toml  uv.lock  alembic/
+    pyproject.toml  uv.lock  alembic.ini
     src/photo_triage/
       api/          FastAPI routers, current_actor dependency
       worker/       job queue, scheduler, stage runners
       pipeline/     scan, thumbnails, clip, quality, faces, tagging, layout, dupes
       ml/           pluggable adapters (embedder, face detector, tagger) + fakes
       files/        THE ONLY module allowed to mutate files: trash, restore, purge, exif writes
-      db/           models, repositories
+      db/           engine, models, migrations/ (Alembic), repositories
     tests/
       unit/  integration/  models/  safety/
       fixtures/synthetic/        committed, generated
@@ -121,7 +121,7 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 | `just worker` / `just web` | Each individually |
 | `just stack` | Full production-like Compose stack (built image) against tier-1 fixtures |
 | `just dry-run-full` | Stack against `/mnt/pictures` (read-only), writes disabled — for scale testing |
-| `just db-reset` | Drop and re-migrate the dev database |
+| `just db-reset` | Drop and re-migrate the dev database in `DATA_DIR`: Alembic downgrade to empty, then upgrade to head. For other Alembic commands, run `uv run --project backend alembic -c backend/alembic.ini …` from the repo root. A new migration starts from `revision --autogenerate`; read it before committing, since the tests fail if models and migrations disagree. |
 | `just fixtures` | Regenerate tier-1 synthetic fixtures |
 | `just doctor` | `scripts/bootstrap.sh --check` (tool versions, lockfile sync, model weights, Docker, mounts read-only), plus `PHOTO_DIR` isn't writable when it points at `/mnt/pictures` (§2) |
 
@@ -132,7 +132,7 @@ Worker-specific dev affordances: `WORKER_WINDOW` unset (always on), a `--once` f
 | Layer | Tooling | Approach |
 |---|---|---|
 | Pure logic | pytest (+ Hypothesis) | Quality scoring, union-find grouping, content hashing, ETA math against working windows, schedule windows, search score blending, FTS query building. Property-based where there are invariants. |
-| Database & migrations | pytest + Alembic | Every migration upgrades from empty and downgrades; `alembic check` confirms models and migrations agree. |
+| Database & migrations | pytest + Alembic | Every migration upgrades from empty and downgrades; `alembic check` confirms models and migrations agree. Migrations have a single head and import only Alembic, SQLAlchemy and the standard library, never app code, so later code changes can't alter what an old migration does. |
 | Metadata write-back | pytest + real exiftool | Round-trip each field mapping (plan §6.10) per container type on tier-1 copies in a temp dir; read back and assert. |
 | Pipelines & worker | pytest + fake ML adapters | Run the worker `--once` over tier-1 fixtures with fake embedders/detectors (deterministic vectors derived from file hashes). Assert job states, stage ordering, resumability (kill mid-run, restart), retry/park behaviour. |
 | ML adapters (model tier) | pytest `-m models` | Real CLIP / InsightFace / UMAP on fixtures with **tolerance** assertions: burst pair cosine > threshold, distinct scenes below it, expected face counts, text query ranks the right fixture first. Weights cached. Not in the default suite. |
@@ -181,7 +181,7 @@ Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`. The ru
 | Job | Checks |
 |---|---|
 | backend | `uv sync --locked --no-group export`; pre-commit (all hooks); ruff; **pyright strict** (tests and `scripts/` at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt) |
-| migrations | upgrade from empty → downgrade → upgrade; `alembic check` |
+| migrations | upgrade from empty → downgrade → upgrade; `alembic check`; on PRs, migrations already on `main` aren't modified, renamed or deleted (add a new one instead) |
 | frontend | `pnpm install --frozen-lockfile`; svelte-check; eslint; prettier; Vitest; `vite build` |
 | contract | Export OpenAPI from the app, regenerate TS types (`openapi-typescript`); fail if the committed types differ |
 | docker | hadolint; build image; image smoke test (container starts, `/api/health` ok, `exiftool -ver` / `ffmpeg -version` match pinned versions) |
@@ -225,7 +225,8 @@ Changes that aren't part of a phase, such as docs or tooling, still go through a
 
 These are set in the GitHub repo settings, not in files:
 
-- **`main` is protected.** The `backend` and `audit` CI jobs must pass, and the branch must be up to date with `main` before merging. This applies to admins too, so nothing reaches `main` without a green PR.
+- **`main` is protected.** The `backend`, `migrations` and `audit` CI jobs must pass, and the branch must be up to date with `main` before merging. This applies to admins too, so nothing reaches `main` without a green PR.
+  - A required job must run on every PR. GitHub waits indefinitely for a required check that never reports, so don't add `paths:` filters to these jobs; skip steps inside the job instead. Renaming a required job also needs this setting updated.
   - Because `audit` is required, a newly published vulnerability in a runtime dependency blocks merges until the dependency is upgraded or the advisory is dealt with.
   - This is deliberate. If it ever blocks urgent work, an admin can relax the rule temporarily.
 - **Squash merges only.** Each PR lands as one commit whose message is the PR title and body.
@@ -242,7 +243,7 @@ These are set in the GitHub repo settings, not in files:
    - **open_clip 3.3 → ONNX:** `torch.onnx.export(..., dynamo=True)` needs `onnxscript`. A dynamic batch axis needs `dynamic_shapes` with an example batch of at least 2, because `dynamic_axes` gets specialised to the example. The onnxruntime output matches torch to within 3e-6.
    - Also resolved: numpy 2.5, onnxruntime 1.30, OpenCV 5.0 (headless), Pillow 12.3, torch 2.14 (CPU).
 4. ~~Write `mise.toml`, `justfile`, `scripts/bootstrap.sh`, pre-commit config, and the CI workflow skeleton before any feature code, so every subsequent change lands with the checks already in place.~~ Done on 2026-10-02. The backend checks from §7–8 are live: pre-commit, `just lint`/`typecheck`/`test`/`audit`/`check`, and the `backend` and `audit` CI jobs in `.github/workflows/ci.yml`. The `backend/src/photo_triage` subpackages from §3 exist as empty packages so the import contracts apply from the first line of feature code. Still to add as their code lands:
-   - CI jobs: migrations, frontend, contract, docker; model tier and e2e on `main`/nightly.
+   - CI jobs: frontend, contract, docker; model tier and e2e on `main`/nightly. (The migrations job landed on 2026-10-03.)
    - Pre-commit: prettier, eslint, and pnpm lockfile checks (with the frontend).
    - The ≥ 90% branch-coverage gates on `files/`, identity/move detection, and purge (the 75% overall gate is live).
    - Pinned exiftool and ffmpeg in CI, once tests call them.

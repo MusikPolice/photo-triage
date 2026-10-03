@@ -159,6 +159,7 @@ just doctor          # verifies versions, mounts, model weights
 
 ```bash
 cp .env.example .env
+just db-reset        # creates the database in ./data (and later, resets it)
 ```
 
 The defaults point `PHOTO_DIR` at `/mnt/sample-pictures` and keep app state in `./data` and `./trash`. To test anything that **writes** to photos (trash, EXIF write-back), work on a throwaway copy:
@@ -201,7 +202,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just doctor` | Verify the environment |
 | `just fmt` | Format and auto-fix lint |
 
-Available today: `api`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `api`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 
