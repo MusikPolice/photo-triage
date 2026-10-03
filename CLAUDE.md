@@ -16,6 +16,9 @@ rather than calling `gh` by hand, so issues, branches and PRs stay consistent.
   phase, which issues are in progress, ready or blocked, and which PRs are open.
 - To plan a phase, use the `plan-phase` skill. Draft issues and get the user's
   approval before filing.
+- To file a single issue (a follow-up, bug, idea or spike), use the `new-issue`
+  skill. It interviews the user with `grill-me` until the what, why and how
+  are agreed.
 - To work an issue, use the `work-issue` skill: `start N`, build, then
   `finish` opens the PR.
 - **Never commit to `main` and never merge PRs.** The user reviews and merges

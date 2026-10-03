@@ -204,7 +204,7 @@ Work toward the spec is tracked on GitHub:
 
 | Command | Does |
 |---|---|
-| `setup` | Creates the phase milestones from the plan §11 headings, plus the area labels (`backend`, `frontend`, `infra`, `documentation`) and the `in-progress` label. Running it again only adds what's missing. |
+| `setup` | Creates the phase milestones from the plan §11 headings, plus the area labels (`backend`, `frontend`, `infra`, `documentation`), `bug`, and `in-progress`. Every issue needs at least one area label. Running it again only adds what's missing. |
 | `status` | Shows the current phase and its issues (in progress, ready, or blocked on an open dependency), plus open PRs. |
 | `new DRAFT...` | Validates issue drafts: required sections, spec citations that match a heading, checklist criteria, labels and phase. Then files them in order. If any draft is invalid, it files nothing. Use `--dry-run` to validate without filing. |
 | `start N` | Creates branch `N-slug` from `origin/main`, assigns the issue and labels it `in-progress`. |
@@ -212,6 +212,7 @@ Work toward the spec is tracked on GitHub:
 
 The Claude Code skills in `.claude/skills/` hold the decisions the script can't make:
 - `plan-phase` splits a phase into issues and gets approval before filing them.
+- `new-issue` files a single issue, such as a PR follow-up, a bug, an idea or a spike. It first interviews the user, using the user-level `grill-me` skill when it's installed, until the what, why and how are agreed. The agreed decisions go in the issue's optional `Background` and `Approach` sections.
 - `work-issue` goes from picking an issue to a PR with passing CI.
 
 `CLAUDE.md` points every session at `tracker.py status`. Issues filed on the web use the same sections, through the issue form in `.github/ISSUE_TEMPLATE/`.

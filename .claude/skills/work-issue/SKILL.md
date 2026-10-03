@@ -55,7 +55,8 @@ Write `.drafts/pr-N.md` with these sections:
 - `## Summary`: what changed and why, plus anything surprising.
 - `## Verification`: one bullet per acceptance criterion saying how it was
   checked (test name, command, or manual step and result).
-- `## Follow-ups` (if any): work found but not done. Offer to draft issues for it.
+- `## Follow-ups` (if any): work found but not done. Offer to file issues for these
+  with the `new-issue` skill.
 - `## Notes for review` (optional): where to look first, risky spots, and
   decisions the reviewer might question.
 

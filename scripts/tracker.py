@@ -19,6 +19,8 @@ cited as "plan §6.11" or "dev-environment §7"):
   phase: 1
   labels: backend
   ---
+  ## Background          (optional)
+  Why this is needed now, and the context a reader needs.
   ## Spec
   - plan §6.11
   ## Deliverable
@@ -27,9 +29,13 @@ cited as "plan §6.11" or "dev-environment §7"):
   - [ ] A checkable statement.
   ## Out of scope
   What this issue deliberately leaves for later.
+  ## Approach            (optional)
+  How it will be built: decisions already agreed, and the alternatives rejected.
   ## Depends on          (optional)
   - #12
   - draft:01-alembic-schema
+
+Labels: at least one area label, plus optionally "bug".
 
 A "draft:<file stem>" dependency names another draft filed earlier in the same
 `new` run. It's replaced with that draft's issue number as it's filed.
@@ -63,10 +69,15 @@ AREA_LABELS = {
     "infra": ("6e7781", "Docker, CI, tooling, dev environment"),
     "documentation": ("0075ca", "Improvements or additions to documentation"),
 }
-LABELS = {**AREA_LABELS, IN_PROGRESS: ("fbca04", "Being worked on in an open branch")}
+KIND_LABELS = {"bug": ("d73a4a", "Something isn't working")}
+LABELS = {
+    **AREA_LABELS,
+    **KIND_LABELS,
+    IN_PROGRESS: ("fbca04", "Being worked on in an open branch"),
+}
 
 REQUIRED_SECTIONS = ("Spec", "Deliverable", "Acceptance criteria", "Out of scope")
-OPTIONAL_SECTIONS = ("Depends on",)
+OPTIONAL_SECTIONS = ("Background", "Approach", "Depends on")
 SUMMARY_SECTIONS = ("Summary", "Verification")
 
 ATTRIBUTION = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
@@ -174,10 +185,10 @@ def validate_draft(draft: Draft, phases: list[Phase], docs: dict[str, str]) -> l
         errors.append("front matter: title is longer than 80 characters")
     if draft.phase not in {p.number for p in phases}:
         errors.append(f"front matter: phase must be one of 1-{len(phases)} (docs/plan.md §11)")
-    if not draft.labels:
+    if not any(label in AREA_LABELS for label in draft.labels):
         errors.append(f"front matter: labels must include one of {', '.join(AREA_LABELS)}")
     for label in draft.labels:
-        if label not in AREA_LABELS:
+        if label not in AREA_LABELS and label not in KIND_LABELS:
             errors.append(f"front matter: unknown label {label!r}")
 
     found = sections(draft.body)
