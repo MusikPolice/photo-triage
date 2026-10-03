@@ -2,6 +2,11 @@
 
 After changing a model, add a migration (`alembic revision --autogenerate`) and
 check it by hand: the tests fail if the models and migrations disagree.
+
+Naming: every `*_at` column is a timezone-aware UTC datetime (`UTCDateTime`),
+except `taken_at_local`, which says otherwise in its name. Sizes, durations and
+raw timestamps carry their unit in the name (`file_size_bytes`, `duration_s`,
+`file_mtime_ns`).
 """
 
 import datetime as dt
@@ -72,14 +77,17 @@ class Item(Base):
     path: Mapped[str]
     """Relative to `PHOTO_DIR`."""
     media_type: Mapped[MediaType] = mapped_column(_enum(MediaType, "media_type"))
-    file_size: Mapped[int]
-    file_mtime: Mapped[float]
-    """`st_mtime` when last scanned."""
+    file_size_bytes: Mapped[int]
+    file_mtime_ns: Mapped[int]
+    """`st_mtime_ns` when last scanned: nanoseconds since the Unix epoch. An integer,
+    so comparing it with a fresh `stat()` is exact."""
     width: Mapped[int | None]
+    """Pixels."""
     height: Mapped[int | None]
+    """Pixels."""
     duration_s: Mapped[float | None]
     """Videos only."""
-    taken_at: Mapped[dt.datetime | None]
+    taken_at_local: Mapped[dt.datetime | None]
     """Capture time as the camera recorded it: local wall-clock time, no timezone."""
     first_seen_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
     last_seen_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
