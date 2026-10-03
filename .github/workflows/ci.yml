@@ -92,6 +92,23 @@ jobs:
       - name: Models and migrations agree (alembic check)
         run: uv run --no-sync --project backend alembic -c backend/alembic.ini check
 
+      # A migration that's on main may already have run against real databases.
+      # Changing it would leave those databases out of step with fresh ones, so
+      # a PR may add migrations but not modify, rename or delete existing ones.
+      - name: Merged migrations are unchanged
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          changed="$(git diff --name-status --diff-filter=MDR "origin/$BASE_REF" HEAD \
+            -- backend/src/photo_triage/db/migrations/versions/)"
+          if [ -n "$changed" ]; then
+            echo "::error::Migrations already on $BASE_REF were changed. Add a new migration instead:"
+            echo "$changed"
+            exit 1
+          fi
+
   audit:
     runs-on: ubuntu-24.04
     steps:

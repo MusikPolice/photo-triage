@@ -109,6 +109,14 @@ def test_every_migration_upgrades_downgrades_and_upgrades_again(
     assert _tables(engine) >= PHASE_1_COLUMNS.keys()
 
 
+def test_migrations_have_a_single_head(alembic_cfg: Config) -> None:
+    heads = ScriptDirectory.from_config(alembic_cfg).get_heads()
+    assert len(heads) == 1, (
+        f"migrations branch into heads {heads}: re-parent the newer migration onto the other "
+        "(`down_revision`), or merge them with `alembic merge`"
+    )
+
+
 def test_models_and_migrations_agree(migrated: Engine, alembic_cfg: Config) -> None:
     command.check(alembic_cfg)  # raises if autogenerate would produce a migration
 

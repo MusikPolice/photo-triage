@@ -132,7 +132,7 @@ Worker-specific dev affordances: `WORKER_WINDOW` unset (always on), a `--once` f
 | Layer | Tooling | Approach |
 |---|---|---|
 | Pure logic | pytest (+ Hypothesis) | Quality scoring, union-find grouping, content hashing, ETA math against working windows, schedule windows, search score blending, FTS query building. Property-based where there are invariants. |
-| Database & migrations | pytest + Alembic | Every migration upgrades from empty and downgrades; `alembic check` confirms models and migrations agree. |
+| Database & migrations | pytest + Alembic | Every migration upgrades from empty and downgrades; `alembic check` confirms models and migrations agree. Migrations have a single head and import only Alembic, SQLAlchemy and the standard library, never app code, so later code changes can't alter what an old migration does. |
 | Metadata write-back | pytest + real exiftool | Round-trip each field mapping (plan §6.10) per container type on tier-1 copies in a temp dir; read back and assert. |
 | Pipelines & worker | pytest + fake ML adapters | Run the worker `--once` over tier-1 fixtures with fake embedders/detectors (deterministic vectors derived from file hashes). Assert job states, stage ordering, resumability (kill mid-run, restart), retry/park behaviour. |
 | ML adapters (model tier) | pytest `-m models` | Real CLIP / InsightFace / UMAP on fixtures with **tolerance** assertions: burst pair cosine > threshold, distinct scenes below it, expected face counts, text query ranks the right fixture first. Weights cached. Not in the default suite. |
@@ -181,7 +181,7 @@ Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`. The ru
 | Job | Checks |
 |---|---|
 | backend | `uv sync --locked --no-group export`; pre-commit (all hooks); ruff; **pyright strict** (tests and `scripts/` at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt) |
-| migrations | upgrade from empty → downgrade → upgrade; `alembic check` |
+| migrations | upgrade from empty → downgrade → upgrade; `alembic check`; on PRs, migrations already on `main` aren't modified, renamed or deleted (add a new one instead) |
 | frontend | `pnpm install --frozen-lockfile`; svelte-check; eslint; prettier; Vitest; `vite build` |
 | contract | Export OpenAPI from the app, regenerate TS types (`openapi-typescript`); fail if the committed types differ |
 | docker | hadolint; build image; image smoke test (container starts, `/api/health` ok, `exiftool -ver` / `ffmpeg -version` match pinned versions) |
