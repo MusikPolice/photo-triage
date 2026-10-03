@@ -11,6 +11,7 @@ htmlcov/
 
 # Node
 node_modules/
+/frontend/dist/
 
 # Local config and app state (docs/dev-environment.md §5)
 .env
