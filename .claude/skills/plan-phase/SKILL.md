@@ -61,6 +61,9 @@ is gitignored, and `NN` is the filing order. The format is in the docstring of
   number to check against.
 - **Out of scope:** list what a reader might expect here that comes later, and
   which issue or phase covers it.
+- **Background** and **Approach** (optional): add these only when the spec
+  leaves the why or the how open and you and the user settled it while
+  reviewing.
 - **Depends on** (optional): use `draft:NN-short-slug` for drafts in this batch
   and `#N` for issues that are already filed.
 

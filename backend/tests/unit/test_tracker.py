@@ -66,6 +66,7 @@ def test_valid_draft() -> None:
         (("phase: 1", "phase: 9"), "phase must be one of"),
         (("labels: backend, infra", "labels: backend, ui"), "unknown label 'ui'"),
         (("labels: backend, infra", "labels:"), "labels must include"),
+        (("labels: backend, infra", "labels: bug"), "labels must include"),
         (("plan §6.11", "plan §6.99"), "'plan §6.99' has no matching heading"),
         (("- plan §6.11\n- dev-environment §7", "the queue section"), "cites nothing"),
         (("- [ ] Higher", "- Higher"), None),  # one checkbox left is still valid
@@ -157,3 +158,12 @@ def test_draft_dependencies() -> None:
     assert tracker.dependencies(draft.body) == [5]
     resolved = tracker.resolve_drafts(draft.body, {"01-schema": 21})
     assert tracker.dependencies(resolved) == [21, 5]
+
+
+def test_optional_sections_and_bug_label() -> None:
+    text = VALID.replace("labels: backend, infra", "labels: backend, bug")
+    text = text.replace("## Spec", "## Background\nScans crash on empty dirs.\n\n## Spec")
+    text += "\n## Approach\nGuard the walker.\n"
+    draft = tracker.parse_draft(text)
+    assert draft.labels == ["backend", "bug"]
+    assert tracker.validate_draft(draft, PHASES, DOCS) == []

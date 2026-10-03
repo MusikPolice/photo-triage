@@ -16,12 +16,31 @@ rather than calling `gh` by hand, so issues, branches and PRs stay consistent.
   phase, which issues are in progress, ready or blocked, and which PRs are open.
 - To plan a phase, use the `plan-phase` skill. Draft issues and get the user's
   approval before filing.
+- To file a single issue (a follow-up, bug, idea or spike), use the `new-issue`
+  skill. It interviews the user with `grill-me` until the what, why and how
+  are agreed.
 - To work an issue, use the `work-issue` skill: `start N`, build, then
   `finish` opens the PR.
 - **Never commit to `main` and never merge PRs.** The user reviews and merges
   every PR.
 - Work that's outside the current issue goes in the PR's "Follow-ups" section,
   not into the branch.
+
+## Keeping docs current
+
+Update the docs in the same PR as the change, without being asked. Docs that
+lag behind the code mislead the next session as well as the user.
+
+- **`docs/dev-environment.md`, `README.md` and `CLAUDE.md`** describe how the
+  project is built, run, tested and tracked. When a change affects any of
+  that, update them. That includes new tools, recipes, checks, CI jobs, scripts,
+  repo settings and workflow steps. Mark finished items in
+  dev-environment "Next steps" as done, with the date.
+- **`docs/plan.md` is the spec, and changing it is a decision.** If the
+  implementation needs to diverge from it, or the work answers a question in
+  plan §12, propose the edit to the user and don't change the spec quietly.
+  Once they agree, update the spec in the same PR.
+- In a PR, list doc updates in the summary so the reviewer sees them.
 
 ## Checks
 

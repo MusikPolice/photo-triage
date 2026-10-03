@@ -5,6 +5,11 @@ name: Deliverable
 description: A piece of work toward the spec that one PR can close
 body:
   - type: textarea
+    id: background
+    attributes:
+      label: Background
+      description: Why this is needed, and the context a reader needs. Optional.
+  - type: textarea
     id: spec
     attributes:
       label: Spec
@@ -34,6 +39,11 @@ body:
       description: What a reader might expect here that comes later.
     validations:
       required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Approach
+      description: How it will be built, including decisions agreed and alternatives rejected. Optional.
   - type: textarea
     id: depends-on
     attributes:
