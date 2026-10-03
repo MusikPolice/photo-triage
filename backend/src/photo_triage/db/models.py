@@ -97,18 +97,38 @@ class Item(Base):
     )
 
 
+JOB_IS_OPEN = "status IN ('pending', 'error')"
+"""SQL for a job that may still run: never tried, or failed and waiting to retry.
+
+A literal, not bound parameters: SQLite uses a partial index only when the query
+repeats the index's condition exactly, and the queue's claim query does.
+"""
+
+
 class Job(Base):
-    """One unit of work for the worker (plan §6.11). `item_id` is null for batch jobs."""
+    """One unit of work for the worker (plan §6.11). `item_id` is null for batch jobs.
+
+    `photo_triage.worker.queue` owns the status transitions.
+    """
 
     __tablename__ = "jobs"
     __table_args__ = (
-        # The worker claims the next pending job by priority, oldest first.
+        # The worker claims the next open job by priority, oldest first.
         sa.Index(
-            "ix_jobs_pending_by_priority",
+            "ix_jobs_open_by_priority",
             "priority",
             "enqueued_at",
             "id",
-            sqlite_where=sa.text("status = 'pending'"),
+            sqlite_where=sa.text(JOB_IS_OPEN),
+        ),
+        # At most one open job per stage and item. Batch jobs (null item) are
+        # deduplicated by the queue, since SQLite treats every null as distinct.
+        sa.Index(
+            "uq_jobs_open_stage_item",
+            "stage",
+            "item_id",
+            unique=True,
+            sqlite_where=sa.text(JOB_IS_OPEN),
         ),
     )
 
@@ -122,8 +142,11 @@ class Job(Base):
         _enum(JobStatus, "job_status"), default=JobStatus.PENDING
     )
     attempts: Mapped[int] = mapped_column(default=0)
+    """Failed runs so far."""
     last_error: Mapped[str | None] = mapped_column(sa.Text)
     enqueued_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
+    retry_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    """Set while a failed job waits out its backoff; it isn't claimed before then."""
     started_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
     finished_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
 

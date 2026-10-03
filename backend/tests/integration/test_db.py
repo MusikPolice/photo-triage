@@ -1,7 +1,6 @@
 """The database engine, the migrations and the Phase 1 schema (dev-environment §6)."""
 
 import datetime as dt
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -13,10 +12,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from photo_triage.db.engine import BUSY_TIMEOUT_MS, DB_FILENAME, open_database
-from photo_triage.db.models import Item, Job, JobStatus, MediaType
-
-ALEMBIC_INI = Path(__file__).parents[2] / "alembic.ini"
+from photo_triage.db.engine import BUSY_TIMEOUT_MS, DB_FILENAME
+from photo_triage.db.models import Item, Job, MediaType
 
 # plan §8
 PHASE_1_COLUMNS = {
@@ -45,6 +42,7 @@ PHASE_1_COLUMNS = {
         "attempts",
         "last_error",
         "enqueued_at",
+        "retry_at",
         "started_at",
         "finished_at",
     },
@@ -52,26 +50,6 @@ PHASE_1_COLUMNS = {
 }
 
 NOW = dt.datetime(2026, 10, 3, 12, tzinfo=dt.UTC)
-
-
-@pytest.fixture
-def engine(tmp_path: Path) -> Iterator[Engine]:
-    engine = open_database(tmp_path / "data")
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture
-def alembic_cfg(engine: Engine) -> Config:
-    cfg = Config(ALEMBIC_INI)
-    cfg.set_main_option("sqlalchemy.url", engine.url.render_as_string(hide_password=False))
-    return cfg
-
-
-@pytest.fixture
-def migrated(engine: Engine, alembic_cfg: Config) -> Engine:
-    command.upgrade(alembic_cfg, "head")
-    return engine
 
 
 def _tables(engine: Engine) -> set[str]:
@@ -125,20 +103,6 @@ def test_phase_1_tables_have_the_plan_columns(migrated: Engine) -> None:
     inspector = sa.inspect(migrated)
     for table, columns in PHASE_1_COLUMNS.items():
         assert {c["name"] for c in inspector.get_columns(table)} == columns, table
-
-
-def test_claiming_the_next_pending_job_uses_the_priority_index(migrated: Engine) -> None:
-    claim = (
-        sa.select(Job.id)
-        .where(Job.status == JobStatus.PENDING)
-        .order_by(Job.priority, Job.enqueued_at, Job.id)
-        .limit(1)
-    )
-    with migrated.connect() as conn:
-        sql = str(claim.compile(conn, compile_kwargs={"literal_binds": True}))
-        plan = " ".join(row[-1] for row in conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {sql}"))
-    assert "ix_jobs_pending_by_priority" in plan
-    assert "TEMP B-TREE" not in plan  # no sort step: the index supplies the order
 
 
 def _item(content_hash: str = "a" * 64) -> Item:
