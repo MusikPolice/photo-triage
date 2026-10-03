@@ -225,7 +225,8 @@ Changes that aren't part of a phase, such as docs or tooling, still go through a
 
 These are set in the GitHub repo settings, not in files:
 
-- **`main` is protected.** The `backend` and `audit` CI jobs must pass, and the branch must be up to date with `main` before merging. This applies to admins too, so nothing reaches `main` without a green PR.
+- **`main` is protected.** The `backend`, `migrations` and `audit` CI jobs must pass, and the branch must be up to date with `main` before merging. This applies to admins too, so nothing reaches `main` without a green PR.
+  - A required job must run on every PR. GitHub waits indefinitely for a required check that never reports, so don't add `paths:` filters to these jobs; skip steps inside the job instead. Renaming a required job also needs this setting updated.
   - Because `audit` is required, a newly published vulnerability in a runtime dependency blocks merges until the dependency is upgraded or the advisory is dealt with.
   - This is deliberate. If it ever blocks urgent work, an admin can relax the rule temporarily.
 - **Squash merges only.** Each PR lands as one commit whose message is the PR title and body.
