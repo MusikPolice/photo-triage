@@ -364,6 +364,7 @@ Environment variables, documented in `.env.example`:
 |---|---|---|
 | `PHOTO_DIR` | *(required)* | Photo library path (dev machine: `P:\`; NUC host: `/mnt/pictures`; in Docker: bind-mounted to `/photos`) |
 | `TRASH_DIR` | *(required)* | Trash location, outside `PHOTO_DIR` |
+| `DATA_DIR` | `./data` | SQLite database and derived files (in Docker: `/data`, bind-mounted from a host folder) |
 | `APP_PORT` | `8000` | Host port for the web UI |
 | `SCAN_SCHEDULE` | `0 2 * * *` | Cron schedule for incremental scans |
 | `WORKER_WINDOW` | *(unset = always)* | Quiet-hours window for heavy stages, e.g. `22:00-07:00` |
@@ -404,7 +405,7 @@ Environment variables, documented in `.env.example`:
 Compose stack (app, worker, ollama), SQLite schema and migrations (Alembic), FastAPI skeleton, `current_actor` dependency, Vite + Svelte frontend built into the image. Job queue and worker loop with priorities, pause/resume, and quiet-hours window. Activity page skeleton with SSE. Confirm it runs against a test directory.
 
 ### Phase 2 — Scanner, Thumbnails & CLIP
-Directory walker, content hashing, move detection, EXIF/video metadata extraction (JPEG, HEIC, MOV/MP4), video frame sampling, thumbnails, CLIP embeddings. Stage progress, throughput, and ETA on the Activity page. Verify exiftool field support per container.
+Directory walker, content hashing, move detection, EXIF/video metadata extraction (JPEG, HEIC, MOV/MP4), video frame sampling, thumbnails, CLIP embeddings. Stage progress, throughput, and ETA on the Activity page. Verify exiftool field support per container. Add the "No escape" safety test (dev-environment §7) here: it needs stages that touch files, so Phase 1 has nothing for it to check.
 
 ### Phase 3 — Exploration Map & Search (first usable milestone)
 UMAP layout job, atlas generation, deck.gl map with LOD, CLIP text search with highlight-in-place, lightbox with nearest-neighbor walk, date filter, color-by overlays. Read-only. Mobile performance testing with 100k points.
