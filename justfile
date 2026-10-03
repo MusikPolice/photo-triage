@@ -1,6 +1,6 @@
 # Task runner (docs/dev-environment.md §5). `just` lists recipes.
-# Recipes for the app itself (dev, api, worker, web, stack, ...) arrive with the
-# Phase 1 scaffold.
+# The other app recipes (dev, worker, web, stack, ...) arrive with the rest of
+# the Phase 1 scaffold.
 
 # List recipes
 default:
@@ -9,6 +9,10 @@ default:
 # Verify the dev environment (tool versions, lockfiles, weights, Docker, mounts)
 doctor:
     ./scripts/bootstrap.sh --check
+
+# API on APP_PORT with reload. Runs from the repo root so `.env` and `./data` resolve here.
+api *args:
+    uv run --no-sync --project backend python -m photo_triage.api --reload {{args}}
 
 # Install backend dependencies exactly as locked
 [working-directory: 'backend']
