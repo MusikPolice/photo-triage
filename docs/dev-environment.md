@@ -96,7 +96,7 @@ photo-triage/
     package.json  pnpm-lock.yaml  src/  tests/  e2e/
   docker/Dockerfile
   scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, ...
-  .claude/skills/ plan-phase, work-issue (see CLAUDE.md)
+  .claude/skills/ plan-phase, work-issue, new-issue, grill-me (see CLAUDE.md)
   docs/
 ```
 
@@ -117,7 +117,8 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 | Command | What it runs |
 |---|---|
 | `just dev` | API (`uvicorn --reload`), worker process, and Vite dev server (proxying `/api` to the API) natively in WSL; Ollama via `compose.dev.yaml`. Uses `.env` → `PHOTO_DIR=/mnt/sample-pictures` (read-only), local `data/` and `trash/` dirs. |
-| `just api` / `just worker` / `just web` | Each individually |
+| `just api` | The API alone: `python -m photo_triage.api --reload`, on `APP_PORT`, from the repo root so `.env` and `./data` resolve there. Exits with a list of what's wrong if `PHOTO_DIR` or `TRASH_DIR` is missing. API docs at `/api/docs`. |
+| `just worker` / `just web` | Each individually |
 | `just stack` | Full production-like Compose stack (built image) against tier-1 fixtures |
 | `just dry-run-full` | Stack against `/mnt/pictures` (read-only), writes disabled — for scale testing |
 | `just db-reset` | Drop and re-migrate the dev database |
@@ -245,6 +246,6 @@ These are set in the GitHub repo settings, not in files:
    - Pre-commit: prettier, eslint, and pnpm lockfile checks (with the frontend).
    - The ≥ 90% branch-coverage gates on `files/`, identity/move detection, and purge (the 75% overall gate is live).
    - Pinned exiftool and ffmpeg in CI, once tests call them.
-   - The `.env` check in `just doctor`, and the app recipes in §5 (`dev`, `api`, `worker`, `web`, `stack`, ...).
+   - The `.env` check in `just doctor`, and the app recipes in §5 (`dev`, `worker`, `web`, `stack`, ...). `just api` and `.env.example` landed on 2026-10-03.
 5. ~~Decide how to track work toward the spec.~~ Done on 2026-10-03. Milestones, issues, and PRs on GitHub, driven by `scripts/tracker.py` (§9).
-6. Plan Phase 1 into issues with the `plan-phase` skill, then start building.
+6. ~~Plan Phase 1 into issues with the `plan-phase` skill, then start building.~~ Done on 2026-10-03: issues #3–#12 in the Phase 1 milestone.

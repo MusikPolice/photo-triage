@@ -5,7 +5,7 @@ A self-hosted tool for exploring and cleaning up a family photo library: a zooma
 - [docs/plan.md](docs/plan.md): product spec and architecture
 - [docs/dev-environment.md](docs/dev-environment.md): toolchain, testing strategy, and build-time checks
 
-> **Status:** the dev environment and its checks are in place; the Phase 1 app scaffold is next. Steps marked 🚧 depend on files that the scaffold adds (`.env.example` and the app's `just` recipes).
+> **Status:** the dev environment and its checks are in place; the Phase 1 app scaffold is next. Steps marked 🚧 depend on `just` recipes that the scaffold is still adding.
 
 ---
 
@@ -155,7 +155,7 @@ Then run the bootstrap script. It installs the pinned `exiftool` and `ffmpeg`, s
 just doctor          # verifies versions, mounts, model weights
 ```
 
-### 8. Local configuration 🚧
+### 8. Local configuration
 
 ```bash
 cp .env.example .env
@@ -164,7 +164,7 @@ cp .env.example .env
 The defaults point `PHOTO_DIR` at `/mnt/sample-pictures` and keep app state in `./data` and `./trash`. To test anything that **writes** to photos (trash, EXIF write-back), work on a throwaway copy:
 
 ```bash
-just seed-scratch    # copies the sample to ~/photo-triage-data/scratch
+just seed-scratch    # 🚧 copies the sample to ~/photo-triage-data/scratch
 # then set PHOTO_DIR=~/photo-triage-data/scratch in .env
 ```
 
@@ -201,7 +201,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just doctor` | Verify the environment |
 | `just fmt` | Format and auto-fix lint |
 
-Available today: `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `api`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 
