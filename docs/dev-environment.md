@@ -211,8 +211,9 @@ Work toward the spec is tracked on GitHub:
 | `finish SUMMARY` | Requires a clean tree that's up to date with `origin/main`. Runs `just check`, pushes, and opens or updates the PR, adding the issue's acceptance criteria and `Closes #N` to the body. |
 
 The Claude Code skills in `.claude/skills/` hold the decisions the script can't make:
+- `grill-me` interviews the user one question at a time until a plan is fully agreed. It's a copy of a claude.ai skill, kept in the repo so every session can invoke it.
 - `plan-phase` splits a phase into issues and gets approval before filing them.
-- `new-issue` files a single issue, such as a PR follow-up, a bug, an idea or a spike. It first interviews the user, using the user-level `grill-me` skill when it's installed, until the what, why and how are agreed. The agreed decisions go in the issue's optional `Background` and `Approach` sections.
+- `new-issue` files a single issue, such as a PR follow-up, a bug, an idea or a spike. It first interviews the user, using the `grill-me` skill, until the what, why and how are agreed. The agreed decisions go in the issue's optional `Background` and `Approach` sections.
 - `work-issue` goes from picking an issue to a PR with passing CI.
 
 `CLAUDE.md` points every session at `tracker.py status`. Issues filed on the web use the same sections, through the issue form in `.github/ISSUE_TEMPLATE/`.

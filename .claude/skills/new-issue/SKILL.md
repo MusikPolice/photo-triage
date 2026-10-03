@@ -27,10 +27,9 @@ only what the files can't answer:
 
 ## 2. Grill
 
-Invoke the `grill-me` skill and interview the user until every branch below is
-resolved. If `grill-me` isn't available, do the same thing directly: one
-question at a time with AskUserQuestion, with 2-4 concrete options each. Don't
-ask what step 1 already answered. State what you found and move on.
+Invoke the `grill-me` skill (`.claude/skills/grill-me`) and interview the user
+until every branch below is resolved. Don't ask what step 1 already answered.
+State what you found and move on.
 
 Work through these branches, letting earlier answers prune later ones:
 
