@@ -1,5 +1,5 @@
 # Task runner (docs/dev-environment.md §5). `just` lists recipes.
-# The other app recipes (dev, worker, web, stack, ...) arrive with the rest of
+# The other app recipes (dev, worker, stack, ...) arrive with the rest of
 # the Phase 1 scaffold.
 
 # List recipes
@@ -13,6 +13,11 @@ doctor:
 # API on APP_PORT with reload. Runs from the repo root so `.env` and `./data` resolve here.
 api *args:
     uv run --no-sync --project backend python -m photo_triage.api --reload {{args}}
+
+# Vite dev server, proxying /api to the API on APP_PORT (run `just api` alongside)
+[working-directory: 'frontend']
+web *args:
+    pnpm exec vite {{args}}
 
 # Drop and re-migrate the database in DATA_DIR (from `.env`, like `just api`)
 db-reset:
@@ -62,9 +67,29 @@ audit:
     uv export --locked --no-dev --no-group export --no-emit-project --format requirements-txt -o "$req" >/dev/null
     uv run --no-sync pip-audit --disable-pip --require-hashes -r "$req"
 
+# Install frontend dependencies exactly as locked
+[working-directory: 'frontend']
+web-sync:
+    pnpm install --frozen-lockfile
+
+# Format and auto-fix frontend lint where possible
+[working-directory: 'frontend']
+web-fmt:
+    pnpm exec prettier --write .
+    pnpm exec eslint --fix .
+
+# Frontend: svelte-check (strict), eslint, prettier, Vitest, production build
+[working-directory: 'frontend']
+web-check:
+    pnpm run check
+    pnpm run lint
+    pnpm run format:check
+    pnpm run test
+    pnpm run build
+
 # Every pre-commit hook against every file
 pre-commit:
     pre-commit run --all-files
 
 # Everything CI runs on a PR (except audit, which needs the network)
-check: pre-commit lint typecheck test
+check: pre-commit lint typecheck test web-check

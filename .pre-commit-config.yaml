@@ -61,3 +61,26 @@ repos:
         entry: scripts/backend-run.sh uv lock --check --offline
         files: '^backend/(pyproject\.toml|uv\.lock)$'
         pass_filenames: false
+
+      # The frontend hooks need node_modules (`just web-sync`). CI's backend job
+      # skips them; the frontend job runs the same checks after installing.
+      - id: prettier
+        name: prettier --check
+        language: system
+        entry: scripts/frontend-run.sh exec prettier --check .
+        files: '^frontend/.*\.(ts|js|svelte|css|html|json)$'
+        pass_filenames: false
+
+      - id: eslint
+        name: eslint
+        language: system
+        entry: scripts/frontend-run.sh exec eslint .
+        files: '^frontend/.*\.(ts|js|svelte)$'
+        pass_filenames: false
+
+      - id: pnpm-lock
+        name: pnpm-lock.yaml matches package.json
+        language: system
+        entry: scripts/frontend-run.sh install --frozen-lockfile --lockfile-only --offline
+        files: '^frontend/(package\.json|pnpm-lock\.yaml)$'
+        pass_filenames: false

@@ -46,6 +46,8 @@ All versions are pinned. `mise.toml` pins the language runtimes and CLI tools; l
 
 Libraries of note (exact versions live in the lockfiles): FastAPI, SQLAlchemy 2, Alembic, Pydantic 2, onnxruntime, open_clip (export to ONNX), insightface, umap-learn, scikit-learn (including its HDBSCAN), Pillow + pillow-heif, OpenCV (headless); Svelte 5, Vite, TypeScript, deck.gl.
 
+TypeScript is pinned to 6.0 (`~6.0` in `frontend/package.json`). TypeScript 7 is out, but svelte-check and typescript-eslint don't support it yet.
+
 `backend/pyproject.toml` has three dependency sets:
 
 - **Runtime** (`[project.dependencies]`): what the app and worker import. This set goes into the Docker image.
@@ -118,7 +120,9 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 |---|---|
 | `just dev` | API (`uvicorn --reload`), worker process, and Vite dev server (proxying `/api` to the API) natively in WSL; Ollama via `compose.dev.yaml`. Uses `.env` → `PHOTO_DIR=/mnt/sample-pictures` (read-only), local `data/` and `trash/` dirs. |
 | `just api` | The API alone: `python -m photo_triage.api --reload`, on `APP_PORT`, from the repo root so `.env` and `./data` resolve there. Exits with a list of what's wrong if `PHOTO_DIR` or `TRASH_DIR` is missing. API docs at `/api/docs`. |
-| `just worker` / `just web` | Each individually |
+| `just web` | The Vite dev server for `frontend/`, with hot reload. It proxies `/api` to the API on `APP_PORT`, which it reads like the backend does: the environment first, then the repo-root `.env`, then 8000. Run `just api` alongside. Extra arguments go to Vite, e.g. `just web --host` to reach it from another device. |
+| `just web-sync` / `just web-fmt` / `just web-check` | Install the frontend dependencies as locked; format and auto-fix lint; run svelte-check, eslint, prettier, Vitest and `vite build` (part of `just check`). |
+| `just worker` | The worker alone |
 | `just stack` | Full production-like Compose stack (built image) against tier-1 fixtures |
 | `just dry-run-full` | Stack against `/mnt/pictures` (read-only), writes disabled — for scale testing |
 | `just db-reset` | Drop and re-migrate the dev database in `DATA_DIR`: Alembic downgrade to empty, then upgrade to head. For other Alembic commands, run `uv run --project backend alembic -c backend/alembic.ini …` from the repo root. A new migration starts from `revision --autogenerate`; read it before committing, since the tests fail if models and migrations disagree. |
@@ -174,7 +178,7 @@ File mutation is confined to `photo_triage.files`. These are enforced both stati
 - `gitleaks` (secrets, e.g. SMB credentials)
 - Trailing whitespace / EOF / merge-conflict markers; LF line endings enforced via `.gitattributes`
 
-Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`. The ruff and uv hooks run through `scripts/backend-run.sh`, which finds mise even when the shell hasn't activated it (commits from an editor), and uses the existing `.venv` without syncing. `just pre-commit` runs every hook on every file; `just check` runs that plus lint, pyright, and the tests — everything CI runs except the audit.
+Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`; prettier and eslint cover `frontend/`. The ruff and uv hooks run through `scripts/backend-run.sh`, which finds mise even when the shell hasn't activated it (commits from an editor), and uses the existing `.venv` without syncing. The frontend hooks do the same through `scripts/frontend-run.sh`, using the existing `node_modules`. The pnpm lockfile hook runs `pnpm install --frozen-lockfile --lockfile-only --offline`, which fails if `pnpm-lock.yaml` doesn't match `package.json` and changes nothing. `just pre-commit` runs every hook on every file; `just check` runs that plus lint, pyright, the tests and `just web-check` — everything CI runs except the audit.
 
 ### CI on every push / PR (GitHub Actions, ubuntu-24.04)
 
@@ -182,7 +186,7 @@ Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`. The ru
 |---|---|
 | backend | `uv sync --locked --no-group export`; pre-commit (all hooks); ruff; **pyright strict** (tests and `scripts/` at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt) |
 | migrations | upgrade from empty → downgrade → upgrade; `alembic check`; on PRs, migrations already on `main` aren't modified, renamed or deleted (add a new one instead) |
-| frontend | `pnpm install --frozen-lockfile`; svelte-check; eslint; prettier; Vitest; `vite build` |
+| frontend | `pnpm install --frozen-lockfile`; svelte-check (strict, fails on warnings); eslint (typescript-eslint `strictTypeChecked`); prettier; Vitest; `vite build`. The backend job's pre-commit run skips the frontend hooks, since it has no `node_modules`. |
 | contract | Export OpenAPI from the app, regenerate TS types (`openapi-typescript`); fail if the committed types differ |
 | docker | hadolint; build image; image smoke test (container starts, `/api/health` ok, `exiftool -ver` / `ffmpeg -version` match pinned versions) |
 | audit | `pip-audit` on the runtime dependencies (`just audit`; fails on any known vulnerability, since pip-audit has no severity filter), `pnpm audit --prod` — fail on high/critical |
@@ -243,10 +247,11 @@ These are set in the GitHub repo settings, not in files:
    - **open_clip 3.3 → ONNX:** `torch.onnx.export(..., dynamo=True)` needs `onnxscript`. A dynamic batch axis needs `dynamic_shapes` with an example batch of at least 2, because `dynamic_axes` gets specialised to the example. The onnxruntime output matches torch to within 3e-6.
    - Also resolved: numpy 2.5, onnxruntime 1.30, OpenCV 5.0 (headless), Pillow 12.3, torch 2.14 (CPU).
 4. ~~Write `mise.toml`, `justfile`, `scripts/bootstrap.sh`, pre-commit config, and the CI workflow skeleton before any feature code, so every subsequent change lands with the checks already in place.~~ Done on 2026-10-02. The backend checks from §7–8 are live: pre-commit, `just lint`/`typecheck`/`test`/`audit`/`check`, and the `backend` and `audit` CI jobs in `.github/workflows/ci.yml`. The `backend/src/photo_triage` subpackages from §3 exist as empty packages so the import contracts apply from the first line of feature code. Still to add as their code lands:
-   - CI jobs: frontend, contract, docker; model tier and e2e on `main`/nightly. (The migrations job landed on 2026-10-03.)
-   - Pre-commit: prettier, eslint, and pnpm lockfile checks (with the frontend).
+   - CI jobs: contract, docker; model tier and e2e on `main`/nightly. (The migrations and frontend jobs landed on 2026-10-03.)
+   - ~~Pre-commit: prettier, eslint, and pnpm lockfile checks (with the frontend).~~ Done on 2026-10-03.
+   - `pnpm audit --prod` in the audit job, once the frontend has runtime dependencies (it has none yet: Vite bundles everything).
    - The ≥ 90% branch-coverage gates on `files/`, identity/move detection, and purge (the 75% overall gate is live).
    - Pinned exiftool and ffmpeg in CI, once tests call them.
-   - The `.env` check in `just doctor`, and the app recipes in §5 (`dev`, `worker`, `web`, `stack`, ...). `just api` and `.env.example` landed on 2026-10-03.
+   - The `.env` check in `just doctor`, and the app recipes in §5 (`dev`, `worker`, `stack`, ...). `just api`, `just web` and `.env.example` landed on 2026-10-03.
 5. ~~Decide how to track work toward the spec.~~ Done on 2026-10-03. Milestones, issues, and PRs on GitHub, driven by `scripts/tracker.py` (§9).
 6. ~~Plan Phase 1 into issues with the `plan-phase` skill, then start building.~~ Done on 2026-10-03: issues #3–#12 in the Phase 1 milestone.

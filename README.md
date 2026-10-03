@@ -201,8 +201,9 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just dry-run-full` | Scale test against `/mnt/pictures` with metadata writes disabled |
 | `just doctor` | Verify the environment |
 | `just fmt` | Format and auto-fix lint |
+| `just web` | Vite dev server for the frontend, proxying `/api` to `just api` |
 
-Available today: `api`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `api`, `web`, `web-sync`, `web-fmt`, `web-check`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 
