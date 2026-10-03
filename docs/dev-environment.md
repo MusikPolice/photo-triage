@@ -34,7 +34,7 @@ All versions are pinned. `mise.toml` pins the language runtimes and CLI tools; l
 | Tool | Version | Pinned in | Purpose |
 |---|---|---|---|
 | mise | latest | — (installed once) | Installs/activates the tools below per-directory |
-| Python | 3.13.x | `mise.toml` | Backend. Not 3.14: ML wheels (onnxruntime, numba/UMAP, InsightFace) lag new releases. The Phase 1 dependency spike confirmed every ML library below works on 3.13 (§9). |
+| Python | 3.13.x | `mise.toml` | Backend. Not 3.14: ML wheels (onnxruntime, numba/UMAP, InsightFace) lag new releases. The Phase 1 dependency spike confirmed every ML library below works on 3.13 (§10). |
 | uv | 0.10.x | `mise.toml` | Python deps, venv, lockfile (`uv.lock`) |
 | Node.js | 24.x LTS | `mise.toml` | Frontend tooling |
 | pnpm | 10.x | `mise.toml` + `packageManager` | Frontend deps, lockfile (`pnpm-lock.yaml`) |
@@ -173,13 +173,13 @@ File mutation is confined to `photo_triage.files`. These are enforced both stati
 - `gitleaks` (secrets, e.g. SMB credentials)
 - Trailing whitespace / EOF / merge-conflict markers; LF line endings enforced via `.gitattributes`
 
-Config: `.pre-commit-config.yaml`. The ruff and uv hooks run through `scripts/backend-run.sh`, which finds mise even when the shell hasn't activated it (commits from an editor), and uses the existing `.venv` without syncing. `just pre-commit` runs every hook on every file; `just check` runs that plus lint, pyright, and the tests — everything CI runs except the audit.
+Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`. The ruff and uv hooks run through `scripts/backend-run.sh`, which finds mise even when the shell hasn't activated it (commits from an editor), and uses the existing `.venv` without syncing. `just pre-commit` runs every hook on every file; `just check` runs that plus lint, pyright, and the tests — everything CI runs except the audit.
 
 ### CI on every push / PR (GitHub Actions, ubuntu-24.04)
 
 | Job | Checks |
 |---|---|
-| backend | `uv sync --locked --no-group export`; pre-commit (all hooks); ruff; **pyright strict** (tests at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt) |
+| backend | `uv sync --locked --no-group export`; pre-commit (all hooks); ruff; **pyright strict** (tests and `scripts/` at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt) |
 | migrations | upgrade from empty → downgrade → upgrade; `alembic check` |
 | frontend | `pnpm install --frozen-lockfile`; svelte-check; eslint; prettier; Vitest; `vite build` |
 | contract | Export OpenAPI from the app, regenerate TS types (`openapi-typescript`); fail if the committed types differ |
@@ -191,7 +191,44 @@ Config: `.pre-commit-config.yaml`. The ruff and uv hooks run through `scripts/ba
 - **Model tier:** `pytest -m models` with cached weights (actions/cache)
 - **E2E:** `just stack` + Playwright, desktop and mobile viewports; traces uploaded on failure
 
-## 9. Next steps
+## 9. Tracking work and merging
+
+Work toward the spec is tracked on GitHub:
+
+- Each phase in plan §11 is a **milestone**.
+- Each deliverable is an **issue** small enough for one PR. An issue cites the spec sections it implements, lists checkable acceptance criteria, and says what's out of scope.
+- Each issue gets its own **branch** and **PR**, and the PR closes the issue when merged.
+- Every PR is reviewed and merged by a person. Claude Code opens PRs but never merges them.
+
+`scripts/tracker.py` does the mechanical steps, so they happen the same way every time. Its docstring has the issue draft format.
+
+| Command | Does |
+|---|---|
+| `setup` | Creates the phase milestones from the plan §11 headings, plus the area labels (`backend`, `frontend`, `infra`, `documentation`) and the `in-progress` label. Running it again only adds what's missing. |
+| `status` | Shows the current phase and its issues (in progress, ready, or blocked on an open dependency), plus open PRs. |
+| `new DRAFT...` | Validates issue drafts: required sections, spec citations that match a heading, checklist criteria, labels and phase. Then files them in order. If any draft is invalid, it files nothing. Use `--dry-run` to validate without filing. |
+| `start N` | Creates branch `N-slug` from `origin/main`, assigns the issue and labels it `in-progress`. |
+| `finish SUMMARY` | Requires a clean tree that's up to date with `origin/main`. Runs `just check`, pushes, and opens or updates the PR, adding the issue's acceptance criteria and `Closes #N` to the body. |
+
+The Claude Code skills in `.claude/skills/` hold the decisions the script can't make:
+- `plan-phase` splits a phase into issues and gets approval before filing them.
+- `work-issue` goes from picking an issue to a PR with passing CI.
+
+`CLAUDE.md` points every session at `tracker.py status`. Issues filed on the web use the same sections, through the issue form in `.github/ISSUE_TEMPLATE/`.
+
+Changes that aren't part of a phase, such as docs or tooling, still go through a branch and a PR. They don't need an issue, so the PR is opened with `gh pr create` rather than `finish`.
+
+### Repository settings
+
+These are set in the GitHub repo settings, not in files:
+
+- **`main` is protected.** The `backend` and `audit` CI jobs must pass, and the branch must be up to date with `main` before merging. This applies to admins too, so nothing reaches `main` without a green PR.
+  - Because `audit` is required, a newly published vulnerability in a runtime dependency blocks merges until the dependency is upgraded or the advisory is dealt with.
+  - This is deliberate. If it ever blocks urgent work, an admin can relax the rule temporarily.
+- **Squash merges only.** Each PR lands as one commit whose message is the PR title and body.
+- **Branches are deleted** automatically after merge.
+
+## 10. Next steps
 
 1. Push `main`, then clone into WSL at `~/src/photo-triage` and start Claude Code there.
 2. Set up the read-only `/mnt/pictures` (CIFS) and `/mnt/sample-pictures` (drvfs) mounts in WSL.
@@ -207,3 +244,5 @@ Config: `.pre-commit-config.yaml`. The ruff and uv hooks run through `scripts/ba
    - The ≥ 90% branch-coverage gates on `files/`, identity/move detection, and purge (the 75% overall gate is live).
    - Pinned exiftool and ffmpeg in CI, once tests call them.
    - The `.env` check in `just doctor`, and the app recipes in §5 (`dev`, `api`, `worker`, `web`, `stack`, ...).
+5. ~~Decide how to track work toward the spec.~~ Done on 2026-10-03. Milestones, issues, and PRs on GitHub, driven by `scripts/tracker.py` (§9).
+6. Plan Phase 1 into issues with the `plan-phase` skill, then start building.

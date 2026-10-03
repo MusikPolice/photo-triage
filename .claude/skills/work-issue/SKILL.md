@@ -36,6 +36,9 @@ Read every spec section the issue cites in full, and the safety invariants in
   spec is silent on something that matters, stop and ask.
 - Write tests alongside the code at the levels in dev-environment §6. Each
   acceptance criterion should map to something that checks it.
+- Update the docs the change affects, as `CLAUDE.md` describes under "Keeping docs
+  current". Propose any edit to `docs/plan.md` to the user and don't make it
+  yourself.
 - Commit in logical steps with clear messages. Run `just check` before
   finishing. `finish` runs it again and refuses to continue if it fails.
 
