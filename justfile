@@ -14,6 +14,11 @@ doctor:
 api *args:
     uv run --no-sync --project backend python -m photo_triage.api --reload {{args}}
 
+# Drop and re-migrate the database in DATA_DIR (from `.env`, like `just api`)
+db-reset:
+    uv run --no-sync --project backend alembic -c backend/alembic.ini downgrade base
+    uv run --no-sync --project backend alembic -c backend/alembic.ini upgrade head
+
 # Install backend dependencies exactly as locked
 [working-directory: 'backend']
 sync:

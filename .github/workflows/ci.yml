@@ -1,5 +1,5 @@
 # CI on every push and PR (docs/dev-environment.md §8).
-# Jobs still to come as their code lands: migrations, frontend, contract, docker,
+# Jobs still to come as their code lands: frontend, contract, docker,
 # and (on main/nightly) the model tier and e2e.
 name: CI
 
@@ -56,6 +56,41 @@ jobs:
 
       - name: Tests and coverage
         run: just test
+
+  migrations:
+    runs-on: ubuntu-24.04
+    env:
+      # The CLI reads DATA_DIR through the app settings, which also require the
+      # other two. Relative to the checkout; none of them need to exist.
+      PHOTO_DIR: ci/photos
+      TRASH_DIR: ci/trash
+      DATA_DIR: ci/data
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: python uv just
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: migrations-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: migrations-
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --locked --no-group export
+
+      - name: Upgrade from empty, downgrade, upgrade again
+        run: |
+          alembic() { uv run --no-sync --project backend alembic -c backend/alembic.ini "$@"; }
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+
+      - name: Models and migrations agree (alembic check)
+        run: uv run --no-sync --project backend alembic -c backend/alembic.ini check
 
   audit:
     runs-on: ubuntu-24.04
