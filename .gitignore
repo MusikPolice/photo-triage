@@ -16,3 +16,6 @@ node_modules/
 .env
 /data/
 /trash/
+
+# Issue and PR drafts written by the plan-phase and work-issue skills
+.drafts/

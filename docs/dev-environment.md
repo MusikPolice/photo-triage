@@ -95,7 +95,8 @@ photo-triage/
   frontend/
     package.json  pnpm-lock.yaml  src/  tests/  e2e/
   docker/Dockerfile
-  scripts/        bootstrap.sh, make_synthetic_fixtures.py, export_openapi.py
+  scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, ...
+  .claude/skills/ plan-phase, work-issue (see CLAUDE.md)
   docs/
 ```
 
