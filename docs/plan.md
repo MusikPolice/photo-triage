@@ -337,9 +337,9 @@ tags
 captions
   item_id, text, model, created_at
 
-jobs
+jobs                               -- error: retries after retry_at; parked: gave up
   id, item_id (nullable), stage, priority, status (pending | running | done | error | parked),
-  attempts, last_error, enqueued_at, started_at, finished_at
+  attempts, last_error, enqueued_at, retry_at, started_at, finished_at
 
 job_stats                          -- for history charts / throughput
   date, stage, processed, errors, busy_seconds
