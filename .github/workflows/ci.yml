@@ -1,5 +1,5 @@
 # CI on every push and PR (docs/dev-environment.md §8).
-# Jobs still to come as their code lands: frontend, contract, docker,
+# Jobs still to come as their code lands: contract, docker,
 # and (on main/nightly) the model tier and e2e.
 name: CI
 
@@ -44,7 +44,10 @@ jobs:
           uv sync --locked --no-group export
           uv tool install "pre-commit==$PRE_COMMIT_VERSION"
 
+      # The frontend hooks need node_modules; the frontend job covers them.
       - name: pre-commit (format, lint, file-mutation guard, secrets, media guard)
+        env:
+          SKIP: prettier,eslint,pnpm-lock
         run: pre-commit run --all-files --show-diff-on-failure
 
       - name: Import contracts
@@ -56,6 +59,46 @@ jobs:
 
       - name: Tests and coverage
         run: just test
+
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: node pnpm
+
+      - name: Find the pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: frontend-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: frontend-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: svelte-check (strict)
+        run: pnpm run check
+
+      - name: eslint
+        run: pnpm run lint
+
+      - name: prettier
+        run: pnpm run format:check
+
+      - name: Vitest
+        run: pnpm run test
+
+      - name: vite build
+        run: pnpm run build
 
   migrations:
     runs-on: ubuntu-24.04
