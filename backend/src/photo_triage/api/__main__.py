@@ -1,13 +1,19 @@
 """Run the API with uvicorn: `python -m photo_triage.api [--reload]` (`just api`)."""
 
 import argparse
+import logging
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 import uvicorn
+from fastapi import FastAPI
 
+from photo_triage import logs
+from photo_triage.api.app import create_app
 from photo_triage.settings import SettingsError, load_settings
+
+logger = logging.getLogger(__name__)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -24,15 +30,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(e, file=sys.stderr)
         return 2
 
+    # With --reload, this process only watches the code and a child process serves
+    # (see `serve`). Only the child writes api.log, since two processes can't share
+    # a rotating file.
+    logs.configure(settings, "api", to_file=not args.reload)
+
     uvicorn.run(
-        "photo_triage.api.app:create_app",
+        "photo_triage.api.__main__:serve",
         factory=True,
         host=args.host,
         port=args.port or settings.app_port,
         reload=args.reload,
         reload_dirs=[str(Path(__file__).parents[1])] if args.reload else None,
+        log_config=None,  # keep the configuration from `logs.configure`
+        # The map loads thousands of tiles and the event stream stays open, so one
+        # line per request is only wanted when debugging.
+        access_log=settings.log_level == "DEBUG",
     )
     return 0
+
+
+def serve() -> FastAPI:
+    """The app as uvicorn loads it, in the process that serves requests."""
+    settings = load_settings()
+    logs.configure(settings, "api")
+    logger.info("API starting: %s", settings.summary())
+    return create_app(settings)
 
 
 if __name__ == "__main__":
