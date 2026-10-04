@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from photo_triage.db.engine import BUSY_TIMEOUT_MS, DB_FILENAME
-from photo_triage.db.models import Item, Job, MediaType
+from photo_triage.db.models import Item, Job, JobStats, MediaType
 
 # plan §8
 PHASE_1_COLUMNS = {
@@ -46,7 +46,7 @@ PHASE_1_COLUMNS = {
         "started_at",
         "finished_at",
     },
-    "job_stats": {"date", "stage", "processed", "errors", "busy_seconds"},
+    "job_stats": {"hour_start_at", "stage", "processed", "errors", "busy_seconds"},
 }
 
 NOW = dt.datetime(2026, 10, 3, 12, tzinfo=dt.UTC)
@@ -163,3 +163,43 @@ def test_timestamps_round_trip_as_aware_utc(migrated: Engine) -> None:
     with Session(migrated) as session:
         assert session.scalars(sa.select(Job.enqueued_at)).one() == NOW
         assert session.scalars(sa.select(Job.enqueued_at)).one().tzinfo == dt.UTC
+
+
+def test_job_stats_keep_their_counts_between_daily_and_hourly_rows(
+    engine: Engine, alembic_cfg: Config
+) -> None:
+    command.upgrade(alembic_cfg, "0002")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "INSERT INTO job_stats VALUES ('2026-10-03', 'clip', 10, 1, 60.5), "
+            "('2026-10-03', 'scan', 2, 0, 1.0)"
+        )
+
+    command.upgrade(alembic_cfg, "0003")
+    with Session(engine) as session:
+        rows = session.execute(
+            sa.select(JobStats.hour_start_at, JobStats.stage, JobStats.processed).order_by(
+                JobStats.stage
+            )
+        ).all()
+        assert [tuple(r) for r in rows] == [
+            (dt.datetime(2026, 10, 3, tzinfo=dt.UTC), "clip", 10),
+            (dt.datetime(2026, 10, 3, tzinfo=dt.UTC), "scan", 2),
+        ]
+        session.add(
+            JobStats(
+                hour_start_at=dt.datetime(2026, 10, 3, 23, tzinfo=dt.UTC),
+                stage="clip",
+                processed=5,
+                errors=2,
+                busy_seconds=30.0,
+            )
+        )
+        session.commit()
+
+    command.downgrade(alembic_cfg, "0002")
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT * FROM job_stats ORDER BY stage").all() == [
+            ("2026-10-03", "clip", 15, 3, 90.5),
+            ("2026-10-03", "scan", 2, 0, 1.0),
+        ]
