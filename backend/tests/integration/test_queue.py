@@ -11,7 +11,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from photo_triage.db.models import Item, Job, JobStatus, MediaType
+from photo_triage.db.models import Item, Job, JobStats, JobStatus, MediaType
 from photo_triage.worker.queue import JobQueue, JobStateError, RetryPolicy, Stage
 
 START = dt.datetime(2026, 10, 3, 12, tzinfo=dt.UTC)
@@ -174,7 +174,7 @@ def test_a_completed_job_is_done(queue: JobQueue, session: Session, clock: FakeC
     job_id = queue.enqueue(session, Stage.LAYOUT)
     queue.claim(session)
     clock.advance(dt.timedelta(seconds=30))
-    queue.complete(session, job_id)
+    queue.complete(session, job_id, 1.0)
 
     job = session.get_one(Job, job_id)
     assert job.status == JobStatus.DONE
@@ -185,7 +185,7 @@ def test_a_completed_job_is_done(queue: JobQueue, session: Session, clock: FakeC
 def _run(queue: JobQueue, session: Session, stage: Stage, item_id: int | None = None) -> int:
     job_id = queue.enqueue(session, stage, item_id)
     assert _claim_id(queue, session) == job_id
-    queue.complete(session, job_id)
+    queue.complete(session, job_id, 1.0)
     return job_id
 
 
@@ -213,7 +213,7 @@ def test_a_failed_job_waits_out_its_backoff_then_parks(
 
     for attempt, backoff_min in [(1, 1), (2, 2)]:
         assert _claim_id(queue, session) == job_id
-        assert queue.fail(session, job_id, _boom()) == JobStatus.ERROR
+        assert queue.fail(session, job_id, _boom(), 1.0) == JobStatus.ERROR
         job = session.get_one(Job, job_id)
         assert job.attempts == attempt
         assert job.last_error is not None
@@ -225,7 +225,7 @@ def test_a_failed_job_waits_out_its_backoff_then_parks(
         clock.advance(dt.timedelta(seconds=1))
 
     assert _claim_id(queue, session) == job_id
-    assert queue.fail(session, job_id, _boom()) == JobStatus.PARKED
+    assert queue.fail(session, job_id, _boom(), 1.0) == JobStatus.PARKED
     job = session.get_one(Job, job_id)
     assert job.attempts == 3
     assert job.last_error is not None
@@ -240,7 +240,7 @@ def test_a_waiting_job_does_not_hold_up_others(
     a, b = _items(session, 2)
     failing = queue.enqueue(session, Stage.SCAN, a)
     queue.claim(session)
-    queue.fail(session, failing, _boom())
+    queue.fail(session, failing, _boom(), 1.0)
     other = queue.enqueue(session, Stage.LLM_TAG, b)
 
     assert _claim_id(queue, session) == other
@@ -251,7 +251,7 @@ def test_a_parked_job_can_be_retried(queue: JobQueue, session: Session, clock: F
     job_id = queue.enqueue(session, Stage.FACES, item)
     for _ in range(3):
         queue.claim(session)
-        queue.fail(session, job_id, _boom())
+        queue.fail(session, job_id, _boom(), 1.0)
         clock.advance(dt.timedelta(hours=1))
 
     assert queue.retry(session, job_id) == job_id
@@ -270,7 +270,7 @@ def test_retrying_a_parked_job_that_was_queued_again_keeps_one_job(
     parked = queue.enqueue(session, Stage.FACES, item)
     for _ in range(3):
         queue.claim(session)
-        queue.fail(session, parked, _boom())
+        queue.fail(session, parked, _boom(), 1.0)
         clock.advance(dt.timedelta(hours=1))
     requeued = queue.enqueue(session, Stage.FACES, item)
 
@@ -285,16 +285,16 @@ def test_transitions_from_the_wrong_state_are_refused(
     job_id = queue.enqueue(session, Stage.LAYOUT)  # pending: not running, not parked
     with pytest.raises(JobStateError, match="is pending"):
         if action == "complete":
-            queue.complete(session, job_id)
+            queue.complete(session, job_id, 1.0)
         elif action == "fail":
-            queue.fail(session, job_id, _boom())
+            queue.fail(session, job_id, _boom(), 1.0)
         else:
             queue.retry(session, job_id)
 
 
 def test_unknown_jobs_are_refused(queue: JobQueue, session: Session) -> None:
     with pytest.raises(JobStateError, match="doesn't exist"):
-        queue.complete(session, 999)
+        queue.complete(session, 999, 1.0)
 
 
 def test_queued_jobs_survive_a_restart(migrated: Engine, clock: FakeClock) -> None:
@@ -307,3 +307,102 @@ def test_queued_jobs_survive_a_restart(migrated: Engine, clock: FakeClock) -> No
         job = JobQueue(clock=clock).claim(session)
         assert job is not None
         assert job.stage == Stage.LAYOUT
+
+
+def _stats(session: Session) -> list[tuple[dt.datetime, str, int, int, float]]:
+    rows = session.execute(
+        sa.select(
+            JobStats.hour_start_at,
+            JobStats.stage,
+            JobStats.processed,
+            JobStats.errors,
+            JobStats.busy_seconds,
+        ).order_by(JobStats.hour_start_at, JobStats.stage)
+    ).all()
+    return [tuple(row) for row in rows]  # pyright: ignore[reportReturnType]
+
+
+def test_runs_are_counted_in_the_hour_they_finish(
+    queue: JobQueue, session: Session, clock: FakeClock
+) -> None:
+    a, b, c = _items(session, 3)
+    for item, duration_s in [(a, 2.0), (b, 3.5)]:
+        queue.enqueue(session, Stage.CLIP, item)
+        job = queue.claim(session)
+        assert job is not None
+        queue.complete(session, job.id, duration_s)
+    failing = queue.enqueue(session, Stage.CLIP, c)
+    queue.claim(session)
+    clock.advance(dt.timedelta(minutes=59, seconds=59))  # still in the 12:00 hour
+    queue.fail(session, failing, _boom(), 0.5)
+    _run(queue, session, Stage.LAYOUT)
+    clock.advance(dt.timedelta(minutes=1))  # 13:00:59, after the backoff
+    queue.claim(session)
+    queue.fail(session, failing, _boom(), 0.25)
+
+    noon, one = START, START + dt.timedelta(hours=1)
+    assert _stats(session) == [
+        (noon, "clip", 2, 1, 6.0),
+        (noon, "layout", 1, 0, 1.0),
+        (one, "clip", 0, 1, 0.25),
+    ]
+
+
+def test_stats_are_written_in_the_same_transaction_as_the_status(
+    queue: JobQueue, session: Session
+) -> None:
+    job_id = queue.enqueue(session, Stage.LAYOUT)
+    queue.claim(session)
+    session.commit()
+
+    queue.complete(session, job_id, 1.0)
+    session.rollback()  # e.g. the process dies before the commit
+
+    assert session.get_one(Job, job_id).status == JobStatus.RUNNING
+    assert _stats(session) == []
+
+    queue.complete(session, job_id, 1.0)
+    session.commit()
+    assert session.get_one(Job, job_id).status == JobStatus.DONE
+    assert _stats(session) == [(START, "layout", 1, 0, 1.0)]
+
+
+def test_claim_can_be_limited_to_some_stages(queue: JobQueue, session: Session) -> None:
+    (item,) = _items(session, 1)
+    queue.enqueue(session, Stage.SCAN, item)
+    layout = queue.enqueue(session, Stage.LAYOUT)
+
+    assert _claim_id_for(queue, session, [Stage.LAYOUT, Stage.ATLASES]) == layout
+    assert queue.claim(session, stages=[Stage.LAYOUT]) is None
+    assert queue.claim(session, stages=[]) is None
+
+
+def _claim_id_for(queue: JobQueue, session: Session, stages: list[Stage]) -> int | None:
+    job = queue.claim(session, stages=stages)
+    return None if job is None else job.id
+
+
+def test_recover_puts_running_jobs_back_where_they_were(
+    queue: JobQueue, session: Session, clock: FakeClock
+) -> None:
+    a, b = _items(session, 2)
+    first = queue.enqueue(session, Stage.THUMBNAIL, a)
+    clock.advance(dt.timedelta(minutes=1))
+    second = queue.enqueue(session, Stage.THUMBNAIL, b)
+    queue.claim(session)
+    queue.claim(session)
+    session.commit()
+
+    assert queue.recover(session) == 2
+    session.commit()
+
+    for job_id in (first, second):
+        job = session.get_one(Job, job_id, populate_existing=True)
+        assert (job.status, job.attempts, job.started_at) == (JobStatus.PENDING, 0, None)
+    assert _claim_id(queue, session) == first  # its place in the queue is unchanged
+    assert queue.recover(session) == 1
+
+
+def test_noop_jobs_are_never_merged(queue: JobQueue, session: Session) -> None:
+    ids = {queue.enqueue(session, Stage.NOOP) for _ in range(3)}
+    assert len(ids) == 3
