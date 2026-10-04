@@ -127,6 +127,9 @@ name = "api and pipeline use only the public interface of files"
 type = "forbidden"
 source_modules = ["photo_triage.api", "photo_triage.pipeline"]
 forbidden_modules = ["photo_triage.files.**"]
+# Only direct imports count: importing `photo_triage.files` itself reaches its
+# submodules through its __init__, which is the public interface working as meant.
+allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "ml adapters don't depend on db or api"
