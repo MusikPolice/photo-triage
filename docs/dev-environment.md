@@ -89,7 +89,8 @@ photo-triage/
       worker/       job queue, scheduler, stage runners
       pipeline/     scan, thumbnails, clip, quality, faces, tagging, layout, dupes
       ml/           pluggable adapters (embedder, face detector, tagger) + fakes
-      files/        THE ONLY module allowed to mutate files: trash, restore, purge, exif writes
+      files/        THE ONLY module allowed to mutate files: trash, restore, purge, exif writes, log rotation
+      logs.py       logging setup shared by every process (§5 "Logging")
       db/           engine, models, migrations/ (Alembic), repositories
     tests/
       unit/  integration/  models/  safety/
@@ -131,6 +132,31 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 
 Worker-specific dev affordances: `WORKER_WINDOW` unset (always on), a `--once` flag to drain the queue and exit, and a controllable clock (`FAKE_NOW`) for exercising quiet-hours and ETA logic.
 
+### Logging
+
+Logs are for the operator finding out why something happened. The UI reads errors, progress and history from the database (plan §7), not from the logs. Every process calls `photo_triage.logs.configure(settings, process)` at startup, which sends one plain-text line per event to stderr and to `DATA_DIR/logs/<process>.log` (`api.log`, `worker.log`, `migrate.log`):
+
+```
+2026-10-03T22:14:05.123Z WARNING photo_triage.worker message
+```
+
+- **Timestamps are UTC with `Z`**, whatever the process's timezone, so they compare directly with the `*_at` columns. A traceback follows its line.
+- **`LOG_LEVEL`** (default `INFO`; `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, any case) sets the level for every process. Set it in `.env` or the environment and restart the process.
+- **Files** rotate at 10 MB and keep 5 old ones (`api.log.1` … `api.log.5`), so a process uses at most about 60 MB. Each process has its own file, because Python's rotating handler isn't safe with several writers. With `just api` (`--reload`), only the serving child process writes `api.log`; the reloader's few lines go to stderr. In Docker, the stderr copy is capped by Compose's log options.
+- **Libraries** (uvicorn, SQLAlchemy, Alembic) log through the same handlers, format and level. Uvicorn's access log and SQLAlchemy's SQL statements appear only at `DEBUG`.
+- **Unhandled errors in requests** are logged at `ERROR` with their traceback by `photo_triage.api.errors`, and the client gets a 500.
+
+Use these levels, so `INFO` stays readable through a first pass of hundreds of thousands of jobs:
+
+| Level | For |
+|---|---|
+| `DEBUG` | One line per job and per request; SQL statements. Off by default. |
+| `INFO` | Startup, with the settings (secrets are `SecretStr` fields, so they're masked); state changes such as pause/resume or a scan starting; batch jobs; periodic progress summaries. Never one line per item. |
+| `WARNING` | A failure that will be retried, e.g. a job going to `error` with a backoff. |
+| `ERROR` | A failure that needs a person: a job that's parked, or an unhandled error. Always with the traceback (`logger.exception`). |
+
+Get a logger with `logging.getLogger(__name__)` and pass values as arguments (`logger.info("scanned %d files", n)`), not f-strings. Alembic's CLI (`just db-reset`) keeps the logging set up in `alembic.ini`.
+
 ## 6. Testing strategy
 
 | Layer | Tooling | Approach |
@@ -157,6 +183,7 @@ File mutation is confined to `photo_triage.files`. These are enforced both stati
 - Ruff can't resolve method calls on `Path` objects or the arguments to `subprocess`, so `scripts/check_file_mutation.py` covers those by syntax, with the same scope: `.unlink()`, `.rename()`, `.rmdir()`, one-argument `.replace()` (`Path.replace`; `str.replace` takes two), and any string literal naming the `exiftool` executable. It runs in pre-commit and `just lint`.
 - `import-linter` contracts: `api` and `pipeline` may import `photo_triage.files` (its public interface) but none of its submodules; `ml` imports nothing from `db`/`api`.
 - Tests are exempt from both, since they build and tear down fixture copies in temp dirs.
+- Log rotation renames and deletes files, so the rotating handler (`RotatingLogHandler`) lives in `photo_triage.files` too. It refuses any log file outside `DATA_DIR/logs` (§5 "Logging").
 
 **Tests (`tests/safety/`, run on every PR):**
 - **Dry run is inert:** with `EXIF_WRITES_ENABLED=false`, run every pipeline and every UI action over a fixture copy; every file's bytes and mtime are identical afterwards.

@@ -368,6 +368,7 @@ Environment variables, documented in `.env.example`:
 | `TRASH_DIR` | *(required)* | Trash location, outside `PHOTO_DIR` |
 | `DATA_DIR` | `./data` | SQLite database and derived files (in Docker: `/data`, bind-mounted from a host folder) |
 | `APP_PORT` | `8000` | Host port for the web UI |
+| `LOG_LEVEL` | `INFO` | Lowest level logged by every process (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); logs go to stderr and `DATA_DIR/logs` |
 | `SCAN_SCHEDULE` | `0 2 * * *` | Cron schedule for incremental scans |
 | `WORKER_WINDOW` | *(unset = always)* | Quiet-hours window for heavy stages, e.g. `22:00-07:00` |
 | `WORKER_THREADS` | `4` | Threads for ONNX/BLAS inference |

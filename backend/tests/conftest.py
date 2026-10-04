@@ -1,14 +1,17 @@
 """Fixtures shared by every test tier."""
 
+import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from photo_triage.logs import LIBRARY_LOGGERS, PER_REQUEST_LOGGERS
 from photo_triage.settings import Settings
 
 # Every variable Settings reads. Cleared for each test so the developer's
 # environment can't leak in.
-SETTINGS_ENV = ["PHOTO_DIR", "TRASH_DIR", "DATA_DIR", "APP_PORT", "AUTH_MODE"]
+SETTINGS_ENV = ["PHOTO_DIR", "TRASH_DIR", "DATA_DIR", "APP_PORT", "LOG_LEVEL", "AUTH_MODE"]
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +20,22 @@ def isolated_settings_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     for name in SETTINGS_ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def restore_logging() -> Iterator[None]:
+    """Undo `photo_triage.logs.configure`, closing the handlers it opened."""
+    names = [*LIBRARY_LOGGERS, *PER_REQUEST_LOGGERS]
+    loggers = [logging.getLogger(), *map(logging.getLogger, names)]
+    saved = [(lg, lg.level, list(lg.handlers), lg.propagate) for lg in loggers]
+    yield
+    for lg, level, handlers, propagate in saved:
+        for handler in lg.handlers:
+            if handler not in handlers:
+                handler.close()
+        lg.setLevel(level)
+        lg.handlers = handlers
+        lg.propagate = propagate
 
 
 @pytest.fixture
