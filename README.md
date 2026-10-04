@@ -218,4 +218,5 @@ See [docs/dev-environment.md](docs/dev-environment.md) for the full testing stra
 - **`/mnt/pictures` is empty after a reboot:** the share wasn't reachable when WSL started. Run `sudo mount /mnt/pictures`.
 - **`mount error(13): Permission denied`:** check `/etc/smb-pictures.cred`. Some NAS setups also need `vers=3.0` added to the fstab options.
 - **`docker: command not found` in WSL:** enable WSL integration for Ubuntu-24.04 in Docker Desktop, then restart the terminal.
+- **Finding out why something failed:** each process logs to stderr and to `DATA_DIR/logs/<process>.log` (`./data/logs/api.log` in dev). Set `LOG_LEVEL=DEBUG` in `.env` for a line per request and per job. See dev-environment §5, "Logging".
 - **Slow installs or tests:** make sure the repo is under `~/src`, not `/mnt/c/...`.
