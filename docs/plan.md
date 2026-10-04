@@ -278,7 +278,7 @@ The initial processing of a large library will take **weeks** (LLM tagging possi
 
 **Library coverage summary.** "What can I do yet?" in plain terms: e.g. "Map & search: 100% · Faces detected: 64% · Tagged: 8% · Duplicates reviewed: 12 of 140 groups".
 
-**History.** A daily chart of items processed per stage (so you can see whether overnight runs happened and how fast they went), stored in a small `job_stats` table.
+**History.** A daily chart of items processed per stage (so you can see whether overnight runs happened and how fast they went), stored in a small `job_stats` table. It holds one row per stage per UTC hour, and the browser groups the hours into the viewer's local days, so an overnight run isn't split at UTC midnight and the server needs no timezone setting.
 
 **Errors.** A browsable list of failed items with the error, retry button, and "ignore" option (e.g. corrupt files).
 
@@ -341,8 +341,8 @@ jobs                               -- error: retries after retry_at; parked: gav
   id, item_id (nullable), stage, priority, status (pending | running | done | error | parked),
   attempts, last_error, enqueued_at, retry_at, started_at, finished_at
 
-job_stats                          -- for history charts / throughput
-  date, stage, processed, errors, busy_seconds
+job_stats                          -- one row per stage per UTC hour; history, throughput, ETA
+  hour_start_at, stage, processed, errors, busy_seconds
 
 metadata_writes                    -- write queue + log
   id, item_id, fields (json), before (json), after (json),

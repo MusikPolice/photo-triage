@@ -13,7 +13,8 @@ from photo_triage import logs
 from photo_triage.api.app import create_app
 from photo_triage.settings import SettingsError, load_settings
 
-logger = logging.getLogger(__name__)
+# Named, since `__name__` is "__main__" when run with `python -m`.
+logger = logging.getLogger("photo_triage.api")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

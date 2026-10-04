@@ -7,7 +7,7 @@ in `.env.example` and gets a field when its feature lands.
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, ValidationError
+from pydantic import AwareDatetime, BeforeValidator, Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -43,9 +43,22 @@ class Settings(BaseSettings):
     auth_mode: Literal["none"] = "none"
     """How `current_actor` identifies people. `forward_auth` arrives in Phase 8."""
 
+    worker_threads: Annotated[int, Field(gt=0)] = 4
+    """Threads for ONNX and BLAS inference in the worker."""
+
+    # Development only (dev-environment §5), so not in plan §9 or `.env.example`.
+
+    worker_noop_stage: bool = False
+    """Enables the `noop` stage, for exercising the worker by hand."""
+
+    fake_now: AwareDatetime | None = None
+    """Starts the worker's clock at this time (with a UTC offset, e.g.
+    `2026-10-03T21:59:00Z`), from where it advances in real time."""
+
     def summary(self) -> str:
         """Every setting as `NAME=value`, for the startup log line. Secrets must be
-        `SecretStr` fields, which show as asterisks."""
+        `SecretStr` fields, which show as asterisks. `test_settings.py` makes each new
+        setting say whether it's secret."""
         return " ".join(f"{name.upper()}={value}" for name, value in self.model_dump().items())
 
 

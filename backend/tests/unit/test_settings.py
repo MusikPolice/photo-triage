@@ -1,10 +1,29 @@
 """Settings come from the environment and `.env`, and fail fast (plan §9)."""
 
+import datetime as dt
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 
 from photo_triage.settings import Settings, SettingsError, load_settings
+
+# Every setting, by whether its value may be written to the logs. The API and the
+# worker log every setting at startup (`Settings.summary`), and only `SecretStr`
+# values are masked. A new setting fails `test_every_setting_is_public_or_secret`
+# until it's added to one of these.
+PUBLIC_SETTINGS = {
+    "photo_dir",
+    "trash_dir",
+    "data_dir",
+    "app_port",
+    "log_level",
+    "auth_mode",
+    "worker_threads",
+    "worker_noop_stage",
+    "fake_now",
+}
+SECRET_SETTINGS: set[str] = set()  # tokens, passwords, URLs that may embed either
 
 
 def test_loads_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,6 +66,9 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.app_port == 8000
     assert settings.auth_mode == "none"
     assert settings.log_level == "INFO"
+    assert settings.worker_threads == 4
+    assert settings.worker_noop_stage is False
+    assert settings.fake_now is None
 
 
 @pytest.mark.parametrize("value", ["debug", "Warning", "ERROR"])
@@ -109,3 +131,39 @@ def test_unsupported_auth_mode_is_rejected(monkeypatch: pytest.MonkeyPatch) -> N
 def test_settings_are_immutable(settings: Settings) -> None:
     with pytest.raises(ValueError, match="frozen"):
         settings.app_port = 1  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_every_setting_is_public_or_secret() -> None:
+    fields = Settings.model_fields
+    unclassified = fields.keys() - PUBLIC_SETTINGS - SECRET_SETTINGS
+    assert not unclassified, (
+        f"classify {sorted(unclassified)} in PUBLIC_SETTINGS or SECRET_SETTINGS in {__file__}: "
+        "every setting is logged at startup, and only SecretStr values are masked"
+    )
+    for name in SECRET_SETTINGS:
+        assert fields[name].annotation in (SecretStr, SecretStr | None), (
+            f"{name} is secret, so it must be a SecretStr"
+        )
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "four"])
+def test_worker_threads_must_be_a_positive_number(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("WORKER_THREADS", value)
+
+    with pytest.raises(SettingsError, match="WORKER_THREADS"):
+        load_settings()
+
+
+def test_fake_now_needs_a_utc_offset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("FAKE_NOW", "2030-01-01T22:00:00Z")
+    assert load_settings().fake_now == dt.datetime(2030, 1, 1, 22, tzinfo=dt.UTC)
+
+    monkeypatch.setenv("FAKE_NOW", "2030-01-01T22:00:00")
+    with pytest.raises(SettingsError, match="FAKE_NOW"):
+        load_settings()
