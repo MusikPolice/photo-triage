@@ -4,20 +4,29 @@ There's a single worker. Each job takes three short transactions: the claim is
 committed before the job runs, and the result straight after, so the API and the
 scanner can write to the database while a job runs. If the process dies mid-run, the
 job stays `running` until `recover` puts it back at the next start.
+
+Before each claim the worker checks whether it's paused (`controls`) or in quiet
+hours, so a job that's running when either starts is finished first.
 """
 
+import datetime as dt
 import logging
 import threading
 import time
 from collections import Counter
 from collections.abc import Mapping
+from dataclasses import dataclass, field
+from enum import StrEnum
+from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from photo_triage.db.models import JOB_IS_OPEN, Job, JobStatus
-from photo_triage.worker.clock import Timer
+from photo_triage.quiet_hours import UTC_ZONE, QuietHours
+from photo_triage.worker import controls
+from photo_triage.worker.clock import Clock, Timer, utc_now
 from photo_triage.worker.queue import JobQueue
 from photo_triage.worker.stages import Runner
 
@@ -30,6 +39,41 @@ IDLE_POLL_S = 2.0
 """How long the worker waits before looking again when there's nothing to run."""
 
 
+class WorkerStatus(StrEnum):
+    RUNNING = "running"
+    """Claiming jobs, or waiting for one. Some stages may be paused."""
+    PAUSED = "paused"
+    """Paused globally."""
+    QUIET = "quiet"
+    """In quiet hours, until `WorkerState.quiet_until_at`."""
+
+
+@dataclass(frozen=True)
+class WorkerState:
+    """Why the worker is or isn't claiming jobs, for the Activity page (plan §7)."""
+
+    status: WorkerStatus = WorkerStatus.RUNNING
+    quiet_until_at: dt.datetime | None = None
+    paused_stages: frozenset[str] = field(default_factory=frozenset[str])
+
+    def describe(self, zone: ZoneInfo) -> str:
+        match self.status:
+            case WorkerStatus.PAUSED:
+                text = "Worker paused"
+            case WorkerStatus.QUIET:
+                assert self.quiet_until_at is not None
+                local = self.quiet_until_at.astimezone(zone)
+                text = (
+                    f"Quiet hours until {local:%a %H:%M %Z} "
+                    f"({self.quiet_until_at:%Y-%m-%dT%H:%M:%SZ})"
+                )
+            case WorkerStatus.RUNNING:
+                text = "Worker running"
+        if self.paused_stages:
+            text += f"; paused stages: {', '.join(sorted(self.paused_stages))}"
+        return text
+
+
 class Worker:
     def __init__(
         self,
@@ -37,14 +81,27 @@ class Worker:
         runners: Mapping[str, Runner],
         *,
         queue: JobQueue | None = None,
+        clock: Clock = utc_now,
         timer: Timer = time.monotonic,
+        quiet_hours: QuietHours | None = None,
+        zone: ZoneInfo = UTC_ZONE,
         summary_interval_s: float = SUMMARY_INTERVAL_S,
     ) -> None:
+        """`clock` should be the queue's clock. `zone` is the one quiet hours are in."""
         self._sessions = sessionmaker(engine, expire_on_commit=False)
         self._runners = dict(runners)
-        self._queue = queue or JobQueue()
+        self._queue = queue or JobQueue(clock)
+        self._clock = clock
         self._timer = timer
+        self._quiet_hours = quiet_hours
+        self._zone = zone
+        self._state = WorkerState()
         self._progress = _Progress(timer, summary_interval_s)
+
+    @property
+    def state(self) -> WorkerState:
+        """As of the last attempt to claim a job."""
+        return self._state
 
     def recover(self) -> int:
         """Count jobs left running when the worker last stopped as failed attempts,
@@ -71,9 +128,16 @@ class Worker:
 
     def run_one(self) -> bool:
         """Claim the next job for a stage this worker runs, run it, and record the
-        result. Returns False if there was nothing to run."""
+        result. Returns False if there was nothing to run, or the worker is paused or
+        in quiet hours."""
         with self._sessions.begin() as session:
-            job = self._queue.claim(session, stages=list(self._runners))
+            paused = controls.paused_scopes(session)
+            state = self._state_now(paused)
+            job = None
+            if state.status == WorkerStatus.RUNNING:
+                stages = [stage for stage in self._runners if stage not in paused]
+                job = self._queue.claim(session, stages=stages)
+        self._set_state(state)
         if job is None:
             return False
 
@@ -110,6 +174,21 @@ class Worker:
                 self._summarize_if_due()
                 stop.wait(idle_poll_s)
         self._summarize()
+
+    def _state_now(self, paused: set[str]) -> WorkerState:
+        paused_stages = frozenset(paused - {controls.GLOBAL})
+        if controls.GLOBAL in paused:
+            return WorkerState(WorkerStatus.PAUSED, paused_stages=paused_stages)
+        if self._quiet_hours is not None:
+            until = self._quiet_hours.quiet_until(self._clock(), self._zone)
+            if until is not None:
+                return WorkerState(WorkerStatus.QUIET, until, paused_stages)
+        return WorkerState(paused_stages=paused_stages)
+
+    def _set_state(self, state: WorkerState) -> None:
+        if state != self._state:
+            logger.info("%s", state.describe(self._zone))
+            self._state = state
 
     def _record_failure(self, job: Job, exc: Exception, duration_s: float) -> None:
         with self._sessions.begin() as session:

@@ -2,6 +2,7 @@
 
 import datetime as dt
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import SecretStr
@@ -20,6 +21,8 @@ PUBLIC_SETTINGS = {
     "log_level",
     "auth_mode",
     "worker_threads",
+    "worker_quiet_hours",
+    "tz",
     "worker_noop_stage",
     "fake_now",
 }
@@ -67,6 +70,8 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.auth_mode == "none"
     assert settings.log_level == "INFO"
     assert settings.worker_threads == 4
+    assert settings.worker_quiet_hours is None
+    assert settings.tz == ZoneInfo("UTC")
     assert settings.worker_noop_stage is False
     assert settings.fake_now is None
 
@@ -166,4 +171,47 @@ def test_fake_now_needs_a_utc_offset(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("FAKE_NOW", "2030-01-01T22:00:00")
     with pytest.raises(SettingsError, match="FAKE_NOW"):
+        load_settings()
+
+
+def test_quiet_hours_and_timezone_are_read_and_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("WORKER_QUIET_HOURS", "Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00")
+    monkeypatch.setenv("TZ", "America/Toronto")
+
+    settings = load_settings()
+
+    assert settings.worker_quiet_hours is not None
+    assert len(settings.worker_quiet_hours.periods) == 7
+    assert settings.tz == ZoneInfo("America/Toronto")
+    assert "WORKER_QUIET_HOURS=Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00 " in settings.summary()
+    assert "TZ=America/Toronto " in settings.summary()
+
+
+def test_empty_quiet_hours_means_always_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("WORKER_QUIET_HOURS", " ")
+
+    assert load_settings().worker_quiet_hours is None
+
+
+def test_malformed_quiet_hours_are_rejected_with_the_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("WORKER_QUIET_HOURS", "Mon-Fri 5pm-11pm")
+
+    with pytest.raises(SettingsError, match=r'WORKER_QUIET_HOURS: .*"Mon-Fri 5pm-11pm" isn\'t'):
+        load_settings()
+
+
+def test_unknown_timezone_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("TZ", "Eastern")
+
+    with pytest.raises(SettingsError, match="TZ"):
         load_settings()

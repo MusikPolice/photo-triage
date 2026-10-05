@@ -18,11 +18,12 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from photo_triage.db.engine import open_database
-from photo_triage.db.models import Item, Job, JobStats, JobStatus, MediaType
+from photo_triage.db.models import Item, Job, JobStats, JobStatus, MediaType, WorkerControl
+from photo_triage.quiet_hours import parse
 from photo_triage.settings import Settings
-from photo_triage.worker import stages
+from photo_triage.worker import controls, stages
 from photo_triage.worker.__main__ import THREAD_ENV_VARS, main
-from photo_triage.worker.loop import Worker
+from photo_triage.worker.loop import Worker, WorkerState, WorkerStatus
 from photo_triage.worker.queue import JobQueue, RetryPolicy, Stage
 
 START = dt.datetime(2026, 10, 3, 12, tzinfo=dt.UTC)
@@ -195,7 +196,7 @@ KILLED_WORKER = """
 import sys, time
 from pathlib import Path
 from photo_triage.db.engine import open_database
-from photo_triage.worker.loop import Worker
+from photo_triage.worker.loop import Worker, WorkerState, WorkerStatus
 
 def hang(job):
     Path(sys.argv[2]).touch()
@@ -557,3 +558,144 @@ def test_a_job_that_keeps_killing_the_worker_is_parked_with_an_error(
             "interrupted when the worker stopped",
         )
     ]
+
+
+def _pause(engine: Engine, scope: str) -> None:
+    with Session(engine) as session, session.begin():
+        controls.pause(session, scope, "anonymous", START)
+
+
+def _resume(engine: Engine, scope: str) -> None:
+    with Session(engine) as session, session.begin():
+        controls.resume(session, scope, "anonymous", START)
+
+
+def test_pausing_a_stage_stops_its_jobs_being_claimed_and_the_running_one_finishes(
+    migrated: Engine, queue: JobQueue, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    a, b = _items(migrated, 2)
+    clip_a, clip_b, layout = _enqueue(
+        migrated, (Stage.CLIP, a), (Stage.CLIP, b), (Stage.LAYOUT, None)
+    )
+    ran: list[int] = []
+
+    def pause_clip_mid_job(job: Job) -> None:
+        ran.append(job.id)
+        if job.id == clip_a:
+            _pause(migrated, Stage.CLIP)
+
+    worker = Worker(migrated, dict.fromkeys(Stage, pause_clip_mid_job), queue=queue)
+
+    assert worker.drain() == 2
+    assert ran == [clip_a, layout]
+    assert _statuses(migrated) == {
+        clip_a: JobStatus.DONE,
+        clip_b: JobStatus.PENDING,
+        layout: JobStatus.DONE,
+    }
+    assert worker.state == WorkerState(paused_stages=frozenset({"clip"}))
+    assert "Worker running; paused stages: clip" in caplog.messages
+
+    _resume(migrated, Stage.CLIP)
+    assert worker.drain() == 1
+    assert _statuses(migrated)[clip_b] == JobStatus.DONE
+    assert worker.state == WorkerState()
+
+
+def test_a_global_pause_stops_all_claiming_and_the_running_job_finishes(
+    migrated: Engine, queue: JobQueue, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    first, second = _enqueue(migrated, (Stage.SCAN, None), (Stage.LAYOUT, None))
+
+    def pause_mid_job(job: Job) -> None:
+        _pause(migrated, controls.GLOBAL)
+
+    worker = Worker(migrated, dict.fromkeys(Stage, pause_mid_job), queue=queue)
+
+    assert worker.drain() == 1
+    assert _statuses(migrated) == {first: JobStatus.DONE, second: JobStatus.PENDING}
+    assert worker.state.status == WorkerStatus.PAUSED
+    assert "Worker paused" in caplog.messages
+
+
+def test_a_pause_survives_a_worker_restart(migrated: Engine, worker_env: Settings) -> None:
+    clip, layout = _enqueue(migrated, (Stage.CLIP, None), (Stage.LAYOUT, None))
+    _pause(migrated, controls.GLOBAL)
+    _pause(migrated, Stage.CLIP)
+    recorder = Recorder()
+
+    assert main(["--once"], runners=dict.fromkeys(Stage, recorder)) == 0
+    assert recorder.ran == []
+
+    _resume(migrated, controls.GLOBAL)
+    assert main(["--once"], runners=dict.fromkeys(Stage, recorder)) == 0
+    assert recorder.ran == [(Stage.LAYOUT, None)]
+    assert _statuses(migrated) == {clip: JobStatus.PENDING, layout: JobStatus.DONE}
+    log = (worker_env.data_dir / "logs/worker.log").read_text()
+    assert "INFO photo_triage.worker.loop Worker paused; paused stages: clip" in log
+
+
+def test_controls_keep_who_changed_them_and_when(migrated: Engine) -> None:
+    later = START + dt.timedelta(hours=1)
+    with Session(migrated) as session, session.begin():
+        controls.pause(session, Stage.CLIP, "alice", START)
+        controls.resume(session, Stage.CLIP, "bob", later)
+        controls.pause(session, controls.GLOBAL, "alice", later)
+        assert controls.paused_scopes(session) == {controls.GLOBAL}
+
+    with Session(migrated) as session:
+        clip = session.get_one(WorkerControl, "clip")
+        assert (clip.paused, clip.actor, clip.changed_at) == (False, "bob", later)
+
+
+def test_only_global_or_a_stage_can_be_paused(migrated: Engine) -> None:
+    with Session(migrated) as session, pytest.raises(ValueError, match="neither"):
+        controls.pause(session, "everything", "alice", START)
+
+
+def test_no_job_is_claimed_during_quiet_hours_and_a_running_job_finishes(
+    migrated: Engine, queue: JobQueue, clock: FakeClock, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    first, second = _enqueue(migrated, (Stage.LAYOUT, None), (Stage.SCAN, None))
+
+    def run_into_quiet_hours(job: Job) -> None:
+        clock.advance(dt.timedelta(minutes=40))  # START is Saturday 12:00 UTC
+
+    worker = Worker(
+        migrated,
+        dict.fromkeys(Stage, run_into_quiet_hours),
+        queue=queue,
+        clock=clock,
+        quiet_hours=parse("Sat 12:30-14:00"),
+    )
+
+    assert worker.drain() == 1
+    assert _statuses(migrated) == {first: JobStatus.PENDING, second: JobStatus.DONE}
+    until = dt.datetime(2026, 10, 3, 14, tzinfo=dt.UTC)
+    assert worker.state == WorkerState(WorkerStatus.QUIET, until)
+    assert "Quiet hours until Sat 14:00 UTC (2026-10-03T14:00:00Z)" in caplog.messages
+
+    clock.now = until
+    assert worker.drain() == 1
+    assert _statuses(migrated)[first] == JobStatus.DONE
+    assert worker.state == WorkerState()
+    assert "Worker running" in caplog.messages
+
+
+def test_quiet_hours_are_read_in_tz(
+    migrated: Engine, worker_env: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _enqueue(migrated, (Stage.LAYOUT, None))
+    monkeypatch.setenv("FAKE_NOW", "2026-10-05T18:00:00-04:00")  # a Monday
+    monkeypatch.setenv("TZ", "America/Toronto")
+    monkeypatch.setenv("WORKER_QUIET_HOURS", "Mon-Fri 17:00-23:00")
+    recorder = Recorder()
+
+    assert main(["--once"], runners={Stage.LAYOUT: recorder}) == 0
+
+    assert recorder.ran == []
+    log = (worker_env.data_dir / "logs/worker.log").read_text()
+    assert "Quiet hours until Mon 23:00 EDT (2026-10-06T03:00:00Z)" in log

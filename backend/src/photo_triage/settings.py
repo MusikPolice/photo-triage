@@ -6,15 +6,38 @@ in `.env.example` and gets a field when its feature lands.
 
 from pathlib import Path
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo
 
-from pydantic import AwareDatetime, BeforeValidator, Field, ValidationError
+from pydantic import (
+    AwareDatetime,
+    BeforeValidator,
+    Field,
+    PlainSerializer,
+    PlainValidator,
+    ValidationError,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from photo_triage import quiet_hours
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
 def _upper(value: object) -> object:
     return value.upper() if isinstance(value, str) else value
+
+
+def _quiet_hours(value: object) -> quiet_hours.QuietHours | None:
+    if value is None or isinstance(value, quiet_hours.QuietHours):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("expected text")
+    return quiet_hours.parse(value) if value.strip() else None
+
+
+QuietHoursSetting = Annotated[
+    quiet_hours.QuietHours | None, PlainValidator(_quiet_hours), PlainSerializer(str)
+]
 
 
 class Settings(BaseSettings):
@@ -45,6 +68,14 @@ class Settings(BaseSettings):
 
     worker_threads: Annotated[int, Field(gt=0)] = 4
     """Threads for ONNX and BLAS inference in the worker."""
+
+    worker_quiet_hours: QuietHoursSetting = None
+    """When the whole worker stays idle, in `tz` (see `photo_triage.quiet_hours`).
+    Unset or empty means it always runs."""
+
+    tz: ZoneInfo = quiet_hours.UTC_ZONE
+    """The household's timezone, an IANA name such as `America/Toronto`. Only quiet
+    hours use it: timestamps and logs are UTC."""
 
     # Development only (dev-environment §5), so not in plan §9 or `.env.example`.
 
