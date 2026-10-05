@@ -168,3 +168,20 @@ class JobStats(Base):
     """Failed runs, including those that will be retried."""
     busy_seconds: Mapped[float] = mapped_column(default=0.0)
     """Time spent running, successful or not, measured with a monotonic timer."""
+
+
+class WorkerControl(Base):
+    """A pause or resume of the worker, globally or for one stage (plan §6.11).
+
+    One row per scope, holding the latest change. No row means not paused.
+    `photo_triage.worker.controls` reads and writes it.
+    """
+
+    __tablename__ = "worker_controls"
+
+    scope: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
+    """`global`, or a stage name."""
+    paused: Mapped[bool]
+    actor: Mapped[str] = mapped_column(sa.String(255))
+    """Who paused or resumed it (plan §10)."""
+    changed_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
