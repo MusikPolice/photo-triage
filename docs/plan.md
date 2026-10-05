@@ -257,7 +257,7 @@ metadata writes (high priority, small)
 - **Priority order:** metadata writes > scan > thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
 - **Resource limits:** CPU/memory caps via Compose (`cpus:`, `mem_limit:`); `WORKER_THREADS` for ONNX/BLAS. The worker sets the OpenMP, BLAS and numba thread variables from it at startup, but ONNX Runtime ignores those: every ONNX Runtime session must be created with `intra_op_num_threads=WORKER_THREADS`.
 - **Quiet hours:** optional `WORKER_QUIET_HOURS` lists the times when the household is using the host, in its local time (`TZ`), e.g. `Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00`. Each period names the days it starts on, and one whose end is at or before its start ends the next day. The whole worker stays idle during them, and a job already running finishes. Unset means it always runs.
-- **Pause / resume** from the UI, globally or per stage. A pause is stored in `worker_controls`, so it survives a restart, and a job already running finishes.
+- **Pause / resume** from the UI or the command line, globally or per stage. A pause is stored in `worker_controls`, so it survives a restart, and a job already running finishes.
 - **Resumable:** job state is durable; the worker picks up where it left off after restart. Failed jobs retry with backoff, then park in an error list. A run cut short by the worker dying counts as a failed attempt, so a job that keeps killing the worker (e.g. running it out of memory) ends up parked rather than retried forever.
 
 ---
@@ -266,9 +266,9 @@ metadata writes (high priority, small)
 
 The initial processing of a large library will take **weeks** (LLM tagging possibly months). Progress must be visible at a glance and in detail.
 
-**Global status indicator.** A compact indicator in the app header, visible from every view: overall "library readiness" and whether the worker is running, paused, or waiting for quiet hours to end ("Quiet until 02:00"). Tapping it opens the Activity page.
+**Global status indicator.** A compact indicator in the app header, visible from every view: overall "library readiness" and whether the worker is running, paused, waiting for quiet hours to end ("Quiet until 02:00"), or stopped (the worker process isn't running, from a heartbeat it writes every few seconds). Tapping it opens the Activity page.
 
-**Activity page.** One row per pipeline stage (scan, thumbnails, CLIP, quality, faces, recognition, LLM tagging, metadata writes, batch jobs):
+**Activity page.** One row per pipeline stage (scan, thumbnails, CLIP, quality, faces, recognition, LLM tagging, metadata writes, and each batch job: layout re-fit, duplicate grouping, atlases):
 
 - done / total, with a progress bar, and counts of pending, in-progress, errored, skipped
 - **throughput** (rolling average, items/min) and **ETA** — computed against the hours outside quiet hours, not wall-clock (e.g. "~23 nights remaining" rather than a misleading "~8 days")
@@ -346,6 +346,9 @@ job_stats                          -- one row per stage per UTC hour; history, t
 
 worker_controls                    -- latest pause/resume per scope; no row = not paused
   scope (global | <stage>), paused, actor, changed_at
+
+worker_heartbeat                   -- single row; stale seen_at = worker not running
+  id, started_at, seen_at, stopped_at
 
 metadata_writes                    -- write queue + log
   id, item_id, fields (json), before (json), after (json),
