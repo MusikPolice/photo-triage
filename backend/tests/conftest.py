@@ -11,7 +11,7 @@ from photo_triage.settings import Settings
 
 # Every variable Settings reads. Cleared for each test so the developer's
 # environment can't leak in.
-SETTINGS_ENV = ["PHOTO_DIR", "TRASH_DIR", "DATA_DIR", "APP_PORT", "LOG_LEVEL", "AUTH_MODE"]
+SETTINGS_ENV = [name.upper() for name in Settings.model_fields]
 
 
 @pytest.fixture(autouse=True)

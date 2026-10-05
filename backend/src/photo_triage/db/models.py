@@ -152,12 +152,19 @@ class Job(Base):
 
 
 class JobStats(Base):
-    """Work done per stage per day, for throughput and history charts (plan §7)."""
+    """Work done per stage per hour, for throughput, ETA and history (plan §7).
+
+    Hours are UTC. The browser groups them into the viewer's local days or nights.
+    A run counts in the hour it finished.
+    """
 
     __tablename__ = "job_stats"
 
-    date: Mapped[dt.date] = mapped_column(primary_key=True)
+    hour_start_at: Mapped[dt.datetime] = mapped_column(UTCDateTime, primary_key=True)
     stage: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
     processed: Mapped[int] = mapped_column(default=0)
+    """Successful runs."""
     errors: Mapped[int] = mapped_column(default=0)
+    """Failed runs, including those that will be retried."""
     busy_seconds: Mapped[float] = mapped_column(default=0.0)
+    """Time spent running, successful or not, measured with a monotonic timer."""

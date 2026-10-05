@@ -123,14 +123,21 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 | `just api` | The API alone: `python -m photo_triage.api --reload`, on `APP_PORT`, from the repo root so `.env` and `./data` resolve there. Exits with a list of what's wrong if `PHOTO_DIR` or `TRASH_DIR` is missing. API docs at `/api/docs`. |
 | `just web` | The Vite dev server for `frontend/`, with hot reload. It proxies `/api` to the API on `APP_PORT`, which it reads like the backend does: the environment first, then the repo-root `.env`, then 8000. Run `just api` alongside. Extra arguments go to Vite, e.g. `just web --host` to reach it from another device. |
 | `just web-sync` / `just web-fmt` / `just web-check` | Install the frontend dependencies as locked; format and auto-fix lint; run svelte-check, eslint, prettier, Vitest and `vite build` (part of `just check`). |
-| `just worker` | The worker alone |
+| `just worker` | The worker alone: `python -m photo_triage.worker`, from the repo root like `just api`. At startup it counts any job left `running` when it last stopped as a failed attempt: the job goes back to its place in the queue, or is parked after 5 attempts. Then it runs jobs in priority order until SIGINT or SIGTERM, finishing the job in progress first (a second signal stops at once). `just worker --once` runs every ready job and exits; jobs waiting out a retry backoff are left for later. Stages without a runner (all of them until Phase 2) stay in the queue. |
 | `just stack` | Full production-like Compose stack (built image) against tier-1 fixtures |
 | `just dry-run-full` | Stack against `/mnt/pictures` (read-only), writes disabled — for scale testing |
 | `just db-reset` | Drop and re-migrate the dev database in `DATA_DIR`: Alembic downgrade to empty, then upgrade to head. For other Alembic commands, run `uv run --project backend alembic -c backend/alembic.ini …` from the repo root. A new migration starts from `revision --autogenerate`; read it before committing, since the tests fail if models and migrations disagree. |
 | `just fixtures` | Regenerate tier-1 synthetic fixtures |
 | `just doctor` | `scripts/bootstrap.sh --check` (tool versions, lockfile sync, model weights, Docker, mounts read-only), plus `PHOTO_DIR` isn't writable when it points at `/mnt/pictures` (§2) |
 
-Worker-specific dev affordances: `WORKER_WINDOW` unset (always on), a `--once` flag to drain the queue and exit, and a controllable clock (`FAKE_NOW`) for exercising quiet-hours and ETA logic.
+Worker-specific dev affordances, read from `.env` or the environment like the settings in plan §9 but not listed there:
+
+- `WORKER_WINDOW` unset (always on).
+- `--once` to drain the queue and exit.
+- **`FAKE_NOW`**, a controllable clock for exercising quiet hours and ETA logic. It needs a UTC offset (`FAKE_NOW=2026-10-03T21:59:00-04:00`). The worker's clock starts there and advances in real time. It sets `*_at` columns and backoff; durations in `job_stats` always come from a real monotonic timer.
+- **The `noop` stage**, off unless `WORKER_NOOP_STAGE=true`. `just worker noop 500` queues 500 jobs that each take 0.2 s, to watch the worker (and later the Activity page) at work. It logs to stderr only, since a running worker owns `worker.log`.
+
+`WORKER_THREADS` sets `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS` and `NUMBA_NUM_THREADS` when the worker starts, before any ML library loads.
 
 ### Logging
 
@@ -143,7 +150,7 @@ Logs are for the operator finding out why something happened. The UI reads error
 - **Timestamps are UTC with `Z`**, whatever the process's timezone, so they compare directly with the `*_at` columns. A traceback follows its line.
 - **`LOG_LEVEL`** (default `INFO`; `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`, any case) sets the level for every process. Set it in `.env` or the environment and restart the process.
 - **Files** rotate at 10 MB and keep 5 old ones (`api.log.1` … `api.log.5`), so a process uses at most about 60 MB. Each process has its own file, because Python's rotating handler isn't safe with several writers. With `just api` (`--reload`), only the serving child process writes `api.log`; the reloader's few lines go to stderr. In Docker, the stderr copy is capped by Compose's log options.
-- **Libraries** (uvicorn, SQLAlchemy, Alembic) log through the same handlers, format and level. Uvicorn's access log and SQLAlchemy's SQL statements appear only at `DEBUG`.
+- **Libraries** (uvicorn, SQLAlchemy, Alembic) log through the same handlers, format and level. Uvicorn's access log and SQLAlchemy's SQL statements appear only at `DEBUG`. SQLAlchemy's other loggers, such as the ORM's setup lines, are held at `WARNING`.
 - **Unhandled errors in requests** are logged at `ERROR` with their traceback by `photo_triage.api.errors`, and the client gets a 500.
 
 Use these levels, so `INFO` stays readable through a first pass of hundreds of thousands of jobs:
@@ -151,11 +158,11 @@ Use these levels, so `INFO` stays readable through a first pass of hundreds of t
 | Level | For |
 |---|---|
 | `DEBUG` | One line per job and per request; SQL statements. Off by default. |
-| `INFO` | Startup, with the settings (secrets are `SecretStr` fields, so they're masked); state changes such as pause/resume or a scan starting; batch jobs; periodic progress summaries. Never one line per item. |
+| `INFO` | Startup, with the settings (secrets are `SecretStr` fields, so they're masked; `test_every_setting_is_public_or_secret` makes each new setting declare which it is); state changes such as pause/resume or a scan starting; batch jobs; periodic progress summaries. Never one line per item. |
 | `WARNING` | A failure that will be retried, e.g. a job going to `error` with a backoff. |
 | `ERROR` | A failure that needs a person: a job that's parked, or an unhandled error. Always with the traceback (`logger.exception`). |
 
-Get a logger with `logging.getLogger(__name__)` and pass values as arguments (`logger.info("scanned %d files", n)`), not f-strings. Alembic's CLI (`just db-reset`) keeps the logging set up in `alembic.ini`.
+Get a logger with `logging.getLogger(__name__)` (in a `__main__` module, name it, since `__name__` is `"__main__"` there) and pass values as arguments (`logger.info("scanned %d files", n)`), not f-strings. Alembic's CLI (`just db-reset`) keeps the logging set up in `alembic.ini`.
 
 ## 6. Testing strategy
 
@@ -256,7 +263,7 @@ Changes that aren't part of a phase, such as docs or tooling, still go through a
 
 These are set in the GitHub repo settings, not in files:
 
-- **`main` is protected.** The `backend`, `migrations` and `audit` CI jobs must pass, and the branch must be up to date with `main` before merging. This applies to admins too, so nothing reaches `main` without a green PR.
+- **`main` is protected.** The `backend`, `migrations`, `frontend` and `audit` CI jobs must pass, and the branch must be up to date with `main` before merging. This applies to admins too, so nothing reaches `main` without a green PR.
   - A required job must run on every PR. GitHub waits indefinitely for a required check that never reports, so don't add `paths:` filters to these jobs; skip steps inside the job instead. Renaming a required job also needs this setting updated.
   - Because `audit` is required, a newly published vulnerability in a runtime dependency blocks merges until the dependency is upgraded or the advisory is dealt with.
   - This is deliberate. If it ever blocks urgent work, an admin can relax the rule temporarily.
@@ -279,6 +286,6 @@ These are set in the GitHub repo settings, not in files:
    - `pnpm audit --prod` in the audit job, once the frontend has runtime dependencies (it has none yet: Vite bundles everything).
    - The ≥ 90% branch-coverage gates on `files/`, identity/move detection, and purge (the 75% overall gate is live).
    - Pinned exiftool and ffmpeg in CI, once tests call them.
-   - The `.env` check in `just doctor`, and the app recipes in §5 (`dev`, `worker`, `stack`, ...). `just api`, `just web` and `.env.example` landed on 2026-10-03.
+   - The `.env` check in `just doctor`, and the app recipes in §5 (`dev`, `stack`, ...). `just api`, `just web` and `.env.example` landed on 2026-10-03, and `just worker` on 2026-10-04.
 5. ~~Decide how to track work toward the spec.~~ Done on 2026-10-03. Milestones, issues, and PRs on GitHub, driven by `scripts/tracker.py` (§9).
 6. ~~Plan Phase 1 into issues with the `plan-phase` skill, then start building.~~ Done on 2026-10-03: issues #3–#12 in the Phase 1 milestone.

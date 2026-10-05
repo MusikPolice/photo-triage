@@ -135,6 +135,8 @@ def test_sql_is_logged_only_at_debug(
     text = "\n".join(lines(log_file(settings)))
     assert ("INFO sqlalchemy.engine.Engine SELECT 42" in text) == sql_logged
     assert "Row (" not in text  # result rows never
+    # The ORM logs dozens of lines at INFO when it first sets up the models.
+    assert not logging.getLogger("sqlalchemy.orm.mapper.Mapper").isEnabledFor(logging.INFO)
 
 
 def test_configuring_again_replaces_the_handlers(settings: Settings) -> None:

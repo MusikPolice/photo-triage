@@ -1,6 +1,6 @@
 # Task runner (docs/dev-environment.md §5). `just` lists recipes.
-# The other app recipes (dev, worker, stack, ...) arrive with the rest of
-# the Phase 1 scaffold.
+# The other app recipes (dev, stack, ...) arrive with the rest of the
+# Phase 1 scaffold.
 
 # List recipes
 default:
@@ -13,6 +13,10 @@ doctor:
 # API on APP_PORT with reload. Runs from the repo root so `.env` and `./data` resolve here.
 api *args:
     uv run --no-sync --project backend python -m photo_triage.api --reload {{args}}
+
+# Worker, from the repo root like `just api`. `--once` drains the queue and exits; `noop N` queues N noop jobs
+worker *args:
+    uv run --no-sync --project backend python -m photo_triage.worker {{args}}
 
 # Vite dev server, proxying /api to the API on APP_PORT (run `just api` alongside)
 [working-directory: 'frontend']

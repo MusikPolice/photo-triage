@@ -102,7 +102,7 @@ def test_serve_logs_to_the_file_and_says_what_it_runs_with() -> None:
     for handler in logging.getLogger().handlers:
         handler.flush()
     text = Path("data/logs/api.log").read_text()
-    assert "INFO photo_triage.api.__main__ API starting: PHOTO_DIR=/photos " in text
+    assert "INFO photo_triage.api API starting: PHOTO_DIR=/photos " in text
 
 
 def test_bad_configuration_exits_before_starting(

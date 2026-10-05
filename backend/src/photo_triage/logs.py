@@ -26,6 +26,9 @@ LINE_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 # line goes through ours, in our format, at our level.
 LIBRARY_LOGGERS = ["uvicorn", "uvicorn.error", "uvicorn.access", "alembic", "sqlalchemy"]
 PER_REQUEST_LOGGERS = ["uvicorn.access", "sqlalchemy.engine", "sqlalchemy.pool"]
+# SQLAlchemy's other loggers, such as the ORM's, log their own setup at INFO, which
+# is no use even when debugging.
+QUIET_LOGGERS = ["sqlalchemy"]
 
 
 class UTCFormatter(logging.Formatter):
@@ -84,6 +87,7 @@ def configure(
             "root": {"level": level, "handlers": list(handlers)},
             "loggers": {
                 **{name: _inherit() for name in LIBRARY_LOGGERS},
+                **{name: _inherit("WARNING") for name in QUIET_LOGGERS},
                 **{name: _inherit(per_request_level) for name in PER_REQUEST_LOGGERS},
             },
         }

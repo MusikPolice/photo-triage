@@ -42,6 +42,14 @@ lag behind the code mislead the next session as well as the user.
   Once they agree, update the spec in the same PR.
 - In a PR, list doc updates in the summary so the reviewer sees them.
 
+## Debugging
+
+- Logs are in `DATA_DIR/logs/<process>.log` (and stderr). `LOG_LEVEL=DEBUG` adds a
+  line per job and per request, and the SQL. See dev-environment §5 "Logging".
+- The worker has dev-only switches, listed in dev-environment §5 and not in plan §9:
+  `just worker --once` runs every ready job and exits, `FAKE_NOW` sets its clock,
+  and `WORKER_NOOP_STAGE=true` with `just worker noop N` queues test jobs.
+
 ## Checks
 
 `just check` runs everything CI runs on a PR: pre-commit, lint, the
