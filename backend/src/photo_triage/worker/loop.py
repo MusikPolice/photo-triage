@@ -47,12 +47,27 @@ class Worker:
         self._progress = _Progress(timer, summary_interval_s)
 
     def recover(self) -> int:
-        """Requeue jobs left running when the worker last stopped. Call at startup."""
+        """Count jobs left running when the worker last stopped as failed attempts,
+        requeueing or parking them. Call at startup. Returns how many there were."""
         with self._sessions.begin() as session:
-            count = self._queue.recover(session)
-        if count:
-            logger.warning("Requeued %d job(s) left running when the worker last stopped", count)
-        return count
+            jobs = self._queue.recover(session)
+        for job in jobs:
+            if job.status == JobStatus.PARKED:
+                # No traceback: the process that ran it is gone.
+                logger.error(
+                    "Parked %s after %d failed attempts, the last interrupted when the "
+                    "worker stopped",
+                    _describe(job),
+                    job.attempts,
+                )
+            else:
+                logger.warning(
+                    "%s was interrupted when the worker stopped (attempt %d of %d), queued again",
+                    _describe(job).capitalize(),
+                    job.attempts,
+                    self._queue.max_attempts,
+                )
+        return len(jobs)
 
     def run_one(self) -> bool:
         """Claim the next job for a stage this worker runs, run it, and record the

@@ -12,7 +12,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from photo_triage.db.models import Item, Job, JobStats, JobStatus, MediaType
-from photo_triage.worker.queue import JobQueue, JobStateError, RetryPolicy, Stage
+from photo_triage.worker.queue import (
+    INTERRUPTED_ERROR,
+    JobQueue,
+    JobStateError,
+    RetryPolicy,
+    Stage,
+)
 
 START = dt.datetime(2026, 10, 3, 12, tzinfo=dt.UTC)
 
@@ -382,7 +388,7 @@ def _claim_id_for(queue: JobQueue, session: Session, stages: list[Stage]) -> int
     return None if job is None else job.id
 
 
-def test_recover_puts_running_jobs_back_where_they_were(
+def test_recover_puts_interrupted_jobs_back_where_they_were_as_a_failed_attempt(
     queue: JobQueue, session: Session, clock: FakeClock
 ) -> None:
     a, b = _items(session, 2)
@@ -393,14 +399,37 @@ def test_recover_puts_running_jobs_back_where_they_were(
     queue.claim(session)
     session.commit()
 
-    assert queue.recover(session) == 2
+    assert [job.id for job in queue.recover(session)] == [first, second]
     session.commit()
 
     for job_id in (first, second):
         job = session.get_one(Job, job_id, populate_existing=True)
-        assert (job.status, job.attempts, job.started_at) == (JobStatus.PENDING, 0, None)
+        assert (job.status, job.attempts, job.started_at, job.retry_at) == (
+            JobStatus.PENDING,
+            1,
+            None,
+            None,  # no backoff: a restart costs no time
+        )
+        assert job.last_error == INTERRUPTED_ERROR
+    assert _stats(session) == [(START, "thumbnail", 0, 2, 0.0)]  # errors, no busy time
     assert _claim_id(queue, session) == first  # its place in the queue is unchanged
-    assert queue.recover(session) == 1
+    assert [job.id for job in queue.recover(session)] == [first]
+
+
+def test_a_job_that_keeps_killing_the_worker_is_parked(
+    queue: JobQueue, session: Session, clock: FakeClock
+) -> None:
+    (item,) = _items(session, 1)
+    job_id = queue.enqueue(session, Stage.CLIP, item)
+    for attempt in range(1, 4):
+        assert _claim_id(queue, session) == job_id
+        (job,) = queue.recover(session)  # the worker died, and has restarted
+        assert job.attempts == attempt
+
+    assert job.status == JobStatus.PARKED
+    assert job.finished_at == START
+    assert queue.claim(session) is None
+    assert queue.retry(session, job_id) == job_id  # a person can still retry it
 
 
 def test_noop_jobs_are_never_merged(queue: JobQueue, session: Session) -> None:

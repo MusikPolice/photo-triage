@@ -454,7 +454,10 @@ def test_main_recovers_interrupted_jobs_and_logs_to_worker_log(
     assert _statuses(migrated) == {job_id: JobStatus.DONE}
     log = (worker_env.data_dir / "logs/worker.log").read_text()
     assert "INFO photo_triage.worker Worker starting: PHOTO_DIR=" in log
-    assert "WARNING photo_triage.worker.loop Requeued 1 job(s) left running" in log
+    assert (
+        f"WARNING photo_triage.worker.loop Layout job {job_id} (batch) was interrupted when "
+        "the worker stopped (attempt 1 of 5), queued again"
+    ) in log
     assert "Progress in the last" in log
 
 
@@ -524,3 +527,33 @@ def test_fake_now_sets_the_clock(
         enqueued_at = session.scalars(sa.select(Job.enqueued_at)).one()
     expected = dt.datetime(2030, 1, 2, 4, 30, tzinfo=dt.UTC)
     assert expected <= enqueued_at < expected + dt.timedelta(seconds=5)
+
+
+def test_a_job_that_keeps_killing_the_worker_is_parked_with_an_error(
+    migrated: Engine, queue: JobQueue, caplog: pytest.LogCaptureFixture
+) -> None:
+    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
+    worker = Worker(migrated, {Stage.LAYOUT: Recorder()}, queue=queue)
+    for _ in range(3):  # each time, the worker dies mid-job and restarts
+        with Session(migrated) as session:
+            assert queue.claim(session) is not None
+            session.commit()
+        assert worker.recover() == 1
+
+    assert _statuses(migrated) == {job_id: JobStatus.PARKED}
+    assert worker.drain() == 0
+    levels = [(r.levelno, r.getMessage()) for r in caplog.records]
+    assert levels == [
+        (
+            logging.WARNING,
+            f"Layout job {job_id} (batch) was interrupted when the worker stopped "
+            f"(attempt {n} of 3), queued again",
+        )
+        for n in (1, 2)
+    ] + [
+        (
+            logging.ERROR,
+            f"Parked layout job {job_id} (batch) after 3 failed attempts, the last "
+            "interrupted when the worker stopped",
+        )
+    ]

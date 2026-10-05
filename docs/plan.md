@@ -255,10 +255,10 @@ metadata writes (high priority, small)
 ```
 
 - **Priority order:** metadata writes > scan > thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
-- **Resource limits:** CPU/memory caps via Compose (`cpus:`, `mem_limit:`); `WORKER_THREADS` for ONNX/BLAS.
+- **Resource limits:** CPU/memory caps via Compose (`cpus:`, `mem_limit:`); `WORKER_THREADS` for ONNX/BLAS. The worker sets the OpenMP, BLAS and numba thread variables from it at startup, but ONNX Runtime ignores those: every ONNX Runtime session must be created with `intra_op_num_threads=WORKER_THREADS`.
 - **Quiet hours:** optional `WORKER_WINDOW` (e.g. `22:00-07:00`) per stage class, so heavy stages (LLM tagging, optionally all ML) only run overnight.
 - **Pause / resume** from the UI, globally or per stage.
-- **Resumable:** job state is durable; the worker picks up where it left off after restart. Failed jobs retry with backoff, then park in an error list.
+- **Resumable:** job state is durable; the worker picks up where it left off after restart. Failed jobs retry with backoff, then park in an error list. A run cut short by the worker dying counts as a failed attempt, so a job that keeps killing the worker (e.g. running it out of memory) ends up parked rather than retried forever.
 
 ---
 

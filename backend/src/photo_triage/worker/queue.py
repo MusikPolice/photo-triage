@@ -69,6 +69,11 @@ batch jobs > LLM tagging, so the map and search become usable first."""
 
 LAST_ERROR_MAX_CHARS = 4096
 
+INTERRUPTED_ERROR = (
+    "Interrupted: the worker stopped while running this job "
+    "(killed, crashed, or ran out of memory)."
+)
+
 
 class JobStateError(Exception):
     """The job isn't in a state that allows the requested transition."""
@@ -180,21 +185,36 @@ class JobQueue:
             .order_by(Job.priority, Job.enqueued_at, Job.id)
         )
 
-    def recover(self, session: Session) -> int:
-        """Put jobs left running by a worker that stopped mid-run back in the queue,
-        where they were. Returns how many there were.
+    def recover(self, session: Session) -> list[Job]:
+        """Deal with jobs left running by a worker that stopped mid-run, and return
+        them in their new state.
+
+        Each interrupted run counts as a failed attempt, so a job that kills the
+        worker every time (running it out of memory, say) is parked after
+        `max_attempts` rather than retried forever. Until then the job goes back to
+        pending in its old place, with no backoff, so a restart costs no time. How
+        long it ran is unknown, so its `job_stats` row gets an error and no busy time.
 
         Call it only at worker startup: there's a single worker, so at that point
-        nothing is really running. The interrupted run isn't counted as a failure.
+        nothing is really running.
         """
-        requeued = session.scalars(
-            sa.update(Job)
-            .where(Job.status == JobStatus.RUNNING)
-            .values(status=JobStatus.PENDING, started_at=None)
-            .returning(Job.id),
-            execution_options={"synchronize_session": False},
+        jobs = session.scalars(
+            sa.select(Job).where(Job.status == JobStatus.RUNNING).order_by(Job.id),
+            execution_options={"populate_existing": True},  # claim() bypasses the session
         ).all()
-        return len(requeued)
+        now = self._clock()
+        for job in jobs:
+            job.attempts += 1
+            job.last_error = INTERRUPTED_ERROR
+            self._record_stats(session, job.stage, now, processed=0, errors=1, duration_s=0.0)
+            if job.attempts >= self._policy.max_attempts:
+                job.status = JobStatus.PARKED
+                job.finished_at = now
+            else:
+                job.status = JobStatus.PENDING
+                job.started_at = None
+        session.flush()
+        return list(jobs)
 
     def complete(self, session: Session, job_id: int, duration_s: float) -> None:
         """Mark a running job done, and delete older done jobs for the same stage
@@ -204,9 +224,10 @@ class JobQueue:
         grow past one done row per stage per item. `job_stats` keeps the history.
         """
         job = self._get(session, job_id, JobStatus.RUNNING)
+        now = self._clock()
         job.status = JobStatus.DONE
-        job.finished_at = self._clock()
-        self._record_stats(session, job, processed=1, errors=0, duration_s=duration_s)
+        job.finished_at = now
+        self._record_stats(session, job.stage, now, processed=1, errors=0, duration_s=duration_s)
         session.execute(
             sa.delete(Job).where(
                 Job.status == JobStatus.DONE,
@@ -227,7 +248,7 @@ class JobQueue:
         job.attempts += 1
         job.last_error = describe_error(exc)
         job.finished_at = now
-        self._record_stats(session, job, processed=0, errors=1, duration_s=duration_s)
+        self._record_stats(session, job.stage, now, processed=0, errors=1, duration_s=duration_s)
         if job.attempts >= self._policy.max_attempts:
             job.status = JobStatus.PARKED
         else:
@@ -265,16 +286,19 @@ class JobQueue:
 
     @staticmethod
     def _record_stats(
-        session: Session, job: Job, *, processed: int, errors: int, duration_s: float
+        session: Session,
+        stage: str,
+        finished_at: dt.datetime,
+        *,
+        processed: int,
+        errors: int,
+        duration_s: float,
     ) -> None:
         """Add a run to the `job_stats` row for its stage and the hour it finished."""
-        assert job.finished_at is not None
-        hour_start_at = job.finished_at.astimezone(dt.UTC).replace(
-            minute=0, second=0, microsecond=0
-        )
+        hour_start_at = finished_at.astimezone(dt.UTC).replace(minute=0, second=0, microsecond=0)
         row = insert(JobStats).values(
             hour_start_at=hour_start_at,
-            stage=job.stage,
+            stage=stage,
             processed=processed,
             errors=errors,
             busy_seconds=duration_s,
