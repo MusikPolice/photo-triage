@@ -174,8 +174,9 @@ def test_quiet_hours_and_their_end_agree(
     assert until > now
     assert until - now < dt.timedelta(days=8)
     assert not quiet.is_quiet(until, zone)
-    # Every moment before the end is quiet, with the same end.
-    during = now + (until - now) * fraction
+    # Every moment before the end is quiet, with the same end. (A fraction just under
+    # 1 can round to the end itself, to the microsecond.)
+    during = min(now + (until - now) * fraction, until - dt.timedelta(microseconds=1))
     assert quiet.quiet_until(during, zone) == until
 
 

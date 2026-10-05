@@ -7,7 +7,7 @@ and hands each change to every stream, so the load doesn't grow with open tabs.
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 
 POLL_S = 1.0
 """How often the feed reads while anyone is listening."""
@@ -50,7 +50,7 @@ class Feed[T]:
         if self._loop is not None:
             self._loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._notify()))
 
-    async def updates(self) -> AsyncIterator[T]:
+    async def updates(self) -> AsyncGenerator[T]:
         """The current value, then each change, until the caller stops iterating or
         the feed is closed."""
         self._listeners += 1

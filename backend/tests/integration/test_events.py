@@ -89,8 +89,11 @@ def test_a_snapshot_then_an_event_when_a_job_changes_state(base_url: str, migrat
         # The worker is another process: the stream sees the change in the database.
         Worker(migrated, {Stage.LAYOUT: lambda job: None}, queue=queue).drain()
 
-        second = events.next()
-        assert (_stage(second, "layout")["pending"], _stage(second, "layout")["done"]) == (0, 1)
+        # The stream may also catch the job while it runs.
+        layout = _stage(events.next(), "layout")
+        while layout["running"]:
+            layout = _stage(events.next(), "layout")
+        assert (layout["pending"], layout["done"]) == (0, 1)
 
 
 def test_a_pause_is_pushed_to_every_open_stream(base_url: str) -> None:
