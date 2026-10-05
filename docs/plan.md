@@ -256,8 +256,8 @@ metadata writes (high priority, small)
 
 - **Priority order:** metadata writes > scan > thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
 - **Resource limits:** CPU/memory caps via Compose (`cpus:`, `mem_limit:`); `WORKER_THREADS` for ONNX/BLAS. The worker sets the OpenMP, BLAS and numba thread variables from it at startup, but ONNX Runtime ignores those: every ONNX Runtime session must be created with `intra_op_num_threads=WORKER_THREADS`.
-- **Quiet hours:** optional `WORKER_WINDOW` (e.g. `22:00-07:00`) per stage class, so heavy stages (LLM tagging, optionally all ML) only run overnight.
-- **Pause / resume** from the UI, globally or per stage.
+- **Quiet hours:** optional `WORKER_QUIET_HOURS` lists the times when the household is using the host, in its local time (`TZ`), e.g. `Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00`. Each period names the days it starts on, and one whose end is at or before its start ends the next day. The whole worker stays idle during them, and a job already running finishes. Unset means it always runs.
+- **Pause / resume** from the UI, globally or per stage. A pause is stored in `worker_controls`, so it survives a restart, and a job already running finishes.
 - **Resumable:** job state is durable; the worker picks up where it left off after restart. Failed jobs retry with backoff, then park in an error list. A run cut short by the worker dying counts as a failed attempt, so a job that keeps killing the worker (e.g. running it out of memory) ends up parked rather than retried forever.
 
 ---
@@ -266,12 +266,12 @@ metadata writes (high priority, small)
 
 The initial processing of a large library will take **weeks** (LLM tagging possibly months). Progress must be visible at a glance and in detail.
 
-**Global status indicator.** A compact indicator in the app header, visible from every view: overall "library readiness" and whether the worker is running, paused, or waiting for its quiet-hours window ("Idle until 22:00"). Tapping it opens the Activity page.
+**Global status indicator.** A compact indicator in the app header, visible from every view: overall "library readiness" and whether the worker is running, paused, or waiting for quiet hours to end ("Quiet until 02:00"). Tapping it opens the Activity page.
 
 **Activity page.** One row per pipeline stage (scan, thumbnails, CLIP, quality, faces, recognition, LLM tagging, metadata writes, batch jobs):
 
 - done / total, with a progress bar, and counts of pending, in-progress, errored, skipped
-- **throughput** (rolling average, items/min) and **ETA** — computed against the configured working window, not wall-clock (e.g. "~23 nights remaining" rather than a misleading "~8 days")
+- **throughput** (rolling average, items/min) and **ETA** — computed against the hours outside quiet hours, not wall-clock (e.g. "~23 nights remaining" rather than a misleading "~8 days")
 - currently processing item (thumbnail + path)
 - last run / next scheduled run for batch jobs (layout re-fit, duplicate grouping, nightly scan)
 - per-stage pause/resume
@@ -344,6 +344,9 @@ jobs                               -- error: retries after retry_at; parked: gav
 job_stats                          -- one row per stage per UTC hour; history, throughput, ETA
   hour_start_at, stage, processed, errors, busy_seconds
 
+worker_controls                    -- latest pause/resume per scope; no row = not paused
+  scope (global | <stage>), paused, actor, changed_at
+
 metadata_writes                    -- write queue + log
   id, item_id, fields (json), before (json), after (json),
   status (queued | applied | dry_run | error), actor, created_at, applied_at
@@ -370,7 +373,8 @@ Environment variables, documented in `.env.example`:
 | `APP_PORT` | `8000` | Host port for the web UI |
 | `LOG_LEVEL` | `INFO` | Lowest level logged by every process (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); logs go to stderr and `DATA_DIR/logs` |
 | `SCAN_SCHEDULE` | `0 2 * * *` | Cron schedule for incremental scans |
-| `WORKER_WINDOW` | *(unset = always)* | Quiet-hours window for heavy stages, e.g. `22:00-07:00` |
+| `WORKER_QUIET_HOURS` | *(unset = always run)* | When the whole worker stays idle, in `TZ`, e.g. `Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00` (§6.11) |
+| `TZ` | `UTC` | The household's timezone (IANA name, e.g. `America/Toronto`), for quiet hours. Timestamps and logs stay UTC |
 | `WORKER_THREADS` | `4` | Threads for ONNX/BLAS inference |
 | `OLLAMA_MODEL` | `moondream` | Vision model for tagging |
 | `CLIP_MODEL` | `ViT-B-32` | CLIP model |
@@ -405,7 +409,7 @@ Environment variables, documented in `.env.example`:
 ## 11. Phases of Work
 
 ### Phase 1 — Infrastructure & Scaffold
-Compose stack (app, worker, ollama), SQLite schema and migrations (Alembic), FastAPI skeleton, `current_actor` dependency, Vite + Svelte frontend built into the image. Job queue and worker loop with priorities, pause/resume, and quiet-hours window. Activity page skeleton with SSE. Confirm it runs against a test directory.
+Compose stack (app, worker, ollama), SQLite schema and migrations (Alembic), FastAPI skeleton, `current_actor` dependency, Vite + Svelte frontend built into the image. Job queue and worker loop with priorities, pause/resume, and quiet hours. Activity page skeleton with SSE. Confirm it runs against a test directory.
 
 ### Phase 2 — Scanner, Thumbnails & CLIP
 Directory walker, content hashing, move detection, EXIF/video metadata extraction (JPEG, HEIC, MOV/MP4), video frame sampling, thumbnails, CLIP embeddings. Stage progress, throughput, and ETA on the Activity page. Verify exiftool field support per container. Add the "No escape" safety test (dev-environment §7) here: it needs stages that touch files, so Phase 1 has nothing for it to check.

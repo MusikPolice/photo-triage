@@ -123,7 +123,7 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 | `just api` | The API alone: `python -m photo_triage.api --reload`, on `APP_PORT`, from the repo root so `.env` and `./data` resolve there. Exits with a list of what's wrong if `PHOTO_DIR` or `TRASH_DIR` is missing. API docs at `/api/docs`. |
 | `just web` | The Vite dev server for `frontend/`, with hot reload. It proxies `/api` to the API on `APP_PORT`, which it reads like the backend does: the environment first, then the repo-root `.env`, then 8000. Run `just api` alongside. Extra arguments go to Vite, e.g. `just web --host` to reach it from another device. |
 | `just web-sync` / `just web-fmt` / `just web-check` | Install the frontend dependencies as locked; format and auto-fix lint; run svelte-check, eslint, prettier, Vitest and `vite build` (part of `just check`). |
-| `just worker` | The worker alone: `python -m photo_triage.worker`, from the repo root like `just api`. At startup it counts any job left `running` when it last stopped as a failed attempt: the job goes back to its place in the queue, or is parked after 5 attempts. Then it runs jobs in priority order until SIGINT or SIGTERM, finishing the job in progress first (a second signal stops at once). `just worker --once` runs every ready job and exits; jobs waiting out a retry backoff are left for later. Stages without a runner (all of them until Phase 2) stay in the queue. |
+| `just worker` | The worker alone: `python -m photo_triage.worker`, from the repo root like `just api`. At startup it counts any job left `running` when it last stopped as a failed attempt: the job goes back to its place in the queue, or is parked after 5 attempts. Then it runs jobs in priority order until SIGINT or SIGTERM, finishing the job in progress first (a second signal stops at once). `just worker --once` runs every ready job and exits; jobs waiting out a retry backoff are left for later. Stages without a runner (all of them until Phase 2) stay in the queue. Before each claim it checks `worker_controls` and quiet hours, and logs at `INFO` when its state changes (`Worker paused`, `Quiet hours until …`, `Worker running; paused stages: …`). Until the Activity API (#9) there's no command to pause it: `photo_triage.worker.controls` is the Python interface. |
 | `just stack` | Full production-like Compose stack (built image) against tier-1 fixtures |
 | `just dry-run-full` | Stack against `/mnt/pictures` (read-only), writes disabled — for scale testing |
 | `just db-reset` | Drop and re-migrate the dev database in `DATA_DIR`: Alembic downgrade to empty, then upgrade to head. For other Alembic commands, run `uv run --project backend alembic -c backend/alembic.ini …` from the repo root. A new migration starts from `revision --autogenerate`; read it before committing, since the tests fail if models and migrations disagree. |
@@ -132,7 +132,7 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 
 Worker-specific dev affordances, read from `.env` or the environment like the settings in plan §9 but not listed there:
 
-- `WORKER_WINDOW` unset (always on).
+- `WORKER_QUIET_HOURS` unset (always on). To try quiet hours, set it with `FAKE_NOW` and `TZ`: `just worker --once` then runs nothing and logs `Quiet hours until …`.
 - `--once` to drain the queue and exit.
 - **`FAKE_NOW`**, a controllable clock for exercising quiet hours and ETA logic. It needs a UTC offset (`FAKE_NOW=2026-10-03T21:59:00-04:00`). The worker's clock starts there and advances in real time. It sets `*_at` columns and backoff; durations in `job_stats` always come from a real monotonic timer.
 - **The `noop` stage**, off unless `WORKER_NOOP_STAGE=true`. `just worker noop 500` queues 500 jobs that each take 0.2 s, to watch the worker (and later the Activity page) at work. It logs to stderr only, since a running worker owns `worker.log`.
@@ -168,7 +168,7 @@ Get a logger with `logging.getLogger(__name__)` (in a `__main__` module, name it
 
 | Layer | Tooling | Approach |
 |---|---|---|
-| Pure logic | pytest (+ Hypothesis) | Quality scoring, union-find grouping, content hashing, ETA math against working windows, schedule windows, search score blending, FTS query building. Property-based where there are invariants. |
+| Pure logic | pytest (+ Hypothesis) | Quality scoring, union-find grouping, content hashing, ETA math against quiet hours, quiet-hours parsing, search score blending, FTS query building. Property-based where there are invariants. |
 | Database & migrations | pytest + Alembic | Every migration upgrades from empty and downgrades; `alembic check` confirms models and migrations agree. Migrations have a single head and import only Alembic, SQLAlchemy and the standard library, never app code, so later code changes can't alter what an old migration does. |
 | Metadata write-back | pytest + real exiftool | Round-trip each field mapping (plan §6.10) per container type on tier-1 copies in a temp dir; read back and assert. |
 | Pipelines & worker | pytest + fake ML adapters | Run the worker `--once` over tier-1 fixtures with fake embedders/detectors (deterministic vectors derived from file hashes). Assert job states, stage ordering, resumability (kill mid-run, restart), retry/park behaviour. |

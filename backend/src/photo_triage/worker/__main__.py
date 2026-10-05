@@ -56,9 +56,8 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
         return 2
 
     limit_threads(settings.worker_threads)  # before any ML library loads
-    queue = JobQueue(
-        clock=utc_now if settings.fake_now is None else running_from(settings.fake_now)
-    )
+    clock = utc_now if settings.fake_now is None else running_from(settings.fake_now)
+    queue = JobQueue(clock)
     engine = open_database(settings.data_dir)
     try:
         if args.command == "noop":
@@ -70,7 +69,12 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
         logs.configure(settings, "worker")
         logger.info("Worker starting: %s", settings.summary())
         worker = Worker(
-            engine, build_runners(settings) if runners is None else runners, queue=queue
+            engine,
+            build_runners(settings) if runners is None else runners,
+            queue=queue,
+            clock=clock,
+            quiet_hours=settings.worker_quiet_hours,
+            zone=settings.tz,
         )
         worker.recover()
         if args.once:
