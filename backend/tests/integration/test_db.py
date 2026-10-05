@@ -48,6 +48,7 @@ PHASE_1_COLUMNS = {
     },
     "job_stats": {"hour_start_at", "stage", "processed", "errors", "busy_seconds"},
     "worker_controls": {"scope", "paused", "actor", "changed_at"},
+    "worker_heartbeat": {"id", "started_at", "seen_at", "stopped_at"},
 }
 
 NOW = dt.datetime(2026, 10, 3, 12, tzinfo=dt.UTC)

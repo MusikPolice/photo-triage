@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 import uvicorn
 
-from photo_triage.api.__main__ import main, serve
+from photo_triage.api.__main__ import SHUTDOWN_TIMEOUT_S, main, serve
 
 
 @pytest.fixture
@@ -37,6 +37,7 @@ def test_runs_uvicorn_on_app_port(
     assert call["port"] == 8123
     assert call["reload"] is True
     assert call["log_config"] is None  # uvicorn keeps our logging configuration
+    assert call["timeout_graceful_shutdown"] == SHUTDOWN_TIMEOUT_S
 
 
 @pytest.mark.usefixtures("required_env")

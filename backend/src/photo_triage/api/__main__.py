@@ -16,6 +16,9 @@ from photo_triage.settings import SettingsError, load_settings
 # Named, since `__name__` is "__main__" when run with `python -m`.
 logger = logging.getLogger("photo_triage.api")
 
+SHUTDOWN_TIMEOUT_S = 5
+"""How long a stop or reload waits for open requests."""
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m photo_triage.api")
@@ -47,6 +50,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # The map loads thousands of tiles and the event stream stays open, so one
         # line per request is only wanted when debugging.
         access_log=settings.log_level == "DEBUG",
+        # The app ends its event streams when told to stop. This bounds the wait
+        # for anything else still open.
+        timeout_graceful_shutdown=SHUTDOWN_TIMEOUT_S,
     )
     return 0
 

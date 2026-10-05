@@ -185,3 +185,21 @@ class WorkerControl(Base):
     actor: Mapped[str] = mapped_column(sa.String(255))
     """Who paused or resumed it (plan §10)."""
     changed_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
+
+
+class WorkerHeartbeat(Base):
+    """Whether the worker process is running, for the Activity page (plan §7).
+
+    A single row (`id` 1), which the worker writes every few seconds while it runs.
+    `photo_triage.worker.heartbeat` reads and writes it.
+    """
+
+    __tablename__ = "worker_heartbeat"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    started_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
+    """When the worker process last started."""
+    seen_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
+    """The latest heartbeat. Stale means the worker crashed or was killed."""
+    stopped_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    """When it last stopped cleanly. None while it runs, or if it crashed."""
