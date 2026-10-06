@@ -251,6 +251,8 @@ if ((HAVE_RUNTIMES)); then
   for t in python uv node pnpm just; do
     ok "$t $(mx "$t" --version 2>&1 | head -1)"
   done
+  ok "shellcheck $(mx shellcheck --version 2>&1 | sed -n 's/^version: //p')"
+  ok "hadolint $(mx hadolint --version 2>&1 | awk '{print $NF}')"
 fi
 
 # ---------------------------------------------------------------------------
@@ -319,6 +321,8 @@ fi
 
 step "Project dependencies"
 
+BACKEND_SYNCED=0
+
 if [[ ! -f "$REPO_ROOT/backend/pyproject.toml" ]]; then
   warn "backend/pyproject.toml not found yet; skipped uv sync"
 elif ! ((HAVE_RUNTIMES)); then
@@ -330,6 +334,7 @@ elif ! (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv lock --check --offline >/d
 elif ((CHECK)); then
   if (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv sync --locked --check --offline >/dev/null 2>&1); then
     ok "backend: environment matches uv.lock"
+    BACKEND_SYNCED=1
   else
     fail "backend: .venv is missing or out of date with uv.lock ($FIX_HINT)"
   fi
@@ -337,6 +342,46 @@ else
   # Default groups (dev, export) included; torch comes from the CPU-only index.
   (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv sync --locked)
   ok "backend: uv sync"
+  BACKEND_SYNCED=1
+fi
+
+# A .venv can match uv.lock and still be broken. For example, uninstalling
+# opencv-python (left out since #11) also deletes the cv2 folder that
+# opencv-python-headless shares with it. So import the packages with native code.
+# broken_packages prints the distribution of each one that fails to import.
+broken_packages() {
+  (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv run --no-sync python - <<'EOF'
+import importlib
+
+for module, package in [
+    ("cv2", "opencv-python-headless"),
+    ("onnxruntime", "onnxruntime"),
+    ("pillow_heif", "pillow-heif"),
+    ("insightface", "insightface"),
+]:
+    try:
+        importlib.import_module(module)
+    except Exception:
+        print(package)
+EOF
+  )
+}
+
+if ((BACKEND_SYNCED)); then
+  broken="$(broken_packages | xargs)"
+  if [[ -z "$broken" ]]; then
+    ok "backend: native packages import"
+  elif needs_fix "backend: these packages don't import: $broken ($FIX_HINT, which reinstalls them, or 'uv sync --reinstall-package <package>' in backend/)"; then
+    reinstall=()
+    for package in $broken; do reinstall+=(--reinstall-package "$package"); done
+    (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv sync --locked "${reinstall[@]}")
+    broken="$(broken_packages | xargs)"
+    if [[ -z "$broken" ]]; then
+      ok "backend: reinstalled the packages that didn't import"
+    else
+      fail "backend: these packages still don't import after a reinstall: $broken"
+    fi
+  fi
 fi
 
 if [[ ! -f "$REPO_ROOT/frontend/package.json" ]]; then

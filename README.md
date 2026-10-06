@@ -137,7 +137,7 @@ cd photo-triage
 
 ### 7. Toolchain via mise
 
-[mise](https://mise.jdx.dev/) installs the pinned versions of Python, uv, Node, pnpm, and just listed in `mise.toml`.
+[mise](https://mise.jdx.dev/) installs the pinned versions of Python, uv, Node, pnpm, just, shellcheck, and hadolint listed in `mise.toml`.
 
 ```bash
 curl https://mise.run | sh
