@@ -3,9 +3,11 @@ import contextlib
 import signal
 import threading
 from collections.abc import AsyncGenerator, Generator
+from pathlib import Path
 from types import FrameType
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from photo_triage.api import activity, events, health
@@ -15,6 +17,10 @@ from photo_triage.db.engine import open_database
 from photo_triage.settings import Settings, load_settings
 from photo_triage.worker.clock import Clock, running_from, utc_now
 
+FRONTEND_DIR = Path(__file__).parents[4] / "frontend" / "dist"
+"""The built frontend (`vite build`). The image keeps the repo's layout, so this is
+`/app/frontend/dist` there."""
+
 
 def create_app(
     settings: Settings | None = None,
@@ -22,10 +28,12 @@ def create_app(
     clock: Clock | None = None,
     real_clock: Clock = utc_now,
     poll_s: float = POLL_S,
+    frontend_dir: Path | None = None,
 ) -> FastAPI:
     """Build the API. Settings come from the environment unless given. `clock` is
     the app's time, set by `FAKE_NOW` unless given. `real_clock` judges the worker's
-    heartbeat. `poll_s` is how often open event streams look for changes."""
+    heartbeat. `poll_s` is how often open event streams look for changes. With
+    `frontend_dir`, the bundle in it is served at `/`, behind the API's routes."""
     settings = settings if settings is not None else load_settings()
     if clock is None:
         clock = utc_now if settings.fake_now is None else running_from(settings.fake_now)
@@ -64,6 +72,9 @@ def create_app(
     app.include_router(health.router, prefix="/api")
     app.include_router(activity.router, prefix="/api")
     app.include_router(events.router, prefix="/api")
+    # Last, since it matches every path.
+    if frontend_dir is not None:
+        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     return app
 
 

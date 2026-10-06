@@ -10,7 +10,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from photo_triage import logs
-from photo_triage.api.app import create_app
+from photo_triage.api.app import FRONTEND_DIR, create_app
 from photo_triage.settings import SettingsError, load_settings
 
 # Named, since `__name__` is "__main__" when run with `python -m`.
@@ -57,11 +57,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def serve() -> FastAPI:
-    """The app as uvicorn loads it, in the process that serves requests."""
+def serve(frontend_dir: Path = FRONTEND_DIR) -> FastAPI:
+    """The app as uvicorn loads it, in the process that serves requests. It serves
+    the built frontend too, if there is one (in the image, or after `vite build`)."""
     settings = load_settings()
     logs.configure(settings, "api")
     logger.info("API starting: %s", settings.summary())
+    if frontend_dir.is_dir():
+        logger.info("Serving the frontend from %s", frontend_dir)
+        return create_app(settings, frontend_dir=frontend_dir)
+    logger.info("No frontend at %s, so serving the API only", frontend_dir)
     return create_app(settings)
 
 

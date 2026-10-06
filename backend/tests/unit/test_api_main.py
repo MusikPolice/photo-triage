@@ -6,8 +6,10 @@ from typing import Any
 
 import pytest
 import uvicorn
+from fastapi import FastAPI
 
 from photo_triage.api.__main__ import SHUTDOWN_TIMEOUT_S, main, serve
+from photo_triage.api.app import FRONTEND_DIR
 
 
 @pytest.fixture
@@ -104,6 +106,28 @@ def test_serve_logs_to_the_file_and_says_what_it_runs_with() -> None:
         handler.flush()
     text = Path("data/logs/api.log").read_text()
     assert "INFO photo_triage.api API starting: PHOTO_DIR=/photos " in text
+
+
+def test_the_frontend_is_the_repo_s_vite_build() -> None:
+    repo_root = Path(__file__).parents[3]
+    assert repo_root / "frontend" / "dist" == FRONTEND_DIR
+
+
+@pytest.mark.usefixtures("required_env")
+def test_serve_serves_the_frontend_when_it_is_built(tmp_path: Path) -> None:
+    built = serve(tmp_path)
+    missing = serve(tmp_path / "missing")
+
+    def names(app: FastAPI) -> list[str | None]:
+        return [getattr(route, "name", None) for route in app.routes]
+
+    assert names(built)[-1] == "frontend"
+    assert "frontend" not in names(missing)
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    text = Path("data/logs/api.log").read_text()
+    assert f"Serving the frontend from {tmp_path}\n" in text
+    assert f"No frontend at {tmp_path / 'missing'}, so serving the API only\n" in text
 
 
 def test_bad_configuration_exits_before_starting(

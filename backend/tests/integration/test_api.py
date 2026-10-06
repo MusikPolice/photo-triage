@@ -1,15 +1,19 @@
-"""The API skeleton: health check, OpenAPI docs and current_actor (plan §4, §10)."""
+"""The API skeleton: health check, OpenAPI docs, current_actor and the frontend
+(plan §4, §5, §10)."""
 
 import logging
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 from typing import Annotated
 
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.responses import StreamingResponse
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
+from photo_triage.api.app import create_app
 from photo_triage.api.deps import Actor, current_actor
+from photo_triage.settings import Settings
 
 pytestmark = pytest.mark.anyio
 
@@ -92,3 +96,39 @@ async def test_error_after_a_response_starts_goes_to_the_server(
     with pytest.raises(RuntimeError, match="mid-stream"):
         await client.get("/api/test-stream")
     assert not [r for r in caplog.records if r.name == "photo_triage.api.errors"]
+
+
+@pytest.fixture
+async def with_frontend(settings: Settings, tmp_path: Path) -> AsyncIterator[AsyncClient]:
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>photo-triage</title>")
+    (dist / "assets" / "index.js").write_text("console.log('hi')")
+    app = create_app(settings, frontend_dir=dist)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+    app.state.engine.dispose()
+
+
+async def test_the_frontend_is_served_at_the_root(with_frontend: AsyncClient) -> None:
+    index = await with_frontend.get("/")
+    assert index.status_code == 200
+    assert index.headers["content-type"].startswith("text/html")
+    assert "<title>photo-triage</title>" in index.text
+
+    asset = await with_frontend.get("/assets/index.js")
+    assert asset.status_code == 200
+    assert "javascript" in asset.headers["content-type"]
+
+
+async def test_the_api_comes_before_the_frontend(with_frontend: AsyncClient) -> None:
+    assert (await with_frontend.get("/api/health")).json() == {"status": "ok"}
+    assert (await with_frontend.get("/api/docs")).status_code == 200
+
+    missing = await with_frontend.get("/api/no-such-route")
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "Not Found"}
+
+
+async def test_no_frontend_unless_given_one(client: AsyncClient) -> None:
+    assert (await client.get("/")).status_code == 404
