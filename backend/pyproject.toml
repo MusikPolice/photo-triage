@@ -47,6 +47,10 @@ export = [
 
 [tool.uv]
 default-groups = ["dev", "export"]
+# insightface requires the GUI build of OpenCV, which installs its own `cv2` over
+# opencv-python-headless and needs X11 libraries the image doesn't have. Drop it:
+# the headless build has everything insightface uses.
+override-dependencies = ["opencv-python; sys_platform == 'never'"]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
