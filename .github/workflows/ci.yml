@@ -1,6 +1,6 @@
 # CI on every push and PR (docs/dev-environment.md §8).
-# Jobs still to come as their code lands: contract, docker,
-# and (on main/nightly) the model tier and e2e.
+# Jobs still to come as their code lands: contract, and (on main/nightly) the
+# model tier and e2e.
 name: CI
 
 on:
@@ -17,6 +17,7 @@ concurrency:
 
 env:
   PRE_COMMIT_VERSION: "4.6.2"  # keep in sync with scripts/bootstrap.sh
+  HADOLINT_VERSION: "v2.15.1"  # keep in sync with the justfile's `image` recipe
 
 jobs:
   backend:
@@ -151,6 +152,31 @@ jobs:
             echo "$changed"
             exit 1
           fi
+
+  docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: hadolint
+        run: docker run --rm -i "hadolint/hadolint:$HADOLINT_VERSION" < docker/Dockerfile
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: photo-triage:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The app, the frontend, the pinned tools, the user, the left-out
+      # dependency groups, and the worker.
+      - name: Smoke test
+        run: scripts/docker_smoke.sh photo-triage:ci
 
   audit:
     runs-on: ubuntu-24.04
