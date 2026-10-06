@@ -67,6 +67,9 @@ PRIORITY: dict[Stage, int] = {
 """Lower runs first: metadata writes > scan > thumbnails > CLIP > quality > faces >
 batch jobs > LLM tagging, so the map and search become usable first."""
 
+BATCH_STAGES = frozenset({Stage.LAYOUT, Stage.DUPLICATES, Stage.ATLASES, Stage.NOOP})
+"""Stages whose jobs cover the whole library rather than one item."""
+
 LAST_ERROR_MAX_CHARS = 4096
 
 INTERRUPTED_ERROR = (

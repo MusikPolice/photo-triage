@@ -1,6 +1,7 @@
 """The worker loop and `python -m photo_triage.worker` against a migrated database."""
 
 import datetime as dt
+import getpass
 import logging
 import os
 import signal
@@ -18,13 +19,23 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from photo_triage.db.engine import open_database
-from photo_triage.db.models import Item, Job, JobStats, JobStatus, MediaType, WorkerControl
+from photo_triage.db.models import (
+    Item,
+    Job,
+    JobStats,
+    JobStatus,
+    MediaType,
+    WorkerControl,
+    WorkerHeartbeat,
+)
 from photo_triage.quiet_hours import parse
 from photo_triage.settings import Settings
-from photo_triage.worker import controls, stages
+from photo_triage.worker import controls, heartbeat, stages
 from photo_triage.worker.__main__ import THREAD_ENV_VARS, main
-from photo_triage.worker.loop import Worker, WorkerState, WorkerStatus
+from photo_triage.worker.heartbeat import Heartbeat
+from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import JobQueue, RetryPolicy, Stage
+from photo_triage.worker.state import WorkerState, WorkerStatus
 
 START = dt.datetime(2026, 10, 3, 12, tzinfo=dt.UTC)
 
@@ -196,7 +207,8 @@ KILLED_WORKER = """
 import sys, time
 from pathlib import Path
 from photo_triage.db.engine import open_database
-from photo_triage.worker.loop import Worker, WorkerState, WorkerStatus
+from photo_triage.worker.loop import Worker
+from photo_triage.worker.state import WorkerState, WorkerStatus
 
 def hang(job):
     Path(sys.argv[2]).touch()
@@ -699,3 +711,116 @@ def test_quiet_hours_are_read_in_tz(
     assert recorder.ran == []
     log = (worker_env.data_dir / "logs/worker.log").read_text()
     assert "Quiet hours until Mon 23:00 EDT (2026-10-06T03:00:00Z)" in log
+
+
+def _heartbeat(engine: Engine) -> WorkerHeartbeat | None:
+    with Session(engine) as session:
+        return heartbeat.last(session)
+
+
+def test_the_heartbeat_is_written_while_the_worker_runs_and_a_clean_stop_recorded(
+    migrated: Engine, clock: FakeClock
+) -> None:
+    with Heartbeat(migrated, clock, interval_s=0.01):
+        beat = _heartbeat(migrated)
+        assert beat is not None
+        assert (beat.started_at, beat.seen_at, beat.stopped_at) == (START, START, None)
+
+        # The thread keeps beating, as it would while a long job runs.
+        clock.advance(dt.timedelta(seconds=5))
+        deadline_s = time.monotonic() + 10
+        while (beat := _heartbeat(migrated)) is None or beat.seen_at == START:
+            assert time.monotonic() < deadline_s, "no second heartbeat"
+            time.sleep(0.01)
+        assert beat.started_at == START
+        assert heartbeat.is_alive(beat, clock())
+
+        clock.advance(dt.timedelta(seconds=5))
+
+    stopped = _heartbeat(migrated)
+    assert stopped is not None
+    assert stopped.stopped_at == START + dt.timedelta(seconds=10)
+    assert not heartbeat.is_alive(stopped, clock())
+
+
+def test_a_failed_heartbeat_is_logged_and_the_next_one_tried(
+    migrated: Engine, clock: FakeClock, caplog: pytest.LogCaptureFixture
+) -> None:
+    failures = [OSError("database is locked")]
+
+    def flaky_clock() -> dt.datetime:
+        if failures and threading.current_thread().name == "heartbeat":
+            raise failures.pop()
+        return clock()
+
+    with Heartbeat(migrated, flaky_clock, interval_s=0.01):
+        deadline_s = time.monotonic() + 10
+        while failures or "Couldn't write the worker heartbeat" not in caplog.messages:
+            assert time.monotonic() < deadline_s, "the failure wasn't logged"
+            time.sleep(0.01)
+        clock.advance(dt.timedelta(seconds=1))
+        while (beat := _heartbeat(migrated)) is None or beat.seen_at == START:
+            assert time.monotonic() < deadline_s, "no heartbeat after the failure"
+            time.sleep(0.01)
+
+
+def test_staleness() -> None:
+    beat = WorkerHeartbeat(id=1, started_at=START, seen_at=START, stopped_at=None)
+
+    assert not heartbeat.is_alive(None, START)
+    assert heartbeat.is_alive(beat, START + heartbeat.STALE_AFTER - dt.timedelta(seconds=1))
+    assert not heartbeat.is_alive(beat, START + heartbeat.STALE_AFTER)
+
+
+def test_main_records_the_worker_starting_and_stopping(
+    migrated: Engine, worker_env: Settings
+) -> None:
+    assert main(["--once"], runners={}) == 0
+
+    beat = _heartbeat(migrated)
+    assert beat is not None
+    assert beat.stopped_at is not None
+    assert beat.started_at <= beat.stopped_at
+
+
+def test_pause_and_resume_commands(
+    migrated: Engine, worker_env: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["pause"]) == 0
+    assert main(["pause", "clip", "--actor", "alice"]) == 0
+
+    with Session(migrated) as session:
+        assert controls.paused_scopes(session) == {controls.GLOBAL, "clip"}
+        assert session.get_one(WorkerControl, controls.GLOBAL).actor == getpass.getuser()
+        assert session.get_one(WorkerControl, "clip").actor == "alice"
+    assert "INFO photo_triage.worker Paused stage clip. Worker stopped; paused stages: clip" in (
+        capsys.readouterr().err
+    )
+
+    assert main(["resume"]) == 0
+    assert main(["resume", "clip"]) == 0
+
+    with Session(migrated) as session:
+        assert controls.paused_scopes(session) == set()
+    assert "Resumed the worker. Worker stopped; paused stages: clip" in capsys.readouterr().err
+    # Changing a pause doesn't take over worker.log from a running worker.
+    assert not (worker_env.data_dir / "logs/worker.log").exists()
+
+
+def test_the_pause_command_shows_the_state_of_a_running_worker(
+    migrated: Engine, worker_env: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with Heartbeat(migrated):
+        assert main(["pause", "layout"]) == 0
+
+    assert "Paused stage layout. Worker running; paused stages: layout" in capsys.readouterr().err
+
+
+def test_the_pause_command_takes_only_a_stage(
+    worker_env: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["pause", "everything"])
+
+    assert exit_info.value.code == 2
+    assert "invalid choice: 'everything'" in capsys.readouterr().err

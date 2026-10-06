@@ -2,9 +2,13 @@
 
 `python -m photo_triage.worker noop N` queues N jobs for the `noop` stage, to
 exercise the worker by hand (needs `WORKER_NOOP_STAGE=true`).
+
+`python -m photo_triage.worker pause [STAGE]` and `resume [STAGE]` pause and resume
+the worker, or one stage, the same way the Activity page does.
 """
 
 import argparse
+import getpass
 import logging
 import os
 import signal
@@ -19,10 +23,13 @@ from sqlalchemy.orm import Session
 from photo_triage import logs
 from photo_triage.db.engine import open_database
 from photo_triage.settings import Settings, SettingsError, load_settings
-from photo_triage.worker.clock import running_from, utc_now
+from photo_triage.worker import controls
+from photo_triage.worker.clock import Clock, running_from, utc_now
+from photo_triage.worker.heartbeat import Heartbeat
 from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import JobQueue, Stage
 from photo_triage.worker.stages import Runner, build_runners
+from photo_triage.worker.state import observed_state
 
 # Named, since `__name__` is "__main__" when run with `python -m`.
 logger = logging.getLogger("photo_triage.worker")
@@ -47,6 +54,16 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
         "noop", help="queue N noop jobs and exit (needs WORKER_NOOP_STAGE=true)"
     )
     noop.add_argument("count", type=int, metavar="N")
+    for name, verb in [("pause", "pause"), ("resume", "resume")]:
+        control = commands.add_parser(
+            name, help=f"{verb} the worker, or one stage, and exit (a running job finishes)"
+        )
+        control.add_argument(
+            "stage", nargs="?", choices=list(Stage), metavar="STAGE", help="default: every stage"
+        )
+        control.add_argument(
+            "--actor", default=getpass.getuser(), help="who to record (default: your user name)"
+        )
     args = parser.parse_args(argv)
 
     try:
@@ -65,6 +82,11 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
             # can't share a rotating file.
             logs.configure(settings, "worker", to_file=False)
             return enqueue_noop(settings, engine, queue, args.count)
+        if args.command in ("pause", "resume"):
+            logs.configure(settings, "worker", to_file=False)  # as for noop
+            return set_paused(
+                settings, engine, clock, args.command == "pause", args.stage, args.actor
+            )
 
         logs.configure(settings, "worker")
         logger.info("Worker starting: %s", settings.summary())
@@ -76,11 +98,13 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
             quiet_hours=settings.worker_quiet_hours,
             zone=settings.tz,
         )
-        worker.recover()
-        if args.once:
-            worker.drain()
-        else:
-            run_until_signalled(worker)
+        # Real time, not `clock`: see `photo_triage.worker.heartbeat`.
+        with Heartbeat(engine, utc_now):
+            worker.recover()
+            if args.once:
+                worker.drain()
+            else:
+                run_until_signalled(worker)
         logger.info("Worker stopped")
         return 0
     finally:
@@ -101,6 +125,32 @@ def enqueue_noop(settings: Settings, engine: Engine, queue: JobQueue, count: int
         for _ in range(count):
             queue.enqueue(session, Stage.NOOP)
     logger.info("Queued %d noop job(s)", count)
+    return 0
+
+
+def set_paused(
+    settings: Settings,
+    engine: Engine,
+    clock: Clock,
+    paused: bool,
+    stage: str | None,
+    actor: str,
+) -> int:
+    """Pause or resume `stage`, or every stage when it's None, and log the new state."""
+    set_control = controls.pause if paused else controls.resume
+    scope = controls.GLOBAL if stage is None else stage
+    now = clock()
+    with Session(engine) as session, session.begin():
+        set_control(session, scope, actor, now)
+        state = observed_state(
+            session, settings.worker_quiet_hours, settings.tz, now, real_now=utc_now()
+        )
+    logger.info(
+        "%s %s. %s",
+        "Paused" if paused else "Resumed",
+        "the worker" if stage is None else f"stage {stage}",
+        state.describe(settings.tz),
+    )
     return 0
 
 
