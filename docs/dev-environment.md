@@ -39,8 +39,8 @@ All versions are pinned. `mise.toml` pins the language runtimes and CLI tools; l
 | Node.js | 24.x LTS | `mise.toml` | Frontend tooling |
 | pnpm | 10.x | `mise.toml` + `packageManager` | Frontend deps, lockfile (`pnpm-lock.yaml`) |
 | just | 1.x | `mise.toml` | Task runner (`justfile`) |
-| exiftool | 13.x | Dockerfile (tarball from exiftool.org, by version); local via `scripts/bootstrap.sh` | Metadata read/write. Ubuntu's apt version is too old for reliable HEIC/MWG writes. |
-| ffmpeg | 7.x | Dockerfile (Debian trixie); local static build via `scripts/bootstrap.sh` (Ubuntu 24.04's apt version is 6.1) | Video frames, posters |
+| exiftool | 13.x | `scripts/bootstrap.sh` and `docker/Dockerfile`: the same tarball, by version and checksum (from SourceForge, which keeps old releases) | Metadata read/write. Ubuntu's apt version is too old for reliable HEIC/MWG writes. |
+| ffmpeg | 7.0.x | `scripts/bootstrap.sh` and `docker/Dockerfile`: the same static build, by version and checksum, so dev, CI and the image run one binary. Ubuntu 24.04's apt version is 6.1. Debian trixie's (7.1) was the plan for the image, but an apt version pin breaks whenever Debian ships a security update, and it wouldn't match dev. The image's smoke test checks both tools against the bootstrap's pins. | Video frames, posters |
 | Docker Engine + Compose | 29.x / v2 plugin | Docker Desktop (WSL integration) | Integration stack, e2e |
 | Ollama | pinned image tag | `compose.yaml` | LLM tagging service |
 
@@ -50,9 +50,11 @@ TypeScript is pinned to 6.0 (`~6.0` in `frontend/package.json`). TypeScript 7 is
 
 `backend/pyproject.toml` has three dependency sets:
 
-- **Runtime** (`[project.dependencies]`): what the app and worker import. This set goes into the Docker image.
+- **Runtime** (`[project.dependencies]`): what the app and worker import. This set, and no group, goes into the Docker image.
 - **`dev`** group: pytest, Hypothesis, ruff, pyright, import-linter, pip-audit.
 - **`export`** group: open_clip, torch, torchvision, onnx, onnxscript. These are only for the one-off CLIP→ONNX export (`scripts/export_clip_onnx.py`) and stay out of the image (`uv sync --no-group export`).
+
+insightface requires `opencv-python`, the GUI build of OpenCV, which installs its own `cv2` over `opencv-python-headless` and needs X11 libraries. An `override-dependencies` entry in `pyproject.toml` leaves it out. If `import cv2` fails in an older `.venv`, run `uv sync --reinstall-package opencv-python-headless`: removing the GUI build also removed the shared `cv2` folder.
 
 Both groups are `default-groups`, so a plain `uv sync` installs everything locally, which comes to about 2 GB. torch and torchvision come from the PyTorch CPU-only index, and both must be listed directly, because uv applies an index source only to direct dependencies. A torchvision pulled from PyPI fails at import with `operator torchvision::nms does not exist`.
 
@@ -97,8 +99,8 @@ photo-triage/
       fixtures/synthetic/        committed, generated
   frontend/
     package.json  pnpm-lock.yaml  src/  tests/  e2e/
-  docker/Dockerfile
-  scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, ...
+  docker/Dockerfile  .dockerignore (an allowlist: only what the build copies)
+  scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, docker_smoke.sh, ...
   .claude/skills/ plan-phase, work-issue, new-issue, grill-me (see CLAUDE.md)
   docs/
 ```
@@ -124,6 +126,7 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 | `just web` | The Vite dev server for `frontend/`, with hot reload. It proxies `/api` to the API on `APP_PORT`, which it reads like the backend does: the environment first, then the repo-root `.env`, then 8000. Run `just api` alongside. Extra arguments go to Vite, e.g. `just web --host` to reach it from another device. |
 | `just web-sync` / `just web-fmt` / `just web-check` | Install the frontend dependencies as locked; format and auto-fix lint; run svelte-check, eslint, prettier, Vitest and `vite build` (part of `just check`). |
 | `just worker` | The worker alone: `python -m photo_triage.worker`, from the repo root like `just api`. At startup it counts any job left `running` when it last stopped as a failed attempt: the job goes back to its place in the queue, or is parked after 5 attempts. Then it runs jobs in priority order until SIGINT or SIGTERM, finishing the job in progress first (a second signal stops at once). `just worker --once` runs every ready job and exits; jobs waiting out a retry backoff are left for later. Stages without a runner (all of them until Phase 2) stay in the queue. Before each claim it checks `worker_controls` and quiet hours, and logs at `INFO` when its state changes (`Worker paused`, `Quiet hours until …`, `Worker running; paused stages: …`). While it runs, a thread writes a heartbeat to `worker_heartbeat` every 5 s, and a clean stop records `stopped_at`, so the API can say when the worker isn't running. `just worker pause [STAGE]` and `just worker resume [STAGE]` pause and resume the whole worker, or one stage, as the Activity page does: a running worker picks the change up before its next claim, and a job already running finishes. They record your user name as the actor (`--actor NAME` to override) and log the resulting state. |
+| `just image` | Lint `docker/Dockerfile` with hadolint, build the image (`photo-triage:dev`, or `just image TAG`), and run `scripts/docker_smoke.sh` on it, as the CI `docker` job does. One image runs both: the API by default (`python -m photo_triage.api --host 0.0.0.0` on port 8000, as UID 1000, with `PHOTO_DIR=/photos`, `TRASH_DIR=/trash` and `DATA_DIR=/data`), and the worker with the command `python -m photo_triage.worker`. FastAPI serves the built frontend at `/` and the API under `/api`. `just api` serves `frontend/dist` too, if you've run `vite build`. |
 | `just stack` | Full production-like Compose stack (built image) against tier-1 fixtures |
 | `just dry-run-full` | Stack against `/mnt/pictures` (read-only), writes disabled — for scale testing |
 | `just db-reset` | Drop and re-migrate the dev database in `DATA_DIR`: Alembic downgrade to empty, then upgrade to head. For other Alembic commands, run `uv run --project backend alembic -c backend/alembic.ini …` from the repo root. A new migration starts from `revision --autogenerate`; read it before committing, since the tests fail if models and migrations disagree. |
@@ -222,7 +225,7 @@ Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`; pretti
 | migrations | upgrade from empty → downgrade → upgrade; `alembic check`; on PRs, migrations already on `main` aren't modified, renamed or deleted (add a new one instead) |
 | frontend | `pnpm install --frozen-lockfile`; svelte-check (strict, fails on warnings); eslint (typescript-eslint `strictTypeChecked`); prettier; Vitest; `vite build`. The backend job's pre-commit run skips the frontend hooks, since it has no `node_modules`. |
 | contract | Export OpenAPI from the app, regenerate TS types (`openapi-typescript`); fail if the committed types differ |
-| docker | hadolint; build image; image smoke test (container starts, `/api/health` ok, `exiftool -ver` / `ffmpeg -version` match pinned versions) |
+| docker | hadolint; build the image (layers cached in GitHub Actions); `scripts/docker_smoke.sh`: the container starts, `/api/health` is ok, `/` serves the frontend and its script, it runs as a non-root user, `exiftool -ver`, `ffmpeg -version` and `ffprobe -version` match the pins in `scripts/bootstrap.sh`, there's no Node toolchain and no `dev` or `export` packages, the runtime dependencies import, and the worker runs `--once` against a freshly migrated database |
 | audit | `pip-audit` on the runtime dependencies (`just audit`; fails on any known vulnerability, since pip-audit has no severity filter), `pnpm audit --prod` — fail on high/critical |
 
 ### CI on `main` and nightly
@@ -281,7 +284,7 @@ These are set in the GitHub repo settings, not in files:
    - **open_clip 3.3 → ONNX:** `torch.onnx.export(..., dynamo=True)` needs `onnxscript`. A dynamic batch axis needs `dynamic_shapes` with an example batch of at least 2, because `dynamic_axes` gets specialised to the example. The onnxruntime output matches torch to within 3e-6.
    - Also resolved: numpy 2.5, onnxruntime 1.30, OpenCV 5.0 (headless), Pillow 12.3, torch 2.14 (CPU).
 4. ~~Write `mise.toml`, `justfile`, `scripts/bootstrap.sh`, pre-commit config, and the CI workflow skeleton before any feature code, so every subsequent change lands with the checks already in place.~~ Done on 2026-10-02. The backend checks from §7–8 are live: pre-commit, `just lint`/`typecheck`/`test`/`audit`/`check`, and the `backend` and `audit` CI jobs in `.github/workflows/ci.yml`. The `backend/src/photo_triage` subpackages from §3 exist as empty packages so the import contracts apply from the first line of feature code. Still to add as their code lands:
-   - CI jobs: contract, docker; model tier and e2e on `main`/nightly. (The migrations and frontend jobs landed on 2026-10-03.)
+   - CI jobs: contract; model tier and e2e on `main`/nightly. (The migrations and frontend jobs landed on 2026-10-03, and docker on 2026-10-06.)
    - ~~Pre-commit: prettier, eslint, and pnpm lockfile checks (with the frontend).~~ Done on 2026-10-03.
    - `pnpm audit --prod` in the audit job, once the frontend has runtime dependencies (it has none yet: Vite bundles everything).
    - The ≥ 90% branch-coverage gates on `files/`, identity/move detection, and purge (the 75% overall gate is live).

@@ -91,6 +91,12 @@ web-check:
     pnpm run test
     pnpm run build
 
+# Lint the Dockerfile, build the image and smoke-test it, as the CI docker job does
+image tag="photo-triage:dev":
+    docker run --rm -i hadolint/hadolint:v2.15.1 < docker/Dockerfile  # keep in sync with ci.yml
+    docker build -f docker/Dockerfile -t {{tag}} .
+    scripts/docker_smoke.sh {{tag}}
+
 # Every pre-commit hook against every file
 pre-commit:
     pre-commit run --all-files

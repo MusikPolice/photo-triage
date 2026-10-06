@@ -203,8 +203,9 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just fmt` | Format and auto-fix lint |
 | `just web` | Vite dev server for the frontend, proxying `/api` to `just api` |
 | `just worker` | The background worker alone; `just worker --once` runs every ready job and exits; `just worker pause [STAGE]` / `resume [STAGE]` pause and resume it |
+| `just image` | Build the Docker image and smoke-test it, as CI does |
 
-Available today: `api`, `worker`, `web`, `web-sync`, `web-fmt`, `web-check`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `api`, `worker`, `image`, `web`, `web-sync`, `web-fmt`, `web-check`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 
