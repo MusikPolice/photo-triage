@@ -121,6 +121,20 @@ async def test_the_frontend_is_served_at_the_root(with_frontend: AsyncClient) ->
     assert "javascript" in asset.headers["content-type"]
 
 
+@pytest.mark.parametrize("path", ["/activity", "/activity/", "/map/some/where"])
+async def test_the_frontends_pages_get_index_html(with_frontend: AsyncClient, path: str) -> None:
+    page = await with_frontend.get(path)
+    assert page.status_code == 200
+    assert "<title>photo-triage</title>" in page.text
+
+
+@pytest.mark.parametrize("path", ["/assets/missing.js", "/favicon.ico", "/api", "/api/x/y"])
+async def test_missing_files_and_api_routes_are_404s(with_frontend: AsyncClient, path: str) -> None:
+    missing = await with_frontend.get(path)
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "Not Found"}
+
+
 async def test_the_api_comes_before_the_frontend(with_frontend: AsyncClient) -> None:
     assert (await with_frontend.get("/api/health")).json() == {"status": "ok"}
     assert (await with_frontend.get("/api/docs")).status_code == 200
