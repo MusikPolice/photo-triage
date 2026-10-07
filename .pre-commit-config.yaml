@@ -55,6 +55,18 @@ repos:
         entry: python3 scripts/check_file_mutation.py
         files: '^backend/src/.*\.py$'
 
+      - id: shellcheck
+        name: shellcheck
+        language: system
+        entry: scripts/mise-run.sh shellcheck
+        types: [shell]
+
+      - id: hadolint
+        name: hadolint
+        language: system
+        entry: scripts/mise-run.sh hadolint
+        files: '(^|/)Dockerfile$'
+
       - id: uv-lock
         name: uv.lock matches pyproject.toml
         language: system
