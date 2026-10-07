@@ -94,7 +94,7 @@ web-check:
 # Lint the Dockerfile (as pre-commit does), build the image and smoke-test it (as the CI docker job does)
 image tag="photo-triage:dev":
     scripts/mise-run.sh hadolint docker/Dockerfile
-    docker build -f docker/Dockerfile -t {{tag}} .
+    docker build $(scripts/image_pins.sh --build-arg) -f docker/Dockerfile -t {{tag}} .
     scripts/docker_smoke.sh {{tag}}
 
 # Every pre-commit hook against every file

@@ -1,20 +1,24 @@
-# One image for the app and the worker (plan §4). Build from the repo root:
-#   docker build -f docker/Dockerfile -t photo-triage .
+# One image for the app and the worker (plan §4). Build it with `just image`.
 # The app is the default command; the worker runs from the same image with
 #   command: ["python", "-m", "photo_triage.worker"]
 #
-# Versions are pinned (dev-environment §2). Python, Node, pnpm and uv match
-# mise.toml; exiftool and ffmpeg match scripts/bootstrap.sh, which the smoke test
-# (scripts/docker_smoke.sh) checks.
+# Every version is a build arg with no default (dev-environment §2): Python,
+# uv, Node and pnpm from mise.toml, and exiftool and ffmpeg from versions.env.
+# scripts/image_pins.sh turns those into build args, for `just image` and CI. A
+# missing one fails the build with "<NAME>: is not allowed to be unset" (in a
+# FROM) or "<NAME>: parameter null or not set" (in a RUN).
 
-ARG PYTHON_VERSION=3.13.15
-ARG NODE_VERSION=24.21.0
+ARG PYTHON_VERSION
+ARG UV_VERSION
+ARG NODE_VERSION
+
+FROM ghcr.io/astral-sh/uv:${UV_VERSION:?} AS uv
 
 # --- Frontend: vite build ----------------------------------------------------
 
-FROM node:${NODE_VERSION}-trixie-slim AS frontend
-ARG PNPM_VERSION=10.34.6
-RUN npm install --global "pnpm@${PNPM_VERSION}"
+FROM node:${NODE_VERSION:?}-trixie-slim AS frontend
+ARG PNPM_VERSION
+RUN npm install --global "pnpm@${PNPM_VERSION:?}"
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
@@ -30,23 +34,23 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates curl xz-utils \
     && rm -rf /var/lib/apt/lists/*
 # exiftool.org only serves the newest release; SourceForge keeps every version.
-ARG EXIFTOOL_VERSION=13.59
-ARG EXIFTOOL_SHA256=668ea3acececb7235fbd0f4900e72d5f12c9b07e5c778fd36cb1e9b5828fd65a
+ARG EXIFTOOL_VERSION
+ARG EXIFTOOL_SHA256
 RUN curl --fail --silent --show-error --location --retry 3 --output /tmp/exiftool.tar.gz \
-        "https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${EXIFTOOL_VERSION}.tar.gz/download" \
-    && echo "${EXIFTOOL_SHA256}  /tmp/exiftool.tar.gz" | sha256sum --check \
+        "https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${EXIFTOOL_VERSION:?}.tar.gz/download" \
+    && echo "${EXIFTOOL_SHA256:?}  /tmp/exiftool.tar.gz" | sha256sum --check \
     && mkdir /opt/exiftool \
     && tar -xzf /tmp/exiftool.tar.gz -C /opt/exiftool --strip-components=1 \
     && rm /tmp/exiftool.tar.gz
 # The same static build as local dev. The release URL is rolling, so the
 # old-releases path comes first and the checksum guards against drift.
-ARG FFMPEG_VERSION=7.0.2
-ARG FFMPEG_SHA256=abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67
+ARG FFMPEG_VERSION
+ARG FFMPEG_SHA256
 RUN for url in \
-        "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz" \
+        "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION:?}-amd64-static.tar.xz" \
         "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"; do \
         curl --fail --silent --show-error --location --retry 3 --output /tmp/ffmpeg.tar.xz "$url" \
-            && echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum --check --status \
+            && echo "${FFMPEG_SHA256:?}  /tmp/ffmpeg.tar.xz" | sha256sum --check --status \
             && break; \
         rm -f /tmp/ffmpeg.tar.xz; \
     done \
@@ -57,8 +61,8 @@ RUN for url in \
 
 # --- Backend: runtime dependencies only --------------------------------------
 
-FROM python:${PYTHON_VERSION}-slim-trixie AS backend
-COPY --from=ghcr.io/astral-sh/uv:0.10.12 /uv /usr/local/bin/uv
+FROM python:${PYTHON_VERSION:?}-slim-trixie AS backend
+COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
@@ -75,7 +79,7 @@ RUN uv sync --locked
 
 # --- Runtime -----------------------------------------------------------------
 
-FROM python:${PYTHON_VERSION}-slim-trixie
+FROM python:${PYTHON_VERSION:?}-slim-trixie
 # exiftool needs the full perl (perl-base lacks modules it loads).
 # hadolint ignore=DL3008
 RUN apt-get update \

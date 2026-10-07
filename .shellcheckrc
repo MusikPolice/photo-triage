@@ -1,0 +1,4 @@
+# Follow `source` into other files (versions.env), resolving paths from the
+# script's own folder.
+external-sources=true
+source-path=SCRIPTDIR

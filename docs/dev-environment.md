@@ -29,7 +29,16 @@ C:\134Users\134jonfr\134Pictures  /mnt/sample-pictures  drvfs  ro,noatime,uid=10
 
 ## 2. Toolchain
 
-All versions are pinned. `mise.toml` pins the language runtimes and CLI tools; lockfiles pin libraries; the Dockerfile pins system tools. `just doctor` verifies a local environment matches.
+All versions are pinned, and each pin is written once. `mise.toml` pins the language runtimes and CLI tools. `versions.env` (plain `KEY=value` lines at the repo root) pins the rest: exiftool and ffmpeg with their SHA-256s, and pre-commit. Lockfiles pin libraries. Everything else reads those files:
+
+- `scripts/bootstrap.sh` sources `versions.env`, and `mise install` reads `mise.toml`.
+- The CI backend job loads `versions.env` into its environment. Its tools come from `mise.toml` through mise-action.
+- `docker/Dockerfile` takes every version as a build arg with no default: Python, uv, Node and pnpm from `mise.toml`, and exiftool and ffmpeg from `versions.env`. `scripts/image_pins.sh` prints them, for `just image` and the CI docker job. A plain `docker build` without them fails, naming the missing arg.
+- `scripts/docker_smoke.sh` checks the image's exiftool and ffmpeg against `versions.env`.
+
+So a bump is a one-line edit (plus the checksum, for exiftool and ffmpeg). `just doctor` verifies a local environment matches.
+
+The model weights' checksums live in `scripts/bootstrap.sh`, their only user. `frontend/package.json`'s `packageManager` still repeats the pnpm version from `mise.toml`.
 
 | Tool | Version | Pinned in | Purpose |
 |---|---|---|---|
@@ -41,8 +50,9 @@ All versions are pinned. `mise.toml` pins the language runtimes and CLI tools; l
 | just | 1.x | `mise.toml` | Task runner (`justfile`) |
 | shellcheck | 0.11.x | `mise.toml` | Lints the shell scripts (pre-commit) |
 | hadolint | 2.x | `mise.toml` | Lints `docker/Dockerfile` (pre-commit, `just image`) |
-| exiftool | 13.x | `scripts/bootstrap.sh` and `docker/Dockerfile`: the same tarball, by version and checksum (from SourceForge, which keeps old releases) | Metadata read/write. Ubuntu's apt version is too old for reliable HEIC/MWG writes. |
-| ffmpeg | 7.0.x | `scripts/bootstrap.sh` and `docker/Dockerfile`: the same static build, by version and checksum, so dev, CI and the image run one binary. Ubuntu 24.04's apt version is 6.1. Debian trixie's (7.1) was the plan for the image, but an apt version pin breaks whenever Debian ships a security update, and it wouldn't match dev. The image's smoke test checks both tools against the bootstrap's pins. | Video frames, posters |
+| pre-commit | 4.x | `versions.env` (installed with `uv tool install`) | Git hooks and their checks (§8) |
+| exiftool | 13.x | `versions.env`: one tarball, by version and checksum, for the bootstrap and the image (from SourceForge, which keeps old releases) | Metadata read/write. Ubuntu's apt version is too old for reliable HEIC/MWG writes. |
+| ffmpeg | 7.0.x | `versions.env`: one static build, by version and checksum, so dev, CI and the image run one binary. Ubuntu 24.04's apt version is 6.1. Debian trixie's (7.1) was the plan for the image, but an apt version pin breaks whenever Debian ships a security update, and it wouldn't match dev. The image's smoke test checks both tools against `versions.env`. | Video frames, posters |
 | Docker Engine + Compose | 29.x / v2 plugin | Docker Desktop (WSL integration) | Integration stack, e2e |
 | Ollama | pinned image tag | `compose.yaml` | LLM tagging service |
 
@@ -85,7 +95,7 @@ That output lands in Claude's context, so the session starts already knowing tha
 
 ```
 photo-triage/
-  mise.toml  justfile  compose.yaml  compose.dev.yaml  .env.example
+  mise.toml  versions.env  justfile  compose.yaml  compose.dev.yaml  .env.example
   backend/
     pyproject.toml  uv.lock  alembic.ini
     src/photo_triage/
@@ -102,7 +112,7 @@ photo-triage/
   frontend/
     package.json  pnpm-lock.yaml  src/  tests/  e2e/
   docker/Dockerfile  .dockerignore (an allowlist: only what the build copies)
-  scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, docker_smoke.sh, mise-run.sh, ...
+  scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, docker_smoke.sh, image_pins.sh, mise-run.sh, ...
   .claude/skills/ plan-phase, work-issue, new-issue, grill-me (see CLAUDE.md)
   docs/
 ```
@@ -128,7 +138,7 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 | `just web` | The Vite dev server for `frontend/`, with hot reload. It proxies `/api` to the API on `APP_PORT`, which it reads like the backend does: the environment first, then the repo-root `.env`, then 8000. Run `just api` alongside. Extra arguments go to Vite, e.g. `just web --host` to reach it from another device. |
 | `just web-sync` / `just web-fmt` / `just web-check` | Install the frontend dependencies as locked; format and auto-fix lint; run svelte-check, eslint, prettier, Vitest and `vite build` (part of `just check`). |
 | `just worker` | The worker alone: `python -m photo_triage.worker`, from the repo root like `just api`. At startup it counts any job left `running` when it last stopped as a failed attempt: the job goes back to its place in the queue, or is parked after 5 attempts. Then it runs jobs in priority order until SIGINT or SIGTERM, finishing the job in progress first (a second signal stops at once). `just worker --once` runs every ready job and exits; jobs waiting out a retry backoff are left for later. Stages without a runner (all of them until Phase 2) stay in the queue. Before each claim it checks `worker_controls` and quiet hours, and logs at `INFO` when its state changes (`Worker paused`, `Quiet hours until …`, `Worker running; paused stages: …`). While it runs, a thread writes a heartbeat to `worker_heartbeat` every 5 s, and a clean stop records `stopped_at`, so the API can say when the worker isn't running. `just worker pause [STAGE]` and `just worker resume [STAGE]` pause and resume the whole worker, or one stage, as the Activity page does: a running worker picks the change up before its next claim, and a job already running finishes. They record your user name as the actor (`--actor NAME` to override) and log the resulting state. |
-| `just image` | Lint `docker/Dockerfile` with hadolint (as pre-commit does), then build the image (`photo-triage:dev`, or `just image TAG`) and run `scripts/docker_smoke.sh` on it, as the CI `docker` job does. One image runs both: the API by default (`python -m photo_triage.api --host 0.0.0.0` on port 8000, as UID 1000, with `PHOTO_DIR=/photos`, `TRASH_DIR=/trash` and `DATA_DIR=/data`), and the worker with the command `python -m photo_triage.worker`. FastAPI serves the built frontend at `/` and the API under `/api`. `just api` serves `frontend/dist` too, if you've run `vite build`. |
+| `just image` | Lint `docker/Dockerfile` with hadolint (as pre-commit does), then build the image (`photo-triage:dev`, or `just image TAG`) with the pins from `scripts/image_pins.sh` (§2) and run `scripts/docker_smoke.sh` on it, as the CI `docker` job does. One image runs both: the API by default (`python -m photo_triage.api --host 0.0.0.0` on port 8000, as UID 1000, with `PHOTO_DIR=/photos`, `TRASH_DIR=/trash` and `DATA_DIR=/data`), and the worker with the command `python -m photo_triage.worker`. FastAPI serves the built frontend at `/` and the API under `/api`. `just api` serves `frontend/dist` too, if you've run `vite build`. |
 | `just stack` | Full production-like Compose stack (built image) against tier-1 fixtures |
 | `just dry-run-full` | Stack against `/mnt/pictures` (read-only), writes disabled — for scale testing |
 | `just db-reset` | Drop and re-migrate the dev database in `DATA_DIR`: Alembic downgrade to empty, then upgrade to head. For other Alembic commands, run `uv run --project backend alembic -c backend/alembic.ini …` from the repo root. A new migration starts from `revision --autogenerate`; read it before committing, since the tests fail if models and migrations disagree. |
@@ -210,7 +220,7 @@ File mutation is confined to `photo_triage.files`. These are enforced both stati
 ### Pre-commit (local, seconds)
 
 - `ruff format --check`, `ruff check`
-- `shellcheck` on shell scripts, `hadolint` on `docker/Dockerfile`
+- `shellcheck` on shell scripts (`.shellcheckrc` lets it follow `source versions.env`), `hadolint` on `docker/Dockerfile`
 - `prettier --check`, `eslint`
 - `uv lock --check`, pnpm lockfile consistency
 - **Media guard:** reject any image/video file added outside `backend/tests/fixtures/synthetic/`; reject files > 1 MB — prevents family photos (tier 2) from ever being committed
@@ -224,11 +234,11 @@ Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`; pretti
 
 | Job | Checks |
 |---|---|
-| backend | `uv sync --locked --no-group export`; pre-commit (all hooks except the frontend ones, so including shellcheck and hadolint); ruff; **pyright strict** (tests and `scripts/` at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt) |
+| backend | loads `versions.env`; `uv sync --locked --no-group export`; pre-commit (all hooks except the frontend ones, so including shellcheck and hadolint); ruff; **pyright strict** (tests and `scripts/` at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt) |
 | migrations | upgrade from empty → downgrade → upgrade; `alembic check`; on PRs, migrations already on `main` aren't modified, renamed or deleted (add a new one instead) |
 | frontend | `pnpm install --frozen-lockfile`; svelte-check (strict, fails on warnings); eslint (typescript-eslint `strictTypeChecked`); prettier; Vitest; `vite build`. The backend job's pre-commit run skips the frontend hooks, since it has no `node_modules`. |
 | contract | Export OpenAPI from the app, regenerate TS types (`openapi-typescript`); fail if the committed types differ |
-| docker | build the image (layers cached in GitHub Actions); `scripts/docker_smoke.sh`: the container starts, `/api/health` is ok, `/` serves the frontend and its script, it runs as a non-root user, `exiftool -ver`, `ffmpeg -version` and `ffprobe -version` match the pins in `scripts/bootstrap.sh`, there's no Node toolchain and no `dev` or `export` packages, the runtime dependencies import, and the worker runs `--once` against a freshly migrated database |
+| docker | build the image with the build args from `scripts/image_pins.sh` (layers cached in GitHub Actions); `scripts/docker_smoke.sh`: the container starts, `/api/health` is ok, `/` serves the frontend and its script, it runs as a non-root user, `exiftool -ver`, `ffmpeg -version` and `ffprobe -version` match the pins in `versions.env`, there's no Node toolchain and no `dev` or `export` packages, the runtime dependencies import, and the worker runs `--once` against a freshly migrated database |
 | audit | `pip-audit` on the runtime dependencies (`just audit`; fails on any known vulnerability, since pip-audit has no severity filter), `pnpm audit --prod` — fail on high/critical |
 
 ### CI on `main` and nightly

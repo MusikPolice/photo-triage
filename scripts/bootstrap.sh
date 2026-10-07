@@ -46,24 +46,21 @@ exec 3>&1
 if ((QUIET)); then exec >/dev/null 2>&1; fi
 
 # ---------------------------------------------------------------------------
-# Pinned versions. Bumping one means updating its checksum too.
+# Pinned versions. exiftool, ffmpeg and pre-commit come from versions.env,
+# which CI and the Dockerfile share; the model weights are pinned here.
 # ---------------------------------------------------------------------------
 
-EXIFTOOL_VERSION="13.59"
-EXIFTOOL_SHA256="668ea3acececb7235fbd0f4900e72d5f12c9b07e5c778fd36cb1e9b5828fd65a"
-# exiftool.org only serves the newest release; SourceForge keeps every version.
+# shellcheck source=../versions.env
+source "$(dirname "${BASH_SOURCE[0]}")/../versions.env"
+
 EXIFTOOL_URL="https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${EXIFTOOL_VERSION}.tar.gz/download"
 
 # Static build (Ubuntu 24.04's apt ffmpeg is 6.1). The release URL is rolling,
 # so the old-releases path is tried first and the checksum guards against drift.
-FFMPEG_VERSION="7.0.2"
-FFMPEG_SHA256="abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67"
 FFMPEG_URLS=(
   "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz"
   "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
 )
-
-PRE_COMMIT_VERSION="4.6.2"
 
 # InsightFace SCRFD + ArcFace pack (non-commercial licence; personal use only).
 BUFFALO_L_URL="https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
