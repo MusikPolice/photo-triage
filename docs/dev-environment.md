@@ -264,6 +264,7 @@ Work toward the spec is tracked on GitHub:
 | `new DRAFT...` | Validates issue drafts: required sections, spec citations that match a heading, checklist criteria, labels and phase. Then files them in order. If any draft is invalid, it files nothing. Use `--dry-run` to validate without filing. |
 | `start N` | Creates branch `N-slug` from `origin/main`, assigns the issue and labels it `in-progress`. |
 | `finish SUMMARY` | Requires a clean tree that's up to date with `origin/main`. Runs `just check`, pushes, and opens or updates the PR, adding the issue's acceptance criteria and `Closes #N` to the body. |
+| `feedback [N]` | Prints everything reviewers have said on PR N, or on the current branch's PR: its state and review decision, each review, the conversation, and each inline thread with its file, line and whether it's resolved or outdated. |
 
 The Claude Code skills in `.claude/skills/` hold the decisions the script can't make:
 - `grill-me` interviews the user one question at a time until a plan is fully agreed. It's a copy of a claude.ai skill, kept in the repo so every session can invoke it.

@@ -70,9 +70,10 @@ run `finish` again. When CI is green, give the user the PR link and stop.
 
 ## Review feedback
 
-When the user leaves comments, read them with `gh pr view N --comments`. Inline
-review comments come from
-`gh api repos/{owner}/{repo}/pulls/N/comments`. Address them on the same branch
+When the user leaves comments, read them with `scripts/tracker.py feedback N`
+(or with no number, for the current branch's PR). It prints the reviews, the
+conversation and every inline thread, with its file, line and whether it's
+resolved or outdated. Address them on the same branch
 and update `.drafts/pr-N.md` if the summary changed, then run `finish` again.
 
 ## After a merge
