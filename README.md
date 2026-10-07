@@ -197,7 +197,8 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just test` | Unit, integration, and safety tests (fake ML models; fast) |
 | `just test-models` | Tests that run the real CLIP/InsightFace models (slow; cached weights) |
 | `just e2e` | Playwright end-to-end tests against `just stack` |
-| `just check` | Everything CI runs: format, lint, pyright, import contracts, tests, coverage, frontend checks |
+| `just check` | Everything CI runs: format, lint, pyright, import contracts, tests, coverage, frontend checks, API types contract |
+| `just api-types` | Regenerate the frontend's TypeScript API types after changing the API |
 | `just dry-run-full` | Scale test against `/mnt/pictures` with metadata writes disabled |
 | `just doctor` | Verify the environment |
 | `just fmt` | Format and auto-fix lint |
@@ -205,7 +206,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just worker` | The background worker alone; `just worker --once` runs every ready job and exits; `just worker pause [STAGE]` / `resume [STAGE]` pause and resume it |
 | `just image` | Build the Docker image and smoke-test it, as CI does |
 
-Available today: `api`, `worker`, `image`, `web`, `web-sync`, `web-fmt`, `web-check`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `api`, `worker`, `image`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 

@@ -91,6 +91,14 @@ web-check:
     pnpm run test
     pnpm run build
 
+# Regenerate the frontend's API types from the backend's OpenAPI schema
+api-types:
+    scripts/api_types.sh
+
+# Fail if the committed API types are out of date (as the CI contract job does)
+contract:
+    scripts/api_types.sh --check
+
 # Lint the Dockerfile (as pre-commit does), build the image and smoke-test it (as the CI docker job does)
 image tag="photo-triage:dev":
     scripts/mise-run.sh hadolint docker/Dockerfile
@@ -102,4 +110,4 @@ pre-commit:
     pre-commit run --all-files
 
 # Everything CI runs on a PR (except audit, which needs the network)
-check: pre-commit lint typecheck test web-check
+check: pre-commit lint typecheck test web-check contract

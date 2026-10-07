@@ -1,6 +1,5 @@
 # CI on every push and PR (docs/dev-environment.md §8).
-# Jobs still to come as their code lands: contract, and (on main/nightly) the
-# model tier and e2e.
+# Jobs still to come as their code lands: on main/nightly, the model tier and e2e.
 name: CI
 
 on:
@@ -100,6 +99,30 @@ jobs:
 
       - name: vite build
         run: pnpm run build
+
+  # The frontend's API types match the backend's OpenAPI schema.
+  contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: python uv node pnpm
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: contract-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: contract-
+
+      - name: Install dependencies
+        run: |
+          uv sync --locked --no-group export --project backend
+          pnpm --dir frontend install --frozen-lockfile
+
+      - name: API types are up to date
+        run: scripts/api_types.sh --check
 
   migrations:
     runs-on: ubuntu-24.04
