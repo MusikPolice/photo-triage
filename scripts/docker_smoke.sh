@@ -2,18 +2,19 @@
 # Smoke test for the image (dev-environment §8, the `docker` CI job):
 #   scripts/docker_smoke.sh IMAGE
 # Starts the app, checks /api/health and the frontend, the pinned exiftool and
-# ffmpeg (against scripts/bootstrap.sh), the user, what's left out of the image,
+# ffmpeg (against versions.env), the user, what's left out of the image,
 # and that the worker runs from it.
 set -euo pipefail
 
 image="${1:?usage: $0 IMAGE}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-pin() { sed -n "s/^$1=\"\(.*\)\"$/\1/p" "$here/bootstrap.sh"; }
-exiftool_version="$(pin EXIFTOOL_VERSION)"
-ffmpeg_version="$(pin FFMPEG_VERSION)"
+# shellcheck source=../versions.env
+source "$here/../versions.env"
+exiftool_version="${EXIFTOOL_VERSION:-}"
+ffmpeg_version="${FFMPEG_VERSION:-}"
 [[ -n "$exiftool_version" && -n "$ffmpeg_version" ]] || {
-  echo "Couldn't read the pinned versions from scripts/bootstrap.sh" >&2
+  echo "Couldn't read the pinned versions from versions.env" >&2
   exit 1
 }
 

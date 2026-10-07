@@ -15,14 +15,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  PRE_COMMIT_VERSION: "4.6.2"  # keep in sync with scripts/bootstrap.sh
-
 jobs:
   backend:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+
+      # The pins mise.toml doesn't cover (dev-environment §2).
+      - name: Load versions.env
+        run: grep -E '^[A-Z0-9_]+=' versions.env >> "$GITHUB_ENV"
 
       - uses: jdx/mise-action@v5
         with:
@@ -159,12 +160,23 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
+      # Every version the Dockerfile takes, from mise.toml and versions.env.
+      - name: Read the pins
+        id: pins
+        run: |
+          {
+            echo "build_args<<EOF"
+            scripts/image_pins.sh
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build the image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
           tags: photo-triage:ci
+          build-args: ${{ steps.pins.outputs.build_args }}
           load: true
           cache-from: type=gha
           cache-to: type=gha,mode=max

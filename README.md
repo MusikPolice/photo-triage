@@ -148,7 +148,7 @@ cd ~/src/photo-triage
 mise trust && mise install
 ```
 
-Then run the bootstrap script. It installs the pinned `exiftool` and `ffmpeg`, syncs Python and Node dependencies, installs the pre-commit hooks, and downloads model weights to `~/.cache/photo-triage/models`:
+Then run the bootstrap script. It installs the `exiftool`, `ffmpeg` and pre-commit pinned in `versions.env`, syncs Python and Node dependencies, installs the pre-commit hooks, and downloads model weights to `~/.cache/photo-triage/models`:
 
 ```bash
 ./scripts/bootstrap.sh
