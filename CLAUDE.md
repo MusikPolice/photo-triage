@@ -40,6 +40,10 @@ lag behind the code mislead the next session as well as the user.
   implementation needs to diverge from it, or the work answers a question in
   plan §12, propose the edit to the user and don't change the spec quietly.
   Once they agree, update the spec in the same PR.
+- `docs/dev-environment.md` also records decisions: where a tool comes from,
+  what's pinned, how CI and the workflow are designed. Changing one of those is
+  the user's call, like a spec change, so ask first. Describing how things
+  currently work (a new recipe, a check that landed) just needs updating.
 - In a PR, list doc updates in the summary so the reviewer sees them.
 
 ## Debugging

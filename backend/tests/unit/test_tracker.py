@@ -167,3 +167,160 @@ def test_optional_sections_and_bug_label() -> None:
     draft = tracker.parse_draft(text)
     assert draft.labels == ["backend", "bug"]
     assert tracker.validate_draft(draft, PHASES, DOCS) == []
+
+
+# --- feedback ---------------------------------------------------------------
+
+
+def _pr(**fields: object) -> dict[str, object]:
+    pr: dict[str, object] = {
+        "number": 7,
+        "title": "Job queue",
+        "url": "https://github.com/o/r/pull/7",
+        "state": "OPEN",
+        "reviewDecision": None,
+        "reviews": {"nodes": []},
+        "comments": {"nodes": []},
+        "reviewThreads": {"nodes": []},
+    }
+    return pr | fields
+
+
+def _comment(body: str, login: str | None = "reviewer") -> dict[str, object]:
+    author = {"login": login} if login else None
+    return {"author": author, "body": body, "createdAt": "2026-10-07T12:00:00Z"}
+
+
+def test_feedback_with_nothing() -> None:
+    text = tracker.format_feedback(_pr())
+    assert text.splitlines()[:3] == [
+        "PR #7 Job queue",
+        "https://github.com/o/r/pull/7",
+        "State: open; review decision: none",
+    ]
+    assert text.endswith("No reviews or comments yet.")
+
+
+def test_feedback_reviews_and_conversation() -> None:
+    reviews = [
+        {
+            "author": {"login": "a"},
+            "state": "CHANGES_REQUESTED",
+            "body": "Rename it.\n\nPlease.",
+            "submittedAt": "2026-10-07T10:00:00Z",
+        },
+        # The empty wrapper review that holds inline comments is left out.
+        {
+            "author": {"login": "a"},
+            "state": "COMMENTED",
+            "body": "",
+            "submittedAt": "2026-10-07T10:01:00Z",
+        },
+        {
+            "author": {"login": "b"},
+            "state": "APPROVED",
+            "body": "",
+            "submittedAt": "2026-10-07T11:00:00Z",
+        },
+    ]
+    pr = _pr(
+        reviewDecision="CHANGES_REQUESTED",
+        reviews={"nodes": reviews},
+        comments={"nodes": [_comment("Looks close."), _comment("Gone.", login=None)]},
+    )
+    assert tracker.format_feedback(pr).splitlines()[2:] == [
+        "State: open; review decision: changes requested",
+        "",
+        "Reviews:",
+        "  @a changes requested (2026-10-07T10:00:00Z)",
+        "    Rename it.",
+        "",
+        "    Please.",
+        "  @b approved (2026-10-07T11:00:00Z)",
+        "",
+        "Conversation:",
+        "  @reviewer (2026-10-07T12:00:00Z)",
+        "    Looks close.",
+        "  @ghost (2026-10-07T12:00:00Z)",
+        "    Gone.",
+    ]
+
+
+def test_feedback_inline_threads() -> None:
+    threads = [
+        {
+            "isResolved": False,
+            "isOutdated": False,
+            "path": "a.py",
+            "line": 12,
+            "originalLine": 12,
+            "startLine": None,
+            "originalStartLine": None,
+            "comments": {"nodes": [_comment("Unit?"), _comment("Bytes.", login="me")]},
+        },
+        {
+            "isResolved": True,
+            "isOutdated": True,
+            "path": "b.py",
+            "line": None,
+            "originalLine": 30,
+            "startLine": None,
+            "originalStartLine": 28,
+            "comments": {"nodes": [_comment("Split this.")]},
+        },
+    ]
+    text = tracker.format_feedback(_pr(reviewThreads={"nodes": threads}))
+    assert text.split("\n\n", 1)[1].splitlines() == [
+        "Inline comments:",
+        "  a.py:12 (unresolved)",
+        "    @reviewer (2026-10-07T12:00:00Z)",
+        "      Unit?",
+        "    @me (2026-10-07T12:00:00Z)",
+        "      Bytes.",
+        "  b.py:28-30 (resolved, outdated)",
+        "    @reviewer (2026-10-07T12:00:00Z)",
+        "      Split this.",
+    ]
+
+
+@pytest.fixture
+def fake_gh(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """Fakes gh and git: the branch is 7-job-queue, whose PR is #7."""
+    calls: list[tuple[str, ...]] = []
+
+    def gh_json(*args: str) -> object:
+        calls.append(args)
+        if args[:2] == ("pr", "list"):
+            return [{"number": 7}] if "7-job-queue" in args else []
+        return {"data": {"repository": {"pullRequest": _pr()}}}
+
+    monkeypatch.setattr(tracker, "gh_json", gh_json)
+    monkeypatch.setattr(tracker, "git", lambda *args: "7-job-queue")
+    return calls
+
+
+def test_feedback_command(
+    fake_gh: list[tuple[str, ...]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    tracker.main(["feedback", "7"])
+    assert capsys.readouterr().out.startswith("PR #7 Job queue\n")
+    [query] = fake_gh
+    assert query[:2] == ("api", "graphql")
+    assert "number=7" in query
+
+
+def test_feedback_defaults_to_the_branch_pr(
+    fake_gh: list[tuple[str, ...]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    tracker.main(["feedback"])
+    assert "No reviews or comments yet." in capsys.readouterr().out
+    assert fake_gh[0][:2] == ("pr", "list")
+    assert "number=7" in fake_gh[1]
+
+
+def test_feedback_without_a_pr(
+    monkeypatch: pytest.MonkeyPatch, fake_gh: list[tuple[str, ...]]
+) -> None:
+    monkeypatch.setattr(tracker, "git", lambda *args: "8-no-pr")
+    with pytest.raises(SystemExit):
+        tracker.main(["feedback"])

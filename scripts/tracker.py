@@ -10,6 +10,7 @@ mechanical steps so they happen the same way every time:
   new DRAFT... [--dry-run]  validate issue drafts, then file them in the order given
   start N               branch N-slug off origin/main, assign the issue, label it in-progress
   finish SUMMARY        run `just check`, push, and open or update the PR closing the issue
+  feedback [N]          print the reviews and comments on PR N (default: this branch's PR)
 
 Issue draft format (docs/plan.md and docs/dev-environment.md sections are
 cited as "plan §6.11" or "dev-environment §7"):
@@ -258,6 +259,63 @@ def pr_body(summary: str, number: int, issue_body: str) -> str:
     )
 
 
+def _author(node: dict[str, Any]) -> str:
+    # A deleted account comes back as a null author.
+    return f"@{(node.get('author') or {}).get('login', 'ghost')}"
+
+
+def _indent(text: str, prefix: str) -> str:
+    return "\n".join(f"{prefix}{line}" if line else "" for line in text.strip().splitlines())
+
+
+def format_feedback(pr: dict[str, Any]) -> str:
+    """Everything a reviewer has said on a PR, from the FEEDBACK_QUERY result."""
+    decision = (pr.get("reviewDecision") or "none").replace("_", " ").lower()
+    out = [
+        f"PR #{pr['number']} {pr['title']}",
+        f"{pr['url']}",
+        f"State: {pr['state'].lower()}; review decision: {decision}",
+    ]
+    # A review with no body that only comments is the wrapper for inline
+    # comments, which are listed under their threads instead.
+    reviews = [r for r in pr["reviews"]["nodes"] if r["body"].strip() or r["state"] != "COMMENTED"]
+    comments = pr["comments"]["nodes"]
+    threads = pr["reviewThreads"]["nodes"]
+    if not (reviews or comments or threads):
+        out.append("\nNo reviews or comments yet.")
+        return "\n".join(out)
+
+    if reviews:
+        out.append("\nReviews:")
+        for r in reviews:
+            state = r["state"].replace("_", " ").lower()
+            out.append(f"  {_author(r)} {state} ({r['submittedAt']})")
+            if r["body"].strip():
+                out.append(_indent(r["body"], "    "))
+    if comments:
+        out.append("\nConversation:")
+        for c in comments:
+            out.append(f"  {_author(c)} ({c['createdAt']})")
+            out.append(_indent(c["body"], "    "))
+    if threads:
+        out.append("\nInline comments:")
+        for t in threads:
+            line = t["line"] or t["originalLine"]
+            start = t.get("startLine") or t.get("originalStartLine")
+            where = (
+                f"{t['path']}:{start}-{line}" if start and start != line else f"{t['path']}:{line}"
+            )
+            flags = [
+                "resolved" if t["isResolved"] else "unresolved",
+                *(["outdated"] if t["isOutdated"] else []),
+            ]
+            out.append(f"  {where} ({', '.join(flags)})")
+            for c in t["comments"]["nodes"]:
+                out.append(f"    {_author(c)} ({c['createdAt']})")
+                out.append(_indent(c["body"], "      "))
+    return "\n".join(out)
+
+
 # ---------------------------------------------------------------------------
 # git and gh
 # ---------------------------------------------------------------------------
@@ -304,6 +362,25 @@ def load_phases() -> list[Phase]:
 
 def milestones() -> list[dict[str, Any]]:
     return gh_json("api", "repos/{owner}/{repo}/milestones?state=all&per_page=100") or []
+
+
+FEEDBACK_QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number title url state reviewDecision
+      reviews(first: 100) { nodes { author { login } state body submittedAt } }
+      comments(first: 100) { nodes { author { login } body createdAt } }
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved isOutdated path line originalLine startLine originalStartLine
+          comments(first: 100) { nodes { author { login } body createdAt } }
+        }
+      }
+    }
+  }
+}
+"""
 
 
 def issue(number: int) -> dict[str, Any]:
@@ -560,6 +637,32 @@ def cmd_finish(args: argparse.Namespace) -> None:
         print(url)
 
 
+def cmd_feedback(args: argparse.Namespace) -> None:
+    number = args.number
+    if number is None:
+        branch = git("branch", "--show-current")
+        prs = gh_json("pr", "list", "--head", branch, "--state", "all", "--json", "number")
+        if not prs:
+            fail(f"branch {branch!r} has no PR; pass its number")
+        number = prs[0]["number"]
+    data = gh_json(
+        "api",
+        "graphql",
+        "-F",
+        "owner={owner}",
+        "-F",
+        "name={repo}",
+        "-F",
+        f"number={number}",
+        "-f",
+        f"query={FEEDBACK_QUERY}",
+    )
+    pr = data["data"]["repository"]["pullRequest"]
+    if pr is None:
+        fail(f"#{number} isn't a pull request")
+    print(format_feedback(pr))
+
+
 def main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     sub = parser.add_subparsers(required=True)
@@ -580,6 +683,9 @@ def main(argv: list[str]) -> None:
     p = sub.add_parser("finish", help="run just check, push, and open or update the PR")
     p.add_argument("summary", help="markdown file with Summary and Verification sections")
     p.set_defaults(func=cmd_finish)
+    p = sub.add_parser("feedback", help="print the reviews and comments on a PR")
+    p.add_argument("number", type=int, nargs="?", help="PR number (default: this branch's PR)")
+    p.set_defaults(func=cmd_feedback)
     args = parser.parse_args(argv)
     args.func(args)
 
