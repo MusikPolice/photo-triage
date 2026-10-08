@@ -54,6 +54,32 @@ lag behind the code mislead the next session as well as the user.
   `just worker --once` runs every ready job and exits, `FAKE_NOW` sets its clock,
   and `WORKER_NOOP_STAGE=true` with `just worker noop N` queues test jobs.
 
+## Looking at pages
+
+Claude Code can see the frontend without a browser: `just shot /activity`
+saves screenshots at desktop and phone widths, and Claude reads the PNGs. Use
+it to troubleshoot a layout the user reports, and to check any frontend change
+before opening its PR.
+
+- **Setup, once per machine:** run `scripts/bootstrap.sh`. It installs
+  Playwright's headless Chromium, and asks for your sudo password once to
+  install the system libraries it needs. Then `just doctor` should report
+  "Chromium installed" and "Chromium's system libraries present". After a
+  Playwright upgrade in `pnpm-lock.yaml`, `just doctor` says to run the
+  bootstrap again.
+- **Taking screenshots:** `just shot PATH` needs nothing running. It starts a
+  scratch copy of the app (empty folders, no `.env`, free ports), shoots and
+  stops it. `--noop N` queues work so the Activity page has something to show,
+  and `--click`/`--wait` reach states like "paused". For many shots, keep
+  `just preview` running in another terminal (Claude runs it in the
+  background) and `just shot` uses it. `just shot --help` lists the options.
+- **On PRs:** a PR that changes how a page looks lists its screenshots under
+  `## Screenshots` in the PR draft, as
+  `![caption](.screenshots/scratch/NAME.png)`, and `finish` publishes them.
+  Only scratch-stack screenshots can be published. The repo is public, and
+  `just shot --base` against your own `just dev` can show real photos, so those
+  stay local.
+
 ## Checks
 
 `just check` runs everything CI runs on a PR: pre-commit, lint, the

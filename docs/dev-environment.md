@@ -53,6 +53,7 @@ The model weights' checksums live in `scripts/bootstrap.sh`, their only user. `f
 | pre-commit | 4.x | `versions.env` (installed with `uv tool install`) | Git hooks and their checks (§8) |
 | exiftool | 13.x | `versions.env`: one tarball, by version and checksum, for the bootstrap and the image (from SourceForge, which keeps old releases) | Metadata read/write. Ubuntu's apt version is too old for reliable HEIC/MWG writes. |
 | ffmpeg | 7.0.x | `versions.env`: one static build, by version and checksum, so dev, CI and the image run one binary. Ubuntu 24.04's apt version is 6.1. Debian trixie's (7.1) was the plan for the image, but an apt version pin breaks whenever Debian ships a security update, and it wouldn't match dev. The image's smoke test checks both tools against `versions.env`. | Video frames, posters |
+| Playwright + headless Chromium | 1.x | `frontend/pnpm-lock.yaml` (`@playwright/test`); the bootstrap installs the matching Chromium headless shell into `~/.cache/ms-playwright`, and its apt libraries | `just shot` and `just preview` now; e2e later (§6) |
 | Docker Engine + Compose | 29.x / v2 plugin | Docker Desktop (WSL integration) | Integration stack, e2e |
 | Ollama | pinned image tag | `compose.yaml` | LLM tagging service |
 
@@ -72,11 +73,11 @@ Both groups are `default-groups`, so a plain `uv sync` installs everything local
 
 ### Bootstrap (fresh WSL)
 
-`scripts/bootstrap.sh` — idempotent, and assumes nothing on a fresh Ubuntu 24.04 but git: installs apt prerequisites (curl, build-essential, cifs-utils; no libheif, since the pillow-heif wheel bundles its own), mise (plus `~/.bashrc` activation), and the pinned exiftool, ffmpeg, and pre-commit; runs `mise install`, `uv sync`, `pnpm install`, `pre-commit install`; downloads model weights to `~/.cache/photo-triage/models`. Downloads are verified against pinned SHA-256 checksums. It also checks what it can't install: Docker is reachable, and the photo mounts are present and read-only.
+`scripts/bootstrap.sh` — idempotent, and assumes nothing on a fresh Ubuntu 24.04 but git: installs apt prerequisites (curl, build-essential, cifs-utils; no libheif, since the pillow-heif wheel bundles its own), mise (plus `~/.bashrc` activation), and the pinned exiftool, ffmpeg, and pre-commit; runs `mise install`, `uv sync`, `pnpm install`, `pre-commit install`; installs Playwright's headless Chromium and, through `playwright install-deps` (which uses sudo), the apt libraries it needs; downloads model weights to `~/.cache/photo-triage/models`. Downloads are verified against pinned SHA-256 checksums. It also checks what it can't install: Docker is reachable, and the photo mounts are present and read-only.
 
 ### Verifying the environment: `--check` and `just doctor`
 
-`scripts/bootstrap.sh --check` runs the same detection as a bootstrap but changes nothing: no sudo, no network. It prints each problem with its fix and exits 1 if anything needs fixing. That includes a missing or wrong-version tool, missing weights, a `uv.lock` out of date with `pyproject.toml`, a `.venv` or `node_modules` out of date with its lockfile, a backend package with native code that doesn't import (`cv2`, `onnxruntime`, `pillow_heif`, `insightface`; a bootstrap reinstalls it), missing git hooks, Docker unreachable, or `/mnt/sample-pictures` absent. A photo mount that is **read-write** is always a failure. Steps whose project files don't exist yet (e.g. `backend/pyproject.toml` before Phase 1) are warnings, not failures.
+`scripts/bootstrap.sh --check` runs the same detection as a bootstrap but changes nothing: no sudo, no network. It prints each problem with its fix and exits 1 if anything needs fixing. That includes a missing or wrong-version tool, missing weights, a `uv.lock` out of date with `pyproject.toml`, a `.venv` or `node_modules` out of date with its lockfile, a backend package with native code that doesn't import (`cv2`, `onnxruntime`, `pillow_heif`, `insightface`; a bootstrap reinstalls it), missing git hooks, Playwright's Chromium or its system libraries missing (found with `ldd`), Docker unreachable, or `/mnt/sample-pictures` absent. A photo mount that is **read-write** is always a failure. Steps whose project files don't exist yet (e.g. `backend/pyproject.toml` before Phase 1) are warnings, not failures.
 
 `just doctor` runs `scripts/bootstrap.sh --check`, followed by app-level checks that need `.env` (e.g. `PHOTO_DIR` isn't writable when it points at `/mnt/pictures`). The tool and version checks live only in the bootstrap script, so installing and verifying can't drift apart.
 
@@ -111,8 +112,9 @@ photo-triage/
       fixtures/synthetic/        committed, generated
   frontend/
     package.json  pnpm-lock.yaml  src/  tests/  e2e/
+    scripts/      screenshot.ts and shot-options.ts (`just shot`)
   docker/Dockerfile  .dockerignore (an allowlist: only what the build copies)
-  scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, docker_smoke.sh, image_pins.sh, api_types.sh, dev.sh, mise-run.sh, ...
+  scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, docker_smoke.sh, image_pins.sh, api_types.sh, dev.sh, scratch_stack.sh, mise-run.sh, ...
   .claude/skills/ plan-phase, work-issue, new-issue, grill-me (see CLAUDE.md)
   docs/
 ```
@@ -142,6 +144,8 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 | `just image` | Lint `docker/Dockerfile` with hadolint (as pre-commit does), then build the image (`photo-triage:dev`, or `just image TAG`) with the pins from `scripts/image_pins.sh` (§2) and run `scripts/docker_smoke.sh` on it, as the CI `docker` job does. One image runs both: the API by default (`python -m photo_triage.api --host 0.0.0.0` on port 8000, as UID 1000, with `PHOTO_DIR=/photos`, `TRASH_DIR=/trash` and `DATA_DIR=/data`), and the worker with the command `python -m photo_triage.worker`. FastAPI serves the API under `/api` and the built frontend at `/`, answering any other path without a file extension (a page such as `/activity`) with its `index.html`; unknown `/api` paths and missing files are still 404s. `just api` serves `frontend/dist` too, if you've run `vite build`. |
 | `just stack` | Full production-like Compose stack (built image) against tier-1 fixtures |
 | `just dry-run-full` | Stack against `/mnt/pictures` (read-only), writes disabled — for scale testing |
+| `just preview` | `scripts/scratch_stack.sh`: a throwaway copy of the app for looking at pages. It runs `scripts/dev.sh` on two free ports against empty photo, trash and data directories in a new temporary folder, with `ENV_FILE=/dev/null` so it reads no `.env`: it never sees the developer's photo library or dev database, and doesn't touch a `just dev` that's running. The noop stage is on. Once the page answers it prints `Scratch stack ready: URL` and writes `.screenshots/preview.json` (its URL and environment) for `just shot`. Ctrl-C stops it and deletes the folder and that file. |
+| `just shot PATH` | `frontend/scripts/screenshot.ts`: full-page screenshots of `PATH` in headless Chromium, at desktop (1280×800) and phone (390×844, touch, 2× pixels) widths, saved as `NAME-desktop.png` and `NAME-phone.png` and printed. It uses a running `just preview`, or else starts a scratch stack for this shot alone (about 5 s) and stops it afterwards, so it needs nothing running. `--noop N` queues noop jobs first, `--wait SELECTOR` waits for an element, `--click SELECTOR` (repeatable) clicks first, `--viewport desktop\|phone` takes one, `--name` names the files. Scratch-stack shots go to `.screenshots/scratch/`, which `tracker.py finish` can publish (§9). `--base URL` shoots a server that's already running, such as your `just dev`, into `.screenshots/local/`, which it won't publish, because that server can show real photos. `just shot --help` lists the options. |
 | `just db-reset` | Drop and re-migrate the dev database in `DATA_DIR`: Alembic downgrade to empty, then upgrade to head. For other Alembic commands, run `uv run --project backend alembic -c backend/alembic.ini …` from the repo root. A new migration starts from `revision --autogenerate`; read it before committing, since the tests fail if models and migrations disagree. |
 | `just fixtures` | Regenerate tier-1 synthetic fixtures |
 | `just doctor` | `scripts/bootstrap.sh --check` (tool versions, lockfile sync, backend packages with native code import, model weights, Docker, mounts read-only), plus `PHOTO_DIR` isn't writable when it points at `/mnt/pictures` (§2) |
@@ -151,6 +155,7 @@ Worker dev affordances, read from `.env` or the environment like the settings in
 - `WORKER_QUIET_HOURS` unset (always on). To try quiet hours, set it with `FAKE_NOW` and `TZ`: `just worker --once` then runs nothing and logs `Quiet hours until …`.
 - `--once` to drain the queue and exit.
 - **`FAKE_NOW`**, a controllable clock for exercising quiet hours and ETA logic. It needs a UTC offset (`FAKE_NOW=2026-10-03T21:59:00-04:00`). The worker's clock starts there and advances in real time. It sets `*_at` columns and backoff; durations in `job_stats` always come from a real monotonic timer. The API reads it too, so `GET /api/activity` shows the same quiet hours as the worker (each process starts its clock when it starts, so the two differ by the time between their starts). The worker heartbeat always uses real time.
+- **`ENV_FILE`** names the file read in place of `.env`. The scratch stack sets it to `/dev/null`, so a developer's `FAKE_NOW`, quiet hours or paths can't reach it.
 - **The `noop` stage**, off unless `WORKER_NOOP_STAGE=true`. `just worker noop 500` queues 500 jobs that each take 0.2 s, to watch the worker and the Activity page at work. Unlike other stages, every finished noop job is kept, so the page counts them; `just db-reset` clears them. It logs to stderr only, since a running worker owns `worker.log`.
 
 `WORKER_THREADS` sets `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS` and `NUMBA_NUM_THREADS` when the worker starts, before any ML library loads.
@@ -264,8 +269,10 @@ Work toward the spec is tracked on GitHub:
 | `status` | Shows the current phase and its issues (in progress, ready, or blocked on an open dependency), plus open PRs. |
 | `new DRAFT...` | Validates issue drafts: required sections, spec citations that match a heading, checklist criteria, labels and phase. Then files them in order. If any draft is invalid, it files nothing. Use `--dry-run` to validate without filing. |
 | `start N` | Creates branch `N-slug` from `origin/main`, assigns the issue and labels it `in-progress`. |
-| `finish SUMMARY` | Requires a clean tree that's up to date with `origin/main`. Runs `just check`, pushes, and opens or updates the PR, adding the issue's acceptance criteria and `Closes #N` to the body. |
+| `finish SUMMARY` | Requires a clean tree that's up to date with `origin/main`. Runs `just check`, pushes, publishes any screenshots in the summary's `Screenshots` section (below), and opens or updates the PR, adding the issue's acceptance criteria and `Closes #N` to the body. |
 | `feedback [N]` | Prints everything reviewers have said on PR N, or on the current branch's PR: its state and review decision, each review, the conversation, and each inline thread with its file, line and whether it's resolved or outdated. |
+
+**Screenshots on PRs.** A PR that changes how a page looks attaches screenshots of it. Take them with `just shot` (scratch stack, not `--base`) and list them in the PR draft under `## Screenshots` as `![caption](.screenshots/scratch/NAME.png)`. `finish` checks each is a scratch-stack PNG, commits them to the `screenshots` branch under `pr-N/` (N is the issue number, as in `.drafts/pr-N.md`), replacing what was there, and embeds them in the PR body by commit URL (`raw.githubusercontent.com/<repo>/<commit>/pr-N/NAME.png`), so a re-run never shows a stale copy. The branch is an orphan that holds only screenshots, kept out of `main`'s history. It uses a scratch git index, so the working tree is untouched. The repo is public, which is why only scratch-stack screenshots, which never show real photos, can be published.
 
 The Claude Code skills in `.claude/skills/` hold the decisions the script can't make:
 - `grill-me` interviews the user one question at a time until a plan is fully agreed. It's a copy of a claude.ai skill, kept in the repo so every session can invoke it.
@@ -304,6 +311,6 @@ These are set in the GitHub repo settings, not in files:
    - `pnpm audit --prod` in the audit job, once the frontend has runtime dependencies (it has none yet: Vite bundles everything).
    - The ≥ 90% branch-coverage gates on `files/`, identity/move detection, and purge (the 75% overall gate is live).
    - Pinned exiftool and ffmpeg in CI, once tests call them.
-   - The `.env` check in `just doctor`, and the app recipes in §5 (`stack`, ...). `just api`, `just web` and `.env.example` landed on 2026-10-03, `just worker` on 2026-10-04, and `just dev` (without Ollama) on 2026-10-08.
+   - The `.env` check in `just doctor`, and the app recipes in §5 (`stack`, ...). `just api`, `just web` and `.env.example` landed on 2026-10-03, `just worker` on 2026-10-04, and `just dev` (without Ollama) on 2026-10-08, as did `just shot` and `just preview`, which brought in Playwright ahead of e2e.
 5. ~~Decide how to track work toward the spec.~~ Done on 2026-10-03. Milestones, issues, and PRs on GitHub, driven by `scripts/tracker.py` (§9).
 6. ~~Plan Phase 1 into issues with the `plan-phase` skill, then start building.~~ Done on 2026-10-03: issues #3–#12 in the Phase 1 milestone.
