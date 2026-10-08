@@ -19,6 +19,7 @@
 #   4. pinned exiftool and ffmpeg into ~/.local/bin (apt versions are too old)
 #   5. pre-commit; then `uv sync`, `pnpm install`, `pre-commit install` once those
 #      project files exist
+#   5b. Playwright's headless Chromium, and its apt libraries (for `just shot`)
 #   6. model weights into ~/.cache/photo-triage/models
 #   7. checks it can't fix: Docker reachable, photo mounts present and read-only
 #
@@ -411,6 +412,62 @@ elif needs_fix "pre-commit git hooks are not installed ($FIX_HINT)"; then
     ok "pre-commit hooks installed"
   else
     fail "pre-commit hooks not installed: pre-commit itself is missing"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 5b. Headless Chromium for `just shot` and `just preview` (Playwright)
+# ---------------------------------------------------------------------------
+
+step "Headless Chromium (Playwright)"
+
+# The headless shell matching the Playwright version in pnpm-lock.yaml, in
+# Playwright's cache. --dry-run only prints where it goes, with no network.
+playwright() { (cd "$REPO_ROOT/frontend" && "$MISE" exec -- pnpm exec playwright "$@"); }
+chromium_dir() {
+  playwright install --dry-run --only-shell chromium 2>/dev/null |
+    sed -n 's/^ *Install location: *\(.*chromium_headless_shell.*\)$/\1/p' | head -n 1
+}
+# The system libraries it needs that aren't installed (from ldd).
+chromium_missing_libs() {
+  ldd "$1" 2>/dev/null | sed -n 's/^\s*\(\S*\) => not found$/\1/p' | sort -u | xargs
+}
+
+if [[ ! -x "$REPO_ROOT/frontend/node_modules/.bin/playwright" ]]; then
+  fail "Chromium not checked: frontend dependencies aren't installed ($FIX_HINT)"
+else
+  dir="$(chromium_dir)"
+  shell=""
+  [[ -n "$dir" ]] && shell="$(compgen -G "$dir/*/chrome-headless-shell" | head -n 1 || true)"
+  if [[ -n "$shell" ]]; then
+    ok "Chromium installed (${dir##*/})"
+  elif needs_fix "Playwright's Chromium is not installed ($FIX_HINT)"; then
+    playwright install --only-shell chromium
+    shell="$(compgen -G "$(chromium_dir)/*/chrome-headless-shell" | head -n 1 || true)"
+    if [[ -n "$shell" ]]; then
+      ok "Chromium installed"
+    else
+      fail "Chromium install didn't produce chrome-headless-shell"
+    fi
+  fi
+
+  if [[ -n "$shell" ]]; then
+    libs="$(chromium_missing_libs "$shell")"
+    if [[ -z "$libs" ]]; then
+      ok "Chromium's system libraries present"
+    elif needs_fix "Chromium is missing system libraries: $libs ($FIX_HINT, which asks for sudo once)"; then
+      if ! sudo -n true 2>/dev/null && [[ ! -t 0 ]]; then
+        die "sudo needs a password but there is no terminal to ask for it. Run this script from an interactive shell."
+      fi
+      # Playwright knows the apt packages for its Chromium, and runs apt-get through sudo.
+      playwright install-deps chromium
+      libs="$(chromium_missing_libs "$shell")"
+      if [[ -z "$libs" ]]; then
+        ok "Chromium's system libraries installed"
+      else
+        fail "Chromium still misses system libraries after install-deps: $libs"
+      fi
+    fi
   fi
 fi
 
