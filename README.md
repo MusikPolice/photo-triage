@@ -192,7 +192,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 
 | Command | What it does |
 |---|---|
-| `just dev` | API + worker + Vite dev server (hot reload) against the sample library; Ollama in Docker |
+| `just dev` | Migrate, then the API, worker and Vite dev server (hot reload) together against the sample library; Ctrl-C stops all three. Ollama in Docker arrives with the Compose stack |
 | `just stack` | Production-like Docker Compose stack against the committed synthetic fixtures |
 | `just test` | Unit, integration, and safety tests (fake ML models; fast) |
 | `just test-models` | Tests that run the real CLIP/InsightFace models (slow; cached weights) |
@@ -206,7 +206,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just worker` | The background worker alone; `just worker --once` runs every ready job and exits; `just worker pause [STAGE]` / `resume [STAGE]` pause and resume it |
 | `just image` | Build the Docker image and smoke-test it, as CI does |
 
-Available today: `api`, `worker`, `image`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `dev`, `api`, `worker`, `image`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 

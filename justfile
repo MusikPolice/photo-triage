@@ -1,6 +1,6 @@
 # Task runner (docs/dev-environment.md §5). `just` lists recipes.
-# The other app recipes (dev, stack, ...) arrive with the rest of the
-# Phase 1 scaffold.
+# The other app recipes (stack, ...) arrive with the rest of the Phase 1
+# scaffold.
 
 # List recipes
 default:
@@ -9,6 +9,10 @@ default:
 # Verify the dev environment (tool versions, lockfiles, weights, Docker, mounts)
 doctor:
     ./scripts/bootstrap.sh --check
+
+# Migrate, then the API, worker and Vite dev server together; Ctrl-C stops all three. Extra arguments go to Vite
+dev *args:
+    scripts/dev.sh {{args}}
 
 # API on APP_PORT with reload. Runs from the repo root so `.env` and `./data` resolve here.
 api *args:

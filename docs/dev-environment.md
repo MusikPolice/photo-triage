@@ -112,7 +112,7 @@ photo-triage/
   frontend/
     package.json  pnpm-lock.yaml  src/  tests/  e2e/
   docker/Dockerfile  .dockerignore (an allowlist: only what the build copies)
-  scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, docker_smoke.sh, image_pins.sh, api_types.sh, mise-run.sh, ...
+  scripts/        bootstrap.sh, tracker.py (GitHub issues/PRs), check_file_mutation.py, docker_smoke.sh, image_pins.sh, api_types.sh, dev.sh, mise-run.sh, ...
   .claude/skills/ plan-phase, work-issue, new-issue, grill-me (see CLAUDE.md)
   docs/
 ```
@@ -133,7 +133,7 @@ Because tiers 2 and 3 are read-only, anything that needs to write (trash, EXIF w
 
 | Command | What it runs |
 |---|---|
-| `just dev` | API (`uvicorn --reload`), worker process, and Vite dev server (proxying `/api` to the API) natively in WSL; Ollama via `compose.dev.yaml`. Uses `.env` → `PHOTO_DIR=/mnt/sample-pictures` (read-only), local `data/` and `trash/` dirs. |
+| `just dev` | `scripts/dev.sh`: migrates the database in `DATA_DIR` (`alembic upgrade head`), then runs the API (`--reload`), the worker and the Vite dev server natively in WSL, in one terminal, each line prefixed `api`, `worker` or `web`. Open the URL Vite prints (`http://localhost:5173`, which Windows browsers reach through WSL's localhost forwarding). The worker runs under `watchfiles`, which restarts it after its current job when backend code changes. Ctrl-C stops all three, the worker after its current job, and if one exits the others are stopped. Extra arguments go to Vite, e.g. `just dev --host` to try it from a phone. Uses `.env` → `PHOTO_DIR=/mnt/sample-pictures` (read-only), local `data/` and `trash/` dirs. To watch the Activity page at work, set `WORKER_NOOP_STAGE=true` in `.env` and run `just worker noop 500` in a second terminal. The migration is applied without a backup, so after testing a branch that adds one, its revision stays in the dev database: back on a branch without it, `just dev` stops and says to downgrade from that branch or delete `photo-triage.db` in `DATA_DIR`. Ollama (`compose.dev.yaml`) and the migrate step with its backup arrive with #12 and #16. |
 | `just api` | The API alone: `python -m photo_triage.api --reload`, on `APP_PORT`, from the repo root so `.env` and `./data` resolve there. Exits with a list of what's wrong if `PHOTO_DIR` or `TRASH_DIR` is missing. API docs at `/api/docs`. `curl -N localhost:$APP_PORT/api/events` shows the Activity event stream. On a stop or reload, the API ends open event streams so it doesn't wait for them, and browsers reconnect. |
 | `just web` | The Vite dev server for `frontend/`, with hot reload. It proxies `/api` to the API on `APP_PORT`, which it reads like the backend does: the environment first, then the repo-root `.env`, then 8000. Run `just api` alongside. Extra arguments go to Vite, e.g. `just web --host` to reach it from another device. |
 | `just web-sync` / `just web-fmt` / `just web-check` | Install the frontend dependencies as locked; format and auto-fix lint; run svelte-check, eslint, prettier, Vitest and `vite build` (part of `just check`). |
@@ -304,6 +304,6 @@ These are set in the GitHub repo settings, not in files:
    - `pnpm audit --prod` in the audit job, once the frontend has runtime dependencies (it has none yet: Vite bundles everything).
    - The ≥ 90% branch-coverage gates on `files/`, identity/move detection, and purge (the 75% overall gate is live).
    - Pinned exiftool and ffmpeg in CI, once tests call them.
-   - The `.env` check in `just doctor`, and the app recipes in §5 (`dev`, `stack`, ...). `just api`, `just web` and `.env.example` landed on 2026-10-03, and `just worker` on 2026-10-04.
+   - The `.env` check in `just doctor`, and the app recipes in §5 (`stack`, ...). `just api`, `just web` and `.env.example` landed on 2026-10-03, `just worker` on 2026-10-04, and `just dev` (without Ollama) on 2026-10-08.
 5. ~~Decide how to track work toward the spec.~~ Done on 2026-10-03. Milestones, issues, and PRs on GitHub, driven by `scripts/tracker.py` (§9).
 6. ~~Plan Phase 1 into issues with the `plan-phase` skill, then start building.~~ Done on 2026-10-03: issues #3–#12 in the Phase 1 milestone.
