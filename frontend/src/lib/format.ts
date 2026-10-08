@@ -111,3 +111,25 @@ export function workerLabel(
       return { text: "Stopped", tone: "alert" };
   }
 }
+
+export interface StageGroups {
+  /** Stages with work: running first, then queued, then paused. */
+  working: StageActivity[];
+  /** Stages with nothing queued, running or waiting to retry. */
+  idle: StageActivity[];
+}
+
+function workRank(stage: StageActivity): number {
+  if (stage.running > 0) return 0;
+  return stage.paused ? 2 : 1;
+}
+
+/** Splits the stages for the Activity page. Each group keeps priority order
+ * within a rank. */
+export function groupStages(stages: StageActivity[]): StageGroups {
+  const working = stages.filter((s) => s.pending + s.running + s.errored > 0);
+  return {
+    working: working.toSorted((a, b) => workRank(a) - workRank(b)),
+    idle: stages.filter((s) => !working.includes(s)),
+  };
+}

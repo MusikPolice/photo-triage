@@ -5,6 +5,7 @@ import {
   doneOfTotal,
   formatPercent,
   formatTime,
+  groupStages,
   fraction,
   stageCounts,
   stageName,
@@ -100,5 +101,27 @@ describe("workerLabel", () => {
   it("says when it can't reach the API, or hasn't heard yet", () => {
     expect(workerLabel(worker(), "lost", NOW).text).toBe("Offline");
     expect(workerLabel(null, "connecting", NOW).text).toBe("Connecting…");
+  });
+});
+
+describe("groupStages", () => {
+  const names = (stages: StageActivity[]) => stages.map((s) => s.stage);
+
+  it("puts stages with work first, running ones at the top, paused ones last", () => {
+    const groups = groupStages([
+      stage({ stage: "metadata_write", done: 5, total: 5 }),
+      stage({ stage: "scan", pending: 3, total: 3 }),
+      stage({ stage: "thumbnail", paused: true, pending: 2, total: 2 }),
+      stage({ stage: "clip", running: 1, pending: 4, total: 5 }),
+      stage({ stage: "quality", errored: 1, total: 1 }),
+      stage({ stage: "faces", parked: 2, total: 2 }),
+      stage({ stage: "noop" }),
+    ]);
+    expect(names(groups.working)).toEqual(["clip", "scan", "quality", "thumbnail"]);
+    expect(names(groups.idle)).toEqual(["metadata_write", "faces", "noop"]);
+  });
+
+  it("calls everything idle when nothing is queued", () => {
+    expect(groupStages([stage()]).working).toEqual([]);
   });
 });

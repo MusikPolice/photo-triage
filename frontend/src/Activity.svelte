@@ -1,10 +1,12 @@
 <script lang="ts">
   import type { ActivityFeed } from "./lib/activity.svelte";
-  import type { Stage } from "./lib/api";
+  import type { Stage, StageActivity } from "./lib/api";
   import {
     doneOfTotal,
+    formatCount,
     formatPercent,
     fraction,
+    groupStages,
     stageCounts,
     stageName,
     workerLabel,
@@ -13,7 +15,16 @@
   let { feed }: { feed: ActivityFeed } = $props();
 
   const activity = $derived(feed.activity);
+  const groups = $derived(groupStages(activity?.stages ?? []));
   const label = $derived(workerLabel(activity?.worker ?? null, feed.connection, new Date()));
+
+  /** What an idle stage has to show: its done and parked counts. */
+  function idleSummary(stage: StageActivity): string {
+    const parts = [];
+    if (stage.done > 0) parts.push(`${formatCount(stage.done)} done`);
+    if (stage.parked > 0) parts.push(`${formatCount(stage.parked)} parked`);
+    return parts.length > 0 ? parts.join(" · ") : "Nothing yet";
+  }
 
   /** The pause or resume in flight: "all", a stage, or null. */
   let busy = $state<Stage | "all" | null>(null);
@@ -54,39 +65,67 @@
     <p class="failure" role="alert">{failure}</p>
   {/if}
 
-  <ul class="stages">
-    {#each activity.stages as stage (stage.stage)}
-      {@const counts = stageCounts(stage)}
-      <li class:paused={stage.paused}>
-        <div class="head">
-          <span class="name">{stageName(stage.stage)}</span>
-          {#if stage.kind === "batch"}<span class="tag">batch</span>{/if}
-          {#if stage.paused}<span class="tag">paused</span>{/if}
-          <button
-            type="button"
-            disabled={busy !== null}
-            onclick={() => toggle(!stage.paused, stage.stage)}
+  <h2>Working</h2>
+  {#if groups.working.length === 0}
+    <p class="muted">Nothing queued.</p>
+  {:else}
+    <ul class="stages">
+      {#each groups.working as stage (stage.stage)}
+        {@const counts = stageCounts(stage)}
+        <li class:paused={stage.paused}>
+          <div class="head">
+            <span class="name">{stageName(stage.stage)}</span>
+            {#if stage.kind === "batch"}<span class="tag">batch</span>{/if}
+            {#if stage.paused}<span class="tag">paused</span>{/if}
+            <button
+              type="button"
+              disabled={busy !== null}
+              onclick={() => toggle(!stage.paused, stage.stage)}
+            >
+              {stage.paused ? "Resume" : "Pause"}
+            </button>
+          </div>
+          <div
+            class="bar"
+            role="progressbar"
+            aria-label={stageName(stage.stage)}
+            aria-valuemin={0}
+            aria-valuemax={stage.total}
+            aria-valuenow={stage.done}
           >
-            {stage.paused ? "Resume" : "Pause"}
-          </button>
-        </div>
-        <div
-          class="bar"
-          role="progressbar"
-          aria-label={stageName(stage.stage)}
-          aria-valuemin={0}
-          aria-valuemax={stage.total}
-          aria-valuenow={stage.done}
-        >
-          <div style:width="{fraction(stage.done, stage.total) * 100}%"></div>
-        </div>
-        <div class="numbers">
-          <span>{doneOfTotal(stage)} · {formatPercent(stage.done, stage.total)}</span>
-          <span class="muted">{counts === "" ? "Nothing queued" : counts}</span>
-        </div>
-      </li>
-    {/each}
-  </ul>
+            <div style:width="{fraction(stage.done, stage.total) * 100}%"></div>
+          </div>
+          <div class="numbers">
+            <span>{doneOfTotal(stage)} · {formatPercent(stage.done, stage.total)}</span>
+            <span class="muted">{counts}</span>
+          </div>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+
+  {#if groups.idle.length > 0}
+    <h2>Idle</h2>
+    <ul class="stages idle">
+      {#each groups.idle as stage (stage.stage)}
+        <li>
+          <div class="head">
+            <span class="name">{stageName(stage.stage)}</span>
+            {#if stage.kind === "batch"}<span class="tag">batch</span>{/if}
+            {#if stage.paused}<span class="tag">paused</span>{/if}
+            <span class="muted summary">{idleSummary(stage)}</span>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onclick={() => toggle(!stage.paused, stage.stage)}
+            >
+              {stage.paused ? "Resume" : "Pause"}
+            </button>
+          </div>
+        </li>
+      {/each}
+    </ul>
+  {/if}
 {/if}
 
 <style>
@@ -116,6 +155,15 @@
     color: var(--alert);
   }
 
+  h2 {
+    margin: 1.25rem 0 0.5rem;
+    color: var(--muted);
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
   .stages {
     display: grid;
     gap: 0.75rem;
@@ -132,8 +180,27 @@
 
   .head {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.25rem 0.5rem;
+  }
+
+  .idle {
+    gap: 0.375rem;
+  }
+
+  .idle li {
+    padding: 0.375rem 0.75rem;
+    opacity: 0.6;
+  }
+
+  .idle li:hover,
+  .idle li:focus-within {
+    opacity: 1;
+  }
+
+  .summary {
+    font-size: 0.875rem;
   }
 
   .name {
