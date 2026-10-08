@@ -32,8 +32,9 @@ preview:
     scripts/scratch_stack.sh --state .screenshots/preview.json
 
 # Screenshots of a page at desktop and phone widths into .screenshots/ (`just shot --help`). Uses a running preview, or a scratch stack of its own
+[positional-arguments]  # so a selector with spaces stays one argument
 shot *args:
-    scripts/frontend-run.sh exec node scripts/screenshot.ts {{args}}
+    scripts/frontend-run.sh exec node scripts/screenshot.ts "$@"
 
 # Drop and re-migrate the database in DATA_DIR (from `.env`, like `just api`)
 db-reset:
