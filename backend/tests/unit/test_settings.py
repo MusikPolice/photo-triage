@@ -59,6 +59,31 @@ def test_environment_overrides_dotenv(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert load_settings().photo_dir == Path("/from-env")
 
 
+def test_env_file_names_another_file_in_place_of_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".env").write_text(
+        "PHOTO_DIR=/photos\nTRASH_DIR=/trash\nFAKE_NOW=2026-10-03T21:59Z\n"
+    )
+    (tmp_path / "other.env").write_text("PHOTO_DIR=/other\nTRASH_DIR=/trash\n")
+    monkeypatch.setenv("ENV_FILE", str(tmp_path / "other.env"))
+
+    settings = load_settings()
+
+    assert settings.photo_dir == Path("/other")
+    assert settings.fake_now is None
+
+
+def test_env_file_dev_null_reads_the_environment_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".env").write_text("PHOTO_DIR=/photos\nTRASH_DIR=/trash\n")
+    monkeypatch.setenv("ENV_FILE", "/dev/null")
+
+    with pytest.raises(SettingsError, match="PHOTO_DIR"):
+        load_settings()
+
+
 def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PHOTO_DIR", "/photos")
     monkeypatch.setenv("TRASH_DIR", "/trash")

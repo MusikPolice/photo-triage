@@ -4,6 +4,7 @@ Only the variables the code uses so far are read. The rest of plan §9 is listed
 in `.env.example` and gets a field when its feature lands.
 """
 
+import os
 from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
@@ -97,10 +98,19 @@ class SettingsError(Exception):
     """The configuration is missing or invalid. The message lists every problem."""
 
 
+ENV_FILE = "ENV_FILE"
+"""Names the file read in place of `.env`. Development only (dev-environment §5):
+the scratch stack sets it to `/dev/null` so the developer's `.env` can't reach it."""
+
+
 def load_settings() -> Settings:
-    """Read settings from the environment and `.env`, or explain what's wrong."""
+    """Read settings from the environment and `.env` (or the file `ENV_FILE`
+    names), or explain what's wrong."""
     try:
-        return Settings()  # pyright: ignore[reportCallIssue]  # required fields come from the env
+        # Required fields come from the env; _env_file is a pydantic-settings init option.
+        return Settings(  # pyright: ignore[reportCallIssue]
+            _env_file=os.environ.get(ENV_FILE, ".env")  # pyright: ignore[reportCallIssue]
+        )
     except ValidationError as e:
         problems = "\n".join(
             f"  {'.'.join(str(part) for part in err['loc']).upper()}: {err['msg']}"
