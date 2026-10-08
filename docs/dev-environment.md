@@ -151,7 +151,7 @@ Worker dev affordances, read from `.env` or the environment like the settings in
 - `WORKER_QUIET_HOURS` unset (always on). To try quiet hours, set it with `FAKE_NOW` and `TZ`: `just worker --once` then runs nothing and logs `Quiet hours until …`.
 - `--once` to drain the queue and exit.
 - **`FAKE_NOW`**, a controllable clock for exercising quiet hours and ETA logic. It needs a UTC offset (`FAKE_NOW=2026-10-03T21:59:00-04:00`). The worker's clock starts there and advances in real time. It sets `*_at` columns and backoff; durations in `job_stats` always come from a real monotonic timer. The API reads it too, so `GET /api/activity` shows the same quiet hours as the worker (each process starts its clock when it starts, so the two differ by the time between their starts). The worker heartbeat always uses real time.
-- **The `noop` stage**, off unless `WORKER_NOOP_STAGE=true`. `just worker noop 500` queues 500 jobs that each take 0.2 s, to watch the worker (and later the Activity page) at work. It logs to stderr only, since a running worker owns `worker.log`.
+- **The `noop` stage**, off unless `WORKER_NOOP_STAGE=true`. `just worker noop 500` queues 500 jobs that each take 0.2 s, to watch the worker and the Activity page at work. Unlike other stages, every finished noop job is kept, so the page counts them; `just db-reset` clears them. It logs to stderr only, since a running worker owns `worker.log`.
 
 `WORKER_THREADS` sets `OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS` and `NUMBA_NUM_THREADS` when the worker starts, before any ML library loads.
 
