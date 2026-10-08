@@ -225,12 +225,17 @@ class JobQueue:
 
         Counting done jobs then counts items finished, not runs, and the table can't
         grow past one done row per stage per item. `job_stats` keeps the history.
+        Noop jobs are kept: each stands for a unit of work of its own, so the
+        Activity page counts them as they finish.
         """
         job = self._get(session, job_id, JobStatus.RUNNING)
         now = self._clock()
         job.status = JobStatus.DONE
         job.finished_at = now
         self._record_stats(session, job.stage, now, processed=1, errors=0, duration_s=duration_s)
+        if job.stage == Stage.NOOP:
+            session.flush()
+            return
         session.execute(
             sa.delete(Job).where(
                 Job.status == JobStatus.DONE,

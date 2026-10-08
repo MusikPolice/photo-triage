@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Smoke test for the image (dev-environment §8, the `docker` CI job):
 #   scripts/docker_smoke.sh IMAGE
-# Starts the app, checks /api/health and the frontend, the pinned exiftool and
-# ffmpeg (against versions.env), the user, what's left out of the image,
-# and that the worker runs from it.
+# Starts the app, checks /api/health, the frontend and one of its pages, the
+# pinned exiftool and ffmpeg (against versions.env), the user, what's left out
+# of the image, and that the worker runs from it.
 set -euo pipefail
 
 image="${1:?usage: $0 IMAGE}"
@@ -48,6 +48,11 @@ if [[ "$index" == *"<title>photo-triage</title>"* ]]; then
   ok "GET / serves index.html"
 else
   fail "GET / didn't serve the frontend's index.html"
+fi
+if [[ "$(curl --silent --fail "$base_url/activity" || true)" == "$index" ]]; then
+  ok "GET /activity serves index.html"
+else
+  fail "GET /activity didn't serve the frontend's index.html"
 fi
 asset="$(grep -o '/assets/[^"]*\.js' <<<"$index" | head -1 || true)"
 if [[ -n "$asset" ]] && curl --silent --fail --output /dev/null "$base_url$asset"; then

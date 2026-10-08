@@ -504,8 +504,8 @@ def test_noop_jobs_can_be_queued_and_run_when_enabled(
     assert not (worker_env.data_dir / "logs/worker.log").exists()  # stderr only
 
     assert main(["--once"]) == 0
-    # Only the latest done job per stage and item is kept; job_stats has the count.
-    assert list(_statuses(migrated).values()) == [JobStatus.DONE]
+    # Every done noop job is kept, so the Activity page counts them.
+    assert list(_statuses(migrated).values()) == [JobStatus.DONE] * 3
     assert [row[2] for row in _stats(migrated)] == [3]
 
 

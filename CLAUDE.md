@@ -57,6 +57,7 @@ lag behind the code mislead the next session as well as the user.
 ## Checks
 
 `just check` runs everything CI runs on a PR: pre-commit, lint, the
-file-mutation guard, import contracts, pyright and tests. Run `just` to list all
-recipes. Only `photo_triage.files` may move, delete or rewrite files
+file-mutation guard, import contracts, pyright, tests, the frontend checks and
+the API types contract. Run `just` to list all recipes. After changing an API
+model or route, run `just api-types` and commit the regenerated types. Only `photo_triage.files` may move, delete or rewrite files
 (dev-environment §7). The checks enforce this, so don't route around them.

@@ -211,6 +211,11 @@ def test_only_the_latest_done_job_per_stage_and_item_is_kept(
     assert remaining == sorted([other_item, other_stage, latest, latest_batch, waiting])
 
 
+def test_every_done_noop_job_is_kept(queue: JobQueue, session: Session) -> None:
+    done = [_run(queue, session, Stage.NOOP) for _ in range(3)]
+    assert session.scalars(sa.select(Job.id).order_by(Job.id)).all() == done
+
+
 def test_a_failed_job_waits_out_its_backoff_then_parks(
     queue: JobQueue, session: Session, clock: FakeClock
 ) -> None:

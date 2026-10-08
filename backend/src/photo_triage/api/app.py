@@ -9,6 +9,9 @@ from types import FrameType
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from photo_triage.api import activity, events, health
 from photo_triage.api.errors import LogUnhandledErrors
@@ -33,7 +36,8 @@ def create_app(
     """Build the API. Settings come from the environment unless given. `clock` is
     the app's time, set by `FAKE_NOW` unless given. `real_clock` judges the worker's
     heartbeat. `poll_s` is how often open event streams look for changes. With
-    `frontend_dir`, the bundle in it is served at `/`, behind the API's routes."""
+    `frontend_dir`, the bundle in it is served at `/`, behind the API's routes, and
+    its `index.html` answers for the app's own pages (`/activity`)."""
     settings = settings if settings is not None else load_settings()
     if clock is None:
         clock = utc_now if settings.fake_now is None else running_from(settings.fake_now)
@@ -74,8 +78,28 @@ def create_app(
     app.include_router(events.router, prefix="/api")
     # Last, since it matches every path.
     if frontend_dir is not None:
-        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+        app.mount("/", SinglePageApp(directory=frontend_dir, html=True), name="frontend")
     return app
+
+
+class SinglePageApp(StaticFiles):
+    """The built frontend's files, and `index.html` for any other page, such as
+    `/activity`, so the frontend's router shows it. A missing file (a name with a
+    dot, like `/assets/old.js`) and anything under `/api` still get a 404."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except HTTPException as e:
+            if e.status_code != 404 or not _is_page(path):
+                raise
+            return await super().get_response("index.html", scope)
+
+
+def _is_page(path: str) -> bool:
+    """Whether `path` (relative to `/`) could be one of the frontend's pages."""
+    first, _, _ = path.partition("/")
+    return first != "api" and "." not in path.rsplit("/", 1)[-1]
 
 
 @contextlib.contextmanager

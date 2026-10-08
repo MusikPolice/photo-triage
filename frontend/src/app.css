@@ -5,6 +5,9 @@
   --muted: #6b7076;
   --border: #e2e4e7;
   --header-bg: #f6f7f8;
+  --ok: #2f9e44;
+  --idle: #d08700;
+  --alert: #d63939;
   font-family: system-ui, sans-serif;
   line-height: 1.5;
 }
@@ -16,6 +19,9 @@
     --muted: #9a9fa6;
     --border: #2b2d31;
     --header-bg: #1b1c1f;
+    --ok: #51cf66;
+    --idle: #fab005;
+    --alert: #ff6b6b;
   }
 }
 
