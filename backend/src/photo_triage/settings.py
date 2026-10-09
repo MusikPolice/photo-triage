@@ -117,7 +117,10 @@ class Settings(BaseSettings):
         if trash == photos:
             raise ValueError("is the same folder as PHOTO_DIR; unset it to use the default")
         if photos.is_relative_to(trash):
-            raise ValueError(f"contains PHOTO_DIR ({photo_dir}); it may only be inside it")
+            raise ValueError(
+                f"contains PHOTO_DIR ({photo_dir}); "
+                "the trash may be inside the library, not around it"
+            )
         return value
 
     def summary(self) -> str:
