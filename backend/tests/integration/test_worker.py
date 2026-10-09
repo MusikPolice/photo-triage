@@ -29,10 +29,11 @@ from photo_triage.db.models import (
     WorkerControl,
     WorkerHeartbeat,
 )
+from photo_triage.files import exclusive_lock
 from photo_triage.quiet_hours import parse
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat, stages
-from photo_triage.worker.__main__ import THREAD_ENV_VARS, main
+from photo_triage.worker.__main__ import LOCK_FILENAME, THREAD_ENV_VARS, main
 from photo_triage.worker.heartbeat import Heartbeat
 from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import JobQueue, RetryPolicy, Stage
@@ -517,6 +518,36 @@ def test_exits_when_there_is_no_database(
 ) -> None:
     assert main(["--once"]) == 1
     assert "just db-migrate" in capsys.readouterr().err
+
+
+def test_a_second_worker_exits_without_recovering_the_first_one_s_job(
+    migrated: Engine, worker_env: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
+    with Session(migrated) as session:  # the first worker is running it
+        JobQueue(clock=lambda: START).claim(session)
+        session.commit()
+    recorder = Recorder()
+
+    with exclusive_lock(worker_env.data_dir / LOCK_FILENAME):
+        assert main(["--once"], runners={Stage.LAYOUT: recorder}) == 1
+
+    assert "A worker is already running" in capsys.readouterr().err
+    assert recorder.ran == []
+    assert _statuses(migrated) == {job_id: JobStatus.RUNNING}
+    assert not (worker_env.data_dir / "logs/worker.log").exists()
+
+
+@pytest.mark.usefixtures("migrated")
+def test_noop_pause_and_resume_run_alongside_a_worker(
+    worker_env: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WORKER_NOOP_STAGE", "true")
+
+    with exclusive_lock(worker_env.data_dir / LOCK_FILENAME):
+        assert main(["noop", "1"]) == 0
+        assert main(["pause"]) == 0
+        assert main(["resume"]) == 0
 
 
 def test_bad_settings_exit_2(capsys: pytest.CaptureFixture[str]) -> None:
