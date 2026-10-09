@@ -127,10 +127,9 @@ jobs:
   migrations:
     runs-on: ubuntu-24.04
     env:
-      # The CLI reads DATA_DIR through the app settings, which also require the
-      # other two. Relative to the checkout; none of them need to exist.
+      # The CLI reads DATA_DIR through the app settings, which also require
+      # PHOTO_DIR. Relative to the checkout; neither needs to exist.
       PHOTO_DIR: ci/photos
-      TRASH_DIR: ci/trash
       DATA_DIR: ci/data
     steps:
       - uses: actions/checkout@v7
