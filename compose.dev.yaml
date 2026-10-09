@@ -1,0 +1,16 @@
+# Ollama alone, for `just dev` (dev-environment §5), which runs the API, the
+# worker and the Vite dev server natively. The service compose.yaml runs,
+# from docker/ollama.yaml, on localhost:11434.
+
+name: photo-triage-dev
+
+services:
+  ollama:
+    extends:
+      file: docker/ollama.yaml
+      service: ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+
+volumes:
+  ollama:
