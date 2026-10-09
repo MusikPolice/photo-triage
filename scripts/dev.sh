@@ -1,34 +1,40 @@
 #!/usr/bin/env bash
-# `just dev` (dev-environment §5): the API, the worker and the Vite dev server in
-# one terminal, after migrating the dev database in DATA_DIR.
-#   scripts/dev.sh [VITE_ARGS...]     e.g. --host, to reach it from a phone
+# `just dev` (dev-environment §5): the API, the worker, the Vite dev server and
+# Ollama in one terminal, after the migrate step on the dev database in DATA_DIR.
+#   scripts/dev.sh [--no-ollama] [VITE_ARGS...]     e.g. --host, to reach it from a phone
 # The API reloads and the worker restarts when backend code changes; Vite
-# hot-reloads the frontend. Each line is prefixed with the process it came from.
-# Ctrl-C stops all three, and if one exits, the others are stopped too.
+# hot-reloads the frontend. Ollama runs in Docker, from compose.dev.yaml;
+# --no-ollama leaves it out, as the scratch stack does. Each line is prefixed
+# with the process it came from. Ctrl-C stops them all, and if one exits, the
+# others are stopped too.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"  # so .env and ./data resolve here, as for `just api`
 
+ollama=true
+if [[ "${1:-}" == --no-ollama ]]; then
+  ollama=false
+  shift
+fi
+
 backend=(uv run --no-sync --project backend)
 
-echo "Migrating the database in DATA_DIR"
-if ! migrate_log="$("${backend[@]}" alembic -c backend/alembic.ini upgrade head 2>&1)"; then
-  echo "$migrate_log" >&2
+# As `just db-migrate`: it backs the database up first if it needs upgrading.
+status=0
+"${backend[@]}" python -m photo_triage.db migrate || status=$?
+if ((status == 1)); then
   # Most likely a branch with a newer migration ran `just dev` on this database.
-  if [[ "$migrate_log" == *"Can't locate revision"* ]]; then
-    cat >&2 <<'EOF'
+  cat >&2 <<'EOF'
 
-The dev database was migrated by another branch, to a revision this one
-doesn't have. Either check out that branch and run
+If another branch migrated the dev database, either check out that branch and run
   uv run --project backend alembic -c backend/alembic.ini downgrade <a revision this branch has>
-or, since the dev database holds only test data, delete photo-triage.db in
-DATA_DIR and run `just dev` again.
+or restore the backup the migrate step made before that branch's migration, from
+DATA_DIR/backups (dev-environment §5, `just db-migrate`). Or, since the dev
+database holds only test data, delete photo-triage.db in DATA_DIR.
 EOF
-  fi
-  exit 1
 fi
-echo "$migrate_log"
+((status == 0)) || exit "$status"
 
 # Each process gets its own process group, so Ctrl-C reaches only this script,
 # which then stops each one once. The worker in particular must get one signal:
@@ -55,15 +61,20 @@ start api "${backend[@]}" python -m photo_triage.api --reload
 start worker "${backend[@]}" watchfiles --filter python --sigint-timeout 30 \
   "python -m photo_triage.worker" backend/src
 start web pnpm --dir frontend exec vite "$@"
+if $ollama; then
+  # In the foreground, so its log is prefixed too. Stopping it stops the container.
+  start ollama docker compose -f compose.dev.yaml up
+fi
 
 stopping=false
 stop() {
   $stopping && return
   stopping=true
-  echo "Stopping the API, the worker and the Vite dev server"
+  echo "Stopping the API, the worker, the Vite dev server${pids[3]:+ and Ollama}"
   # The API and Vite as whole groups (uvicorn's reloader and its server, pnpm
-  # and Vite). The worker through uv, which passes the signal to watchfiles alone.
-  kill -TERM -- "-${pids[0]}" "${pids[1]}" "-${pids[2]}" 2>/dev/null || true
+  # and Vite). The worker through uv, which passes the signal to watchfiles
+  # alone. Compose, which stops its container.
+  kill -TERM -- "-${pids[0]}" "${pids[1]}" "-${pids[2]}" ${pids[3]:+"${pids[3]}"} 2>/dev/null || true
 }
 trap stop INT TERM
 

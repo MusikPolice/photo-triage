@@ -57,7 +57,7 @@ export APP_PORT="$api_port" WORKER_NOOP_STAGE=true
 url="http://localhost:$web_port"
 
 echo "Scratch stack in $scratch, at $url"
-"$root/scripts/dev.sh" --port "$web_port" --strictPort &
+"$root/scripts/dev.sh" --no-ollama --port "$web_port" --strictPort &
 dev_pid=$!
 
 # Ready when the page and the API behind Vite's proxy both answer.
