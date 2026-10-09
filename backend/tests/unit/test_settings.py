@@ -7,7 +7,14 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import SecretStr
 
-from photo_triage.settings import Settings, SettingsError, load_settings
+from photo_triage import settings as settings_module
+from photo_triage.settings import (
+    TRASH_FOLDER,
+    Settings,
+    SettingsError,
+    load_settings,
+    trash_filesystem_warning,
+)
 
 # Every setting, by whether its value may be written to the logs. The API and the
 # worker log every setting at startup (`Settings.summary`), and only `SecretStr`
@@ -130,23 +137,89 @@ def test_summary_lists_every_setting(settings: Settings) -> None:
     assert summary.count("=") == len(Settings.model_fields)
 
 
-def test_missing_required_settings_are_named() -> None:
+def test_missing_photo_dir_is_named_alone() -> None:
     with pytest.raises(SettingsError) as excinfo:
         load_settings()
 
     message = str(excinfo.value)
     assert "PHOTO_DIR: Field required" in message
-    assert "TRASH_DIR: Field required" in message
+    assert "TRASH_DIR" not in message
     assert ".env.example" in message
 
 
-def test_missing_trash_dir_alone_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_trash_dir_defaults_to_a_hidden_folder_in_the_library(
+    monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
     monkeypatch.setenv("PHOTO_DIR", "/photos")
+    if value is not None:
+        monkeypatch.setenv("TRASH_DIR", value)
 
-    with pytest.raises(SettingsError, match="TRASH_DIR") as excinfo:
+    settings = load_settings()
+
+    assert settings.trash_dir == Path("/photos/.photo-triage-trash")
+    assert TRASH_FOLDER == ".photo-triage-trash"
+    assert "TRASH_DIR=/photos/.photo-triage-trash " in settings.summary()
+
+
+@pytest.mark.parametrize("trash_dir", ["/photos", "/photos/", "/photos/sub/..", "photos"])
+def test_trash_dir_cannot_be_the_library(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, trash_dir: str
+) -> None:
+    # The working directory is tmp_path, so the relative "photos" is the same folder.
+    monkeypatch.setenv("PHOTO_DIR", str(tmp_path / "photos"))
+    monkeypatch.setenv("TRASH_DIR", trash_dir.replace("/photos", str(tmp_path / "photos")))
+
+    with pytest.raises(SettingsError, match=r"TRASH_DIR: .*same folder as PHOTO_DIR"):
         load_settings()
 
-    assert "PHOTO_DIR" not in str(excinfo.value)
+
+@pytest.mark.parametrize("trash_dir", ["/", "/mnt", "/mnt/"])
+def test_trash_dir_cannot_contain_the_library(
+    monkeypatch: pytest.MonkeyPatch, trash_dir: str
+) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/mnt/pictures")
+    monkeypatch.setenv("TRASH_DIR", trash_dir)
+
+    with pytest.raises(SettingsError, match=r"TRASH_DIR: .*contains PHOTO_DIR \(/mnt/pictures\)"):
+        load_settings()
+
+
+@pytest.mark.parametrize("trash_dir", ["/mnt/pictures/.trash", "/mnt/pictures/a/b", "/mnt/pics"])
+def test_trash_dir_may_be_inside_the_library_or_beside_it(
+    monkeypatch: pytest.MonkeyPatch, trash_dir: str
+) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/mnt/pictures")
+    monkeypatch.setenv("TRASH_DIR", trash_dir)
+
+    assert load_settings().trash_dir == Path(trash_dir)
+
+
+def test_no_warning_when_the_trash_is_on_the_library_s_filesystem(tmp_path: Path) -> None:
+    # Neither folder exists yet: each is judged by its nearest existing parent.
+    settings = Settings(photo_dir=tmp_path / "photos", trash_dir=tmp_path / "a" / "trash")
+
+    assert trash_filesystem_warning(settings) is None
+    assert trash_filesystem_warning(Settings(photo_dir=tmp_path / "photos")) is None
+
+
+def test_warning_when_the_trash_is_on_another_filesystem(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "share").mkdir()
+    real_device = settings_module._device  # pyright: ignore[reportPrivateUsage]
+    monkeypatch.setattr(
+        settings_module,
+        "_device",
+        lambda path: 99 if path.is_relative_to(tmp_path / "share") else real_device(path),
+    )
+    settings = Settings(photo_dir=tmp_path / "share", trash_dir=tmp_path / "trash")
+
+    warning = trash_filesystem_warning(settings)
+
+    assert warning is not None
+    assert f"TRASH_DIR ({tmp_path / 'trash'}) is on a different filesystem" in warning
+    assert "Unset TRASH_DIR" in warning
 
 
 def test_unsupported_auth_mode_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

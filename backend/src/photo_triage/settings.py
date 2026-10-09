@@ -6,7 +6,7 @@ in `.env.example` and gets a field when its feature lands.
 
 import os
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import (
@@ -16,6 +16,8 @@ from pydantic import (
     PlainSerializer,
     PlainValidator,
     ValidationError,
+    ValidationInfo,
+    field_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -36,6 +38,16 @@ def _quiet_hours(value: object) -> quiet_hours.QuietHours | None:
     return quiet_hours.parse(value) if value.strip() else None
 
 
+TRASH_FOLDER = ".photo-triage-trash"
+"""The trash's name inside `PHOTO_DIR`, where it is by default (plan §6.8)."""
+
+
+def _default_trash_dir(data: dict[str, Any]) -> Path:
+    photo_dir = data.get("photo_dir")
+    # Without a valid PHOTO_DIR, validation fails anyway and this is never used.
+    return Path(photo_dir) / TRASH_FOLDER if photo_dir is not None else Path(TRASH_FOLDER)
+
+
 QuietHoursSetting = Annotated[
     quiet_hours.QuietHours | None, PlainValidator(_quiet_hours), PlainSerializer(str)
 ]
@@ -52,8 +64,9 @@ class Settings(BaseSettings):
     photo_dir: Path
     """Photo library root."""
 
-    trash_dir: Path
-    """Where trashed files go. Outside `photo_dir`."""
+    trash_dir: Path = Field(default_factory=_default_trash_dir)
+    """Where trashed files go. By default a hidden folder inside `photo_dir`, so that
+    trashing is a rename on the same filesystem (plan §6.8)."""
 
     data_dir: Path = Path("./data")
     """SQLite database and derived files. `/data` in the container."""
@@ -87,11 +100,54 @@ class Settings(BaseSettings):
     """Starts the worker's clock at this time (with a UTC offset, e.g.
     `2026-10-03T21:59:00Z`), from where it advances in real time."""
 
+    @field_validator("trash_dir", mode="before")
+    @classmethod
+    def _blank_trash_dir_is_unset(cls, value: object, info: ValidationInfo) -> object:
+        if isinstance(value, str) and not value.strip():
+            return _default_trash_dir(info.data)
+        return value
+
+    @field_validator("trash_dir")
+    @classmethod
+    def _trash_dir_holds_no_photos(cls, value: Path, info: ValidationInfo) -> Path:
+        photo_dir = info.data.get("photo_dir")
+        if photo_dir is None:
+            return value
+        trash, photos = value.resolve(), photo_dir.resolve()
+        if trash == photos:
+            raise ValueError("is the same folder as PHOTO_DIR; unset it to use the default")
+        if photos.is_relative_to(trash):
+            raise ValueError(f"contains PHOTO_DIR ({photo_dir}); it may only be inside it")
+        return value
+
     def summary(self) -> str:
         """Every setting as `NAME=value`, for the startup log line. Secrets must be
         `SecretStr` fields, which show as asterisks. `test_settings.py` makes each new
         setting say whether it's secret."""
         return " ".join(f"{name.upper()}={value}" for name, value in self.model_dump().items())
+
+
+def trash_filesystem_warning(settings: Settings) -> str | None:
+    """Why trashing would copy files, if it would: the trash is on a different
+    filesystem from the library. Startup logs this and carries on, since a dev
+    setup that never trashes may have it so. The trash move itself refuses to
+    copy (plan §6.8)."""
+    if _device(settings.trash_dir) == _device(settings.photo_dir):
+        return None
+    return (
+        f"TRASH_DIR ({settings.trash_dir}) is on a different filesystem from PHOTO_DIR "
+        f"({settings.photo_dir}), so trashing a file will fail. Unset TRASH_DIR to use "
+        f"PHOTO_DIR/{TRASH_FOLDER}."
+    )
+
+
+def _device(path: Path) -> int:
+    """The filesystem `path` is on, or would be created on: that of its nearest
+    parent that exists."""
+    path = path.resolve()
+    while not path.exists():
+        path = path.parent
+    return path.stat().st_dev
 
 
 class SettingsError(Exception):

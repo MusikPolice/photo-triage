@@ -22,7 +22,12 @@ from sqlalchemy.orm import Session
 
 from photo_triage import logs
 from photo_triage.db.engine import open_database
-from photo_triage.settings import Settings, SettingsError, load_settings
+from photo_triage.settings import (
+    Settings,
+    SettingsError,
+    load_settings,
+    trash_filesystem_warning,
+)
 from photo_triage.worker import controls
 from photo_triage.worker.clock import Clock, running_from, utc_now
 from photo_triage.worker.heartbeat import Heartbeat
@@ -90,6 +95,8 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
 
         logs.configure(settings, "worker")
         logger.info("Worker starting: %s", settings.summary())
+        if (warning := trash_filesystem_warning(settings)) is not None:
+            logger.warning(warning)
         worker = Worker(
             engine,
             build_runners(settings) if runners is None else runners,

@@ -18,6 +18,7 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from photo_triage import settings as settings_module
 from photo_triage.db.engine import open_database
 from photo_triage.db.models import (
     Item,
@@ -472,6 +473,18 @@ def test_main_recovers_interrupted_jobs_and_logs_to_worker_log(
         "the worker stopped (attempt 1 of 5), queued again"
     ) in log
     assert "Progress in the last" in log
+
+
+def test_main_warns_when_the_trash_is_on_another_filesystem(
+    migrated: Engine, worker_env: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trash_dir = worker_env.trash_dir
+    monkeypatch.setattr(settings_module, "_device", lambda path: path.is_relative_to(trash_dir))
+
+    assert main(["--once"], runners={}) == 0
+
+    log = (worker_env.data_dir / "logs/worker.log").read_text()
+    assert f"WARNING photo_triage.worker TRASH_DIR ({trash_dir}) is on a different" in log
 
 
 def test_main_applies_worker_threads(

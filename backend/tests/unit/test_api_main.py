@@ -8,6 +8,7 @@ import pytest
 import uvicorn
 from fastapi import FastAPI
 
+from photo_triage import settings as settings_module
 from photo_triage.api.__main__ import SHUTDOWN_TIMEOUT_S, main, serve
 from photo_triage.api.app import FRONTEND_DIR
 
@@ -106,6 +107,29 @@ def test_serve_logs_to_the_file_and_says_what_it_runs_with() -> None:
         handler.flush()
     text = Path("data/logs/api.log").read_text()
     assert "INFO photo_triage.api API starting: PHOTO_DIR=/photos " in text
+
+
+@pytest.mark.usefixtures("required_env")
+def test_serve_warns_when_the_trash_is_on_another_filesystem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings_module, "_device", lambda path: hash(path.parts[1]))
+
+    serve()
+
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    text = Path("data/logs/api.log").read_text()
+    assert "WARNING photo_triage.api TRASH_DIR (/trash) is on a different filesystem" in text
+
+
+@pytest.mark.usefixtures("required_env")
+def test_serve_does_not_warn_when_the_trash_shares_the_filesystem() -> None:
+    serve()
+
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    assert "WARNING" not in Path("data/logs/api.log").read_text()
 
 
 def test_the_frontend_is_the_repo_s_vite_build() -> None:

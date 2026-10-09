@@ -11,7 +11,7 @@ from fastapi import FastAPI
 
 from photo_triage import logs
 from photo_triage.api.app import FRONTEND_DIR, create_app
-from photo_triage.settings import SettingsError, load_settings
+from photo_triage.settings import SettingsError, load_settings, trash_filesystem_warning
 
 # Named, since `__name__` is "__main__" when run with `python -m`.
 logger = logging.getLogger("photo_triage.api")
@@ -63,6 +63,8 @@ def serve(frontend_dir: Path = FRONTEND_DIR) -> FastAPI:
     settings = load_settings()
     logs.configure(settings, "api")
     logger.info("API starting: %s", settings.summary())
+    if (warning := trash_filesystem_warning(settings)) is not None:
+        logger.warning(warning)
     if frontend_dir.is_dir():
         logger.info("Serving the frontend from %s", frontend_dir)
         return create_app(settings, frontend_dir=frontend_dir)
