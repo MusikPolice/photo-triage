@@ -15,6 +15,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 section() { printf '\n===== %s =====\n' "$1"; }
 docker_ok=false
 if have docker && docker info >/dev/null 2>&1; then docker_ok=true; fi
+no_docker() { echo "skipped: docker isn't installed or isn't reachable by this user"; }
 
 echo "Sampling for $minutes minute(s); writing $out"
 {
@@ -48,7 +49,7 @@ echo "Sampling for $minutes minute(s); writing $out"
     docker version --format 'Engine {{.Server.Version}}'
     docker info --format 'cgroup v{{.CgroupVersion}} ({{.CgroupDriver}}), root {{.DockerRootDir}}, {{.NCPU}} CPUs, {{.MemTotal}} bytes'
   else
-    echo "docker isn't installed or isn't reachable by this user"
+    no_docker
   fi
 
   section "Containers and their limits (cpus in billionths, memory in bytes; 0 = none)"
@@ -56,11 +57,15 @@ echo "Sampling for $minutes minute(s); writing $out"
     docker ps --format '{{.Names}}' | while read -r name; do
       docker inspect "$name" --format '{{.Name}}  image={{.Config.Image}} cpus={{.HostConfig.NanoCpus}} cpuset={{.HostConfig.CpusetCpus}} memory={{.HostConfig.Memory}} restart={{.HostConfig.RestartPolicy.Name}}'
     done
+  else
+    no_docker
   fi
 
   section "Container usage now"
   if $docker_ok; then
     docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
+  else
+    no_docker
   fi
 
   section "Top processes by CPU"
@@ -86,6 +91,8 @@ echo "Sampling for $minutes minute(s); writing $out"
       docker stats --no-stream --format '{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
       sleep 60
     done >"$containers" 2>&1 &
+  else
+    no_docker >"$containers"
   fi
 
   section "Load over $minutes minute(s) (vmstat every 10 s)"
