@@ -9,8 +9,15 @@ import uvicorn
 from fastapi import FastAPI
 
 from photo_triage import settings as settings_module
+from photo_triage.api import __main__ as api_main
 from photo_triage.api.__main__ import SHUTDOWN_TIMEOUT_S, main, serve
 from photo_triage.api.app import FRONTEND_DIR
+
+
+@pytest.fixture(autouse=True)
+def schema_at_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No database here: tests/integration/test_migrate.py checks it with a real one."""
+    monkeypatch.setattr(api_main, "check_schema", lambda _data_dir: None)
 
 
 @pytest.fixture

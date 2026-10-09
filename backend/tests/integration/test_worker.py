@@ -497,6 +497,28 @@ def test_main_applies_worker_threads(
     assert {os.environ[name] for name in THREAD_ENV_VARS} == {"3"}
 
 
+def test_exits_without_claiming_a_job_when_the_database_is_not_at_head(
+    migrated: Engine, worker_env: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
+    recorder = Recorder()
+    with migrated.begin() as conn:  # as if newer code had migrated it
+        conn.exec_driver_sql("UPDATE alembic_version SET version_num = '9999'")
+
+    assert main(["--once"], runners={Stage.LAYOUT: recorder}) == 1
+
+    assert "newer than this code" in capsys.readouterr().err
+    assert recorder.ran == []
+    assert _statuses(migrated) == {job_id: JobStatus.PENDING}
+
+
+def test_exits_when_there_is_no_database(
+    worker_env: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["--once"]) == 1
+    assert "just db-migrate" in capsys.readouterr().err
+
+
 def test_bad_settings_exit_2(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--once"]) == 2
     assert "PHOTO_DIR" in capsys.readouterr().err

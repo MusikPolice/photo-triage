@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from photo_triage import logs
 from photo_triage.db.engine import open_database
+from photo_triage.db.migrate import SchemaError, check_schema
 from photo_triage.settings import (
     Settings,
     SettingsError,
@@ -76,6 +77,12 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
     except SettingsError as e:
         print(e, file=sys.stderr)
         return 2
+    # The migrate step runs before the worker starts; the worker never migrates.
+    try:
+        check_schema(settings.data_dir)
+    except SchemaError as e:
+        print(e, file=sys.stderr)
+        return 1
 
     limit_threads(settings.worker_threads)  # before any ML library loads
     clock = utc_now if settings.fake_now is None else running_from(settings.fake_now)
