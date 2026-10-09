@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from photo_triage import logs
 from photo_triage.api.app import FRONTEND_DIR, create_app
+from photo_triage.db.migrate import SchemaError, check_schema
 from photo_triage.settings import SettingsError, load_settings, trash_filesystem_warning
 
 # Named, since `__name__` is "__main__" when run with `python -m`.
@@ -33,6 +34,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SettingsError as e:
         print(e, file=sys.stderr)
         return 2
+    # The migrate step runs before the API starts; the API never migrates.
+    try:
+        check_schema(settings.data_dir)
+    except SchemaError as e:
+        print(e, file=sys.stderr)
+        return 1
 
     # With --reload, this process only watches the code and a child process serves
     # (see `serve`). Only the child writes api.log, since two processes can't share

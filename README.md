@@ -159,7 +159,7 @@ just doctor          # verifies versions, mounts, model weights
 
 ```bash
 cp .env.example .env
-just db-reset        # creates the database in ./data (and later, resets it)
+just db-migrate      # creates the database in ./data, or upgrades it (backing it up first)
 ```
 
 The defaults point `PHOTO_DIR` at `/mnt/sample-pictures` and keep app state in `./data` and `./trash`. To test anything that **writes** to photos (trash, EXIF write-back), work on a throwaway copy:
@@ -200,6 +200,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just test-models` | Tests that run the real CLIP/InsightFace models (slow; cached weights) |
 | `just e2e` | Playwright end-to-end tests against `just stack` |
 | `just check` | Everything CI runs: format, lint, pyright, import contracts, tests, coverage, frontend checks, API types contract |
+| `just db-migrate` | Create or upgrade the database, backing it up first. The API and worker refuse to start until it's at the newest revision |
 | `just api-types` | Regenerate the frontend's TypeScript API types after changing the API |
 | `just dry-run-full` | Scale test against `/mnt/pictures` with metadata writes disabled |
 | `just doctor` | Verify the environment |
@@ -210,7 +211,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just shot PATH` | Screenshots of a page at desktop and phone widths, from a scratch copy of the app (no real photos) |
 | `just preview` | Keep a scratch copy of the app running, for many `just shot`s |
 
-Available today: `dev`, `api`, `worker`, `image`, `shot`, `preview`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `dev`, `api`, `worker`, `image`, `shot`, `preview`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-migrate`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 

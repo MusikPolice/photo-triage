@@ -36,6 +36,10 @@ preview:
 shot *args:
     scripts/frontend-run.sh exec node scripts/screenshot.ts "$@"
 
+# Upgrade the database in DATA_DIR to head, backing it up to DATA_DIR/backups first (the API and worker never migrate)
+db-migrate:
+    uv run --no-sync --project backend python -m photo_triage.db migrate
+
 # Drop and re-migrate the database in DATA_DIR (from `.env`, like `just api`)
 db-reset:
     uv run --no-sync --project backend alembic -c backend/alembic.ini downgrade base

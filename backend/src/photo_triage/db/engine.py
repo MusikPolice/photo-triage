@@ -29,7 +29,7 @@ def create_engine(url: str) -> Engine:
 def open_database(data_dir: Path) -> Engine:
     """The engine for the database in `data_dir`, creating the directory if needed.
 
-    Opening doesn't migrate. Run `alembic upgrade head` (`just db-reset` in dev) first.
+    Opening doesn't migrate: `python -m photo_triage.db migrate` (`just db-migrate`) does.
     """
     data_dir.mkdir(parents=True, exist_ok=True)
     return create_engine(database_url(data_dir))

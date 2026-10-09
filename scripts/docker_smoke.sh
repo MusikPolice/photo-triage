@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Smoke test for the image (dev-environment §8, the `docker` CI job):
 #   scripts/docker_smoke.sh IMAGE
-# Starts the app, checks /api/health, the frontend and one of its pages, the
-# pinned exiftool and ffmpeg (against versions.env), the user, what's left out
-# of the image, and that the worker runs from it.
+# Runs the migrate step, starts the app, checks /api/health, the frontend and
+# one of its pages, the pinned exiftool and ffmpeg (against versions.env), the
+# user, what's left out of the image, and that the worker runs from it.
 set -euo pipefail
 
 image="${1:?usage: $0 IMAGE}"
@@ -28,8 +28,29 @@ in_image() { docker run --rm "$image" "$@"; }
 
 # --- The app ---------------------------------------------------------------
 
-container="$(docker run --detach --publish 127.0.0.1::8000 "$image")"
-trap 'docker rm --force "$container" >/dev/null' EXIT
+# The app refuses a database that isn't migrated, so the migrate step runs first,
+# into a volume the app then uses, as Compose will run them.
+volume="$(docker volume create)"
+container=""
+cleanup() {
+  [[ -z "$container" ]] || docker rm --force "$container" >/dev/null
+  docker volume rm "$volume" >/dev/null
+}
+trap cleanup EXIT
+with_data() { docker run --rm --volume "$volume:/data" "$image" "$@"; }
+
+if with_data python -m photo_triage.api >/dev/null 2>&1; then
+  fail "the app started on a database that isn't migrated"
+else
+  ok "the app refuses a database that isn't migrated"
+fi
+if with_data python -m photo_triage.db migrate; then
+  ok "the migrate step"
+else
+  fail "the migrate step didn't run"
+fi
+
+container="$(docker run --detach --volume "$volume:/data" --publish 127.0.0.1::8000 "$image")"
 base_url="http://$(docker port "$container" 8000/tcp | head -1)"
 
 for _ in $(seq 60); do
@@ -109,9 +130,8 @@ fi
 
 # --- The worker, from the same image ---------------------------------------
 
-if in_image sh -c 'alembic -c backend/alembic.ini upgrade head \
-    && python -m photo_triage.worker --once'; then
-  ok "the worker runs (--once, on a fresh database)"
+if with_data python -m photo_triage.worker --once; then
+  ok "the worker runs (--once, on the migrated database)"
 else
   fail "the worker didn't run"
 fi
