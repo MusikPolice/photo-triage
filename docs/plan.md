@@ -51,7 +51,7 @@ The absence of a GPU is the most significant constraint. All ML workloads must b
 
 Two Docker Compose services:
 
-**`app`** — Python/FastAPI application serving the REST API and the built frontend bundle, plus the background worker (same image, separate process or container via a `command:` override). Mounts the photo library read/write. The trash is a hidden folder inside the library by default (§6.8). Persists SQLite state and derived artifacts (thumbnails, atlases, embeddings, layout) to named volumes.
+**`app`** — Python/FastAPI application serving the REST API and the built frontend bundle, plus the background worker (same image, separate process or container via a `command:` override). Mounts the photo library read/write. The trash is a hidden folder inside the library by default (§6.8). Persists SQLite state and derived artifacts (thumbnails, atlases, embeddings, layout) to `DATA_DIR`, a bind-mounted host folder, so the database and config sit in one folder that can be backed up. Regenerable files go in their own subdirectory of it, so a backup can skip them.
 
 **`ollama`** — Ollama model server for LLM tagging. Persists models to a named volume. No GPU flags.
 
