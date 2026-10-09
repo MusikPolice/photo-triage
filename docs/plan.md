@@ -51,11 +51,11 @@ The absence of a GPU is the most significant constraint. All ML workloads must b
 
 Two Docker Compose services:
 
-**`app`** — Python/FastAPI application serving the REST API and the built frontend bundle, plus the background worker (same image, separate process or container via a `command:` override). Mounts the photo library read/write and a trash directory. Persists SQLite state and derived artifacts (thumbnails, atlases, embeddings, layout) to named volumes.
+**`app`** — Python/FastAPI application serving the REST API and the built frontend bundle, plus the background worker (same image, separate process or container via a `command:` override). Mounts the photo library read/write. The trash is a hidden folder inside the library by default (§6.8). Persists SQLite state and derived artifacts (thumbnails, atlases, embeddings, layout) to named volumes.
 
 **`ollama`** — Ollama model server for LLM tagging. Persists models to a named volume. No GPU flags.
 
-The app writes metadata directly into files using `exiftool`. Files are never copied; the only file moves are to/from the trash directory (§6.8).
+The app writes metadata directly into files using `exiftool`. Files are never copied; the only file moves are to/from the trash directory (§6.8), and they're renames on the same filesystem.
 
 ### State storage philosophy
 
@@ -117,7 +117,7 @@ Search blends all three (§6.5).
 
 ### 6.1 Library Scanner
 
-Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MOV, MP4).
+Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MOV, MP4). It never walks `TRASH_DIR`, which may be inside `PHOTO_DIR` (§6.8), so a trashed file isn't seen as moved.
 
 **Identity.** Each item is identified by a **content hash** of its decoded pixel data (for video: hash of the media stream, excluding metadata atoms). This is stable across metadata writes (ours and others') and across elodie moving/renaming files. `(path, mtime, size)` is used as a cheap "maybe changed?" pre-check; only when it changes is the content hash recomputed. A known content hash at a new path is treated as a move, not a new item — all history is preserved.
 
@@ -206,7 +206,9 @@ A composite score (weights configurable) plus junk probability decide entry into
 
 **Review UI.** One item at a time, worst-first, phone-friendly. Keep / Skip / Delete. Keep writes a reviewed marker to the file (§6.10) so it's never re-queued, even after a DB rebuild.
 
-**Deletion = move to trash.** All deletes (quality, duplicates, lasso) move the file to `TRASH_DIR`, preserving its relative path. The trash view lists trashed items with restore. Items are permanently purged after `TRASH_RETENTION_DAYS` (default 30). `TRASH_DIR` must be outside `PHOTO_DIR` so elodie and the scanner never see it.
+**Deletion = move to trash.** All deletes (quality, duplicates, lasso) move the file to `TRASH_DIR`, preserving its relative path. The trash view lists trashed items with restore. Items are permanently purged after `TRASH_RETENTION_DAYS` (default 30).
+
+**Trash location.** `TRASH_DIR` defaults to `PHOTO_DIR/.photo-triage-trash`, a hidden folder on the same filesystem as the library, so moving a file to or from the trash is a rename. A move is always a rename: if the trash is on another filesystem, the move fails rather than falling back to copy and delete, which would be slow for large videos and could be left half-done. Startup warns when the trash is on another filesystem, and refuses a `TRASH_DIR` that is `PHOTO_DIR` or contains it. A trash inside the library is safe because the scanner skips it (§6.1) and elodie only imports new files, never walking the existing library.
 
 ### 6.9 Face Identification
 
@@ -371,7 +373,7 @@ Environment variables, documented in `.env.example`:
 | Variable | Default | Description |
 |---|---|---|
 | `PHOTO_DIR` | *(required)* | Photo library path (dev machine: `P:\`; NUC host: `/mnt/pictures`; in Docker: bind-mounted to `/photos`) |
-| `TRASH_DIR` | *(required)* | Trash location, outside `PHOTO_DIR` |
+| `TRASH_DIR` | `PHOTO_DIR/.photo-triage-trash` | Trash location (§6.8). Must be on the same filesystem as `PHOTO_DIR`, and may be inside it |
 | `DATA_DIR` | `./data` | SQLite database and derived files (in Docker: `/data`, bind-mounted from a host folder) |
 | `APP_PORT` | `8000` | Host port for the web UI |
 | `LOG_LEVEL` | `INFO` | Lowest level logged by every process (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); logs go to stderr and `DATA_DIR/logs` |
