@@ -2,6 +2,7 @@
 # `just dev` (dev-environment §5): the API, the worker, the Vite dev server and
 # Ollama in one terminal, after the migrate step on the dev database in DATA_DIR.
 #   scripts/dev.sh [--no-ollama] [VITE_ARGS...]     e.g. --host, to reach it from a phone
+# Before starting anything it checks that Docker answers, and says what to do if not.
 # The API reloads and the worker restarts when backend code changes; Vite
 # hot-reloads the frontend. Ollama runs in Docker, from compose.dev.yaml;
 # --no-ollama leaves it out, as the scratch stack does. Each line is prefixed
@@ -16,6 +17,28 @@ ollama=true
 if [[ "${1:-}" == --no-ollama ]]; then
   ollama=false
   shift
+fi
+
+# Ollama runs in Docker, so check Docker answers before starting anything.
+if $ollama; then
+  if ! command -v docker >/dev/null 2>&1; then
+    docker_problem="The docker command isn't installed in this WSL distro. Enable WSL integration for it in Docker Desktop (Settings → Resources → WSL integration), then reopen the terminal (README §2)."
+  elif ! docker_out="$(docker version --format '{{.Server.Version}}' 2>&1)"; then
+    if [[ "$docker_out" == *"permission denied"* ]]; then
+      docker_problem="Docker is running, but this shell isn't in the 'docker' group yet. Run 'wsl --shutdown' from Windows and reopen Ubuntu (or 'newgrp docker' for one shell)."
+    else
+      docker_out="$(tr -s '\n' ' ' <<<"$docker_out" | sed 's/^ *//; s/ *$//')"
+      docker_problem="Docker isn't answering. Start Docker Desktop on Windows and check that WSL integration is on for this distro (README §2). Docker said: $docker_out"
+    fi
+  fi
+  if [[ -n "${docker_problem:-}" ]]; then
+    cat >&2 <<EOF
+just dev runs Ollama in Docker, and Docker isn't available:
+  $docker_problem
+To work without Ollama for now, run 'just dev --no-ollama'.
+EOF
+    exit 1
+  fi
 fi
 
 backend=(uv run --no-sync --project backend)
