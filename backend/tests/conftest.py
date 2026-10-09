@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 
 from photo_triage.logs import LIBRARY_LOGGERS, PER_REQUEST_LOGGERS
-from photo_triage.settings import Settings
+from photo_triage.settings import ENV_FILE, Settings
 
 # Every variable Settings reads. Cleared for each test so the developer's
 # environment can't leak in.
-SETTINGS_ENV = [name.upper() for name in Settings.model_fields]
+SETTINGS_ENV = [*(name.upper() for name in Settings.model_fields), ENV_FILE]
 
 
 @pytest.fixture(autouse=True)

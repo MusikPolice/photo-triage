@@ -148,7 +148,7 @@ cd ~/src/photo-triage
 mise trust && mise install
 ```
 
-Then run the bootstrap script. It installs the `exiftool`, `ffmpeg` and pre-commit pinned in `versions.env`, syncs Python and Node dependencies, installs the pre-commit hooks, and downloads model weights to `~/.cache/photo-triage/models`:
+Then run the bootstrap script. It installs the `exiftool`, `ffmpeg` and pre-commit pinned in `versions.env`, syncs Python and Node dependencies, installs the pre-commit hooks, installs the headless Chromium that `just shot` uses (asking for your sudo password once, for its system libraries), and downloads model weights to `~/.cache/photo-triage/models`:
 
 ```bash
 ./scripts/bootstrap.sh
@@ -205,8 +205,10 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just web` | Vite dev server for the frontend, proxying `/api` to `just api` |
 | `just worker` | The background worker alone; `just worker --once` runs every ready job and exits; `just worker pause [STAGE]` / `resume [STAGE]` pause and resume it |
 | `just image` | Build the Docker image and smoke-test it, as CI does |
+| `just shot PATH` | Screenshots of a page at desktop and phone widths, from a scratch copy of the app (no real photos) |
+| `just preview` | Keep a scratch copy of the app running, for many `just shot`s |
 
-Available today: `dev`, `api`, `worker`, `image`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `dev`, `api`, `worker`, `image`, `shot`, `preview`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 

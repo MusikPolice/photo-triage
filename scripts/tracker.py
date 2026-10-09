@@ -43,16 +43,24 @@ A "draft:<file stem>" dependency names another draft filed earlier in the same
 
 The PR summary file passed to `finish` needs "## Summary" and "## Verification"
 sections. Verification says how each acceptance criterion was checked.
+
+An optional "## Screenshots" section attaches pictures of the pages a PR
+changes. Each image in it, written ![caption](.screenshots/scratch/NAME.png),
+is pushed to the `screenshots` branch under pr-N/ and shown in the PR body.
+Only `just shot`'s scratch-stack screenshots (.screenshots/scratch/) are
+accepted: the repo is public, and other screenshots may show real photos.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -80,6 +88,10 @@ LABELS = {
 REQUIRED_SECTIONS = ("Spec", "Deliverable", "Acceptance criteria", "Out of scope")
 OPTIONAL_SECTIONS = ("Background", "Approach", "Depends on")
 SUMMARY_SECTIONS = ("Summary", "Verification")
+SCREENSHOTS_SECTION = "Screenshots"
+SCREENSHOTS_BRANCH = "screenshots"
+# Only `just shot`'s scratch stack, which never sees real photos (dev-environment §9).
+PUBLISHABLE_SHOTS = REPO_ROOT / ".screenshots" / "scratch"
 
 ATTRIBUTION = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 
@@ -87,6 +99,8 @@ SPEC_REF = re.compile(r"\b(plan|dev-environment)\s+§(\d+(?:\.\d+)*)")
 CHECKBOX = re.compile(r"^\s*- \[[ xX]\] \S", re.MULTILINE)
 ISSUE_REF = re.compile(r"#(\d+)\b")
 DRAFT_REF = re.compile(r"\bdraft:([\w.-]+)")
+# A Markdown image: ![caption](target)
+IMAGE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)\)")
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +244,47 @@ def validate_summary(text: str) -> list[str]:
     ]
 
 
+def screenshot_paths(summary: str) -> list[str]:
+    """The local images in the summary's Screenshots section, in order."""
+    section = sections(summary).get(SCREENSHOTS_SECTION, "")
+    targets = IMAGE.findall(section)
+    return list(dict.fromkeys(t for t in targets if not re.match(r"https?://", t)))
+
+
+def check_screenshots(paths: list[str], root: Path = REPO_ROOT) -> list[str]:
+    """Why any of these screenshots can't be published, if they can't."""
+    errors: list[str] = []
+    publishable = root / PUBLISHABLE_SHOTS.relative_to(REPO_ROOT)
+    for path in paths:
+        file = (root / path).resolve()
+        if not file.is_relative_to(publishable):
+            errors.append(
+                f"{path}: only scratch-stack screenshots (.screenshots/scratch/, from"
+                " `just shot` without --base) can be published"
+            )
+        elif file.suffix != ".png":
+            errors.append(f"{path}: not a .png")
+        elif not file.is_file():
+            errors.append(f"{path}: no such file; take it with `just shot`")
+    names = [Path(p).name for p in paths]
+    errors += [
+        f"two screenshots are named {n}" for n in sorted({n for n in names if names.count(n) > 1})
+    ]
+    return errors
+
+
+def embed_screenshots(summary: str, urls: dict[str, str]) -> str:
+    """The summary with each local screenshot replaced by its published URL."""
+    return IMAGE.sub(
+        lambda m: (
+            m.group(0).replace(f"({m.group(1)})", f"({urls[m.group(1)]})")
+            if m.group(1) in urls
+            else m.group(0)
+        ),
+        summary,
+    )
+
+
 def slugify(title: str, limit: int = 40) -> str:
     words = re.sub(r"[^a-z0-9]+", " ", title.lower()).split()
     slug = ""
@@ -326,9 +381,15 @@ def fail(message: str) -> NoReturn:
     sys.exit(1)
 
 
-def run(cmd: list[str], stdin: str | None = None) -> str:
+def run(cmd: list[str], stdin: str | None = None, env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
-        cmd, cwd=REPO_ROOT, input=stdin, capture_output=True, text=True, check=False
+        cmd,
+        cwd=REPO_ROOT,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, **env} if env else None,
     )
     if result.returncode != 0:
         fail(f"{' '.join(cmd[:3])} failed:\n{result.stderr.strip()}")
@@ -346,6 +407,37 @@ def gh_json(*args: str) -> Any:
 
 def git(*args: str) -> str:
     return run(["git", *args])
+
+
+def publish_screenshots(number: int, paths: list[str]) -> dict[str, str]:
+    """Commit the screenshots to the screenshots branch as pr-N/, replacing what
+    was there, and push. Answers each path's URL, by commit so it never goes stale.
+    Uses a scratch index, so the working tree and the branch being worked on are
+    left alone."""
+    folder = f"pr-{number}"
+    remote = git("ls-remote", "--heads", "origin", SCREENSHOTS_BRANCH)
+    parent = remote.split()[0] if remote else None
+    if parent:
+        git("fetch", "origin", SCREENSHOTS_BRANCH)
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {"GIT_INDEX_FILE": str(Path(tmp) / "index")}
+        run(["git", "read-tree", *([parent] if parent else ["--empty"])], env=env)
+        run(["git", "rm", "--cached", "-r", "-q", "--ignore-unmatch", folder], env=env)
+        for path in paths:
+            blob = git("hash-object", "-w", str(REPO_ROOT / path))
+            entry = f"100644,{blob},{folder}/{Path(path).name}"
+            run(["git", "update-index", "--add", "--cacheinfo", entry], env=env)
+        tree = run(["git", "write-tree"], env=env)
+    if parent and git("rev-parse", f"{parent}^{{tree}}") == tree:
+        commit = parent
+    else:
+        parents = ["-p", parent] if parent else []
+        message = f"Screenshots for #{number}"
+        commit = git("commit-tree", tree, *parents, "-m", message)
+        git("push", "origin", f"{commit}:refs/heads/{SCREENSHOTS_BRANCH}")
+    repo = gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
+    base = f"https://raw.githubusercontent.com/{repo}/{commit}/{folder}"
+    return {path: f"{base}/{Path(path).name}" for path in paths}
 
 
 def require_clean_tree() -> None:
@@ -592,7 +684,8 @@ def cmd_start(args: argparse.Namespace) -> None:
 
 def cmd_finish(args: argparse.Namespace) -> None:
     summary = Path(args.summary).read_text(encoding="utf-8")
-    errors = validate_summary(summary)
+    shots = screenshot_paths(summary)
+    errors = validate_summary(summary) + check_screenshots(shots)
     if errors:
         fail("summary is invalid:\n" + "\n".join(f"  - {e}" for e in errors))
 
@@ -614,6 +707,9 @@ def cmd_finish(args: argparse.Namespace) -> None:
         fail("`just check` failed; fix it before opening the PR")
 
     git("push", "--force-with-lease", "-u", "origin", branch)
+    if shots:
+        summary = embed_screenshots(summary, publish_screenshots(number, shots))
+        print(f"Published {len(shots)} screenshot(s) to the {SCREENSHOTS_BRANCH} branch")
     info = issue(number)
     body = pr_body(summary, number, info["body"])
     existing = gh_json("pr", "list", "--head", branch, "--state", "open", "--json", "url")

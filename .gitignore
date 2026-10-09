@@ -18,5 +18,8 @@ node_modules/
 /data/
 /trash/
 
+# `just shot` screenshots and `just preview`'s state (docs/dev-environment.md §5)
+/.screenshots/
+
 # Issue and PR drafts written by the plan-phase and work-issue skills
 .drafts/

@@ -27,6 +27,15 @@ worker *args:
 web *args:
     pnpm exec vite {{args}}
 
+# A scratch copy of the app on free ports, with empty photo, trash and data dirs and no .env; Ctrl-C stops it and deletes them
+preview:
+    scripts/scratch_stack.sh --state .screenshots/preview.json
+
+# Screenshots of a page at desktop and phone widths into .screenshots/ (`just shot --help`). Uses a running preview, or a scratch stack of its own
+[positional-arguments]  # so a selector with spaces stays one argument
+shot *args:
+    scripts/frontend-run.sh exec node scripts/screenshot.ts "$@"
+
 # Drop and re-migrate the database in DATA_DIR (from `.env`, like `just api`)
 db-reset:
     uv run --no-sync --project backend alembic -c backend/alembic.ini downgrade base

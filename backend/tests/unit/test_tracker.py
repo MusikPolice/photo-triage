@@ -150,6 +150,70 @@ def test_summary_and_pr_body() -> None:
     assert body.rstrip().endswith(tracker.ATTRIBUTION)
 
 
+SHOTS_SUMMARY = """\
+## Summary
+See ![not this one](.screenshots/scratch/elsewhere.png).
+
+## Verification
+Looked.
+
+## Screenshots
+![Activity, desktop](.screenshots/scratch/activity-desktop.png)
+![Activity, phone](.screenshots/scratch/activity-phone.png)
+![Already published](https://example.com/old.png)
+![Activity, desktop again](.screenshots/scratch/activity-desktop.png)
+"""
+
+
+def test_screenshot_paths_come_from_the_screenshots_section() -> None:
+    assert tracker.screenshot_paths(SHOTS_SUMMARY) == [
+        ".screenshots/scratch/activity-desktop.png",
+        ".screenshots/scratch/activity-phone.png",
+    ]
+    assert tracker.screenshot_paths("## Summary\nx\n\n## Verification\ny\n") == []
+
+
+def _shot(root: Path, path: str) -> str:
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    (root / path).write_bytes(b"\x89PNG")
+    return path
+
+
+def test_only_existing_scratch_pngs_can_be_published(tmp_path: Path) -> None:
+    good = _shot(tmp_path, ".screenshots/scratch/activity-desktop.png")
+    local = _shot(tmp_path, ".screenshots/local/home-desktop.png")
+    sneaky = ".screenshots/scratch/../local/other.png"
+    jpeg = _shot(tmp_path, ".screenshots/scratch/photo.jpg")
+    missing = ".screenshots/scratch/missing.png"
+
+    assert tracker.check_screenshots([good], root=tmp_path) == []
+    errors = tracker.check_screenshots([local, sneaky, jpeg, missing], root=tmp_path)
+    assert len(errors) == 4
+    assert errors[0].startswith(f"{local}: only scratch-stack screenshots")
+    assert errors[1].startswith(f"{sneaky}: only scratch-stack screenshots")
+    assert errors[2] == f"{jpeg}: not a .png"
+    assert errors[3].startswith(f"{missing}: no such file")
+
+
+def test_screenshots_need_distinct_names(tmp_path: Path) -> None:
+    a = _shot(tmp_path, ".screenshots/scratch/a/shot.png")
+    b = _shot(tmp_path, ".screenshots/scratch/b/shot.png")
+    assert tracker.check_screenshots([a, b], root=tmp_path) == [
+        "two screenshots are named shot.png"
+    ]
+
+
+def test_embed_screenshots_swaps_in_published_urls() -> None:
+    url = "https://raw.githubusercontent.com/o/r/abc/pr-4/activity-desktop.png"
+    body = tracker.embed_screenshots(
+        SHOTS_SUMMARY, {".screenshots/scratch/activity-desktop.png": url}
+    )
+    assert body.count(f"![Activity, desktop]({url})") == 1
+    assert f"![Activity, desktop again]({url})" in body
+    assert "![Activity, phone](.screenshots/scratch/activity-phone.png)" in body
+    assert "![Already published](https://example.com/old.png)" in body
+
+
 def test_draft_dependencies() -> None:
     text = VALID + "\n## Depends on\n- draft:01-schema\n- #5\n"
     draft = tracker.parse_draft(text)
