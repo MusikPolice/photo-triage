@@ -166,8 +166,10 @@ The defaults point `PHOTO_DIR` at `/mnt/sample-pictures` and keep app state in `
 
 ```bash
 just seed-scratch    # 🚧 copies the sample to ~/photo-triage-data/scratch
-# then set PHOTO_DIR=~/photo-triage-data/scratch in .env
+# then set PHOTO_DIR=~/photo-triage-data/scratch in .env, and remove TRASH_DIR
 ```
+
+Without `TRASH_DIR`, the trash is a hidden `.photo-triage-trash` folder inside `PHOTO_DIR`, on the same filesystem, which trashing needs. With the read-only sample, `./trash` is on another filesystem, so the API and worker warn about it at startup. That's expected while nothing is trashed.
 
 ### 9. Editor: VS Code with Remote-WSL
 
