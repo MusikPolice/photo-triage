@@ -15,7 +15,9 @@ from photo_triage.settings import SettingsError, load_settings
 
 config = context.config
 
-if config.config_file_name is not None:
+# The migrate command (`photo_triage.db.migrate`) has set up logging already, and
+# says so. The Alembic CLI and `just db-reset` use alembic.ini's.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
@@ -47,6 +49,8 @@ def run_migrations() -> None:
             # SQLite can't alter most columns in place; batch mode copies the table.
             render_as_batch=True,
             render_item=_render_item,
+            # Set by the migrate command, to log each migration it applies.
+            on_version_apply=config.attributes.get("on_version_apply"),
         )
         with context.begin_transaction():
             context.run_migrations()
