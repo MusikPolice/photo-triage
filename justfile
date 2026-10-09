@@ -1,16 +1,18 @@
 # Task runner (docs/dev-environment.md §5). `just` lists recipes.
-# The other app recipes (stack, ...) arrive with the rest of the Phase 1
-# scaffold.
 
 # List recipes
 default:
     @just --list --unsorted
 
-# Verify the dev environment (tool versions, lockfiles, weights, Docker, mounts)
+# Verify the dev environment (tool versions, lockfiles, weights, Docker, mounts), then .env and the settings it gives
 doctor:
-    ./scripts/bootstrap.sh --check
+    #!/usr/bin/env bash
+    status=0
+    ./scripts/bootstrap.sh --check || status=1
+    uv run --no-sync --project backend python scripts/check_env.py || status=1
+    exit "$status"
 
-# Migrate, then the API, worker and Vite dev server together; Ctrl-C stops all three. Extra arguments go to Vite
+# Migrate, then the API, worker, Vite dev server and Ollama together; Ctrl-C stops them all. Extra arguments go to Vite
 dev *args:
     scripts/dev.sh {{args}}
 
@@ -121,6 +123,11 @@ image tag="photo-triage:dev":
     scripts/mise-run.sh hadolint docker/Dockerfile
     docker build $(scripts/image_pins.sh --build-arg) -f docker/Dockerfile -t {{tag}} .
     scripts/docker_smoke.sh {{tag}}
+
+# The Compose stack from an image of this checkout, against `.stack/` (`up` by default; other args go to `docker compose`)
+[positional-arguments]  # so a quoted argument stays one
+stack *args:
+    scripts/stack.sh "$@"
 
 # Every pre-commit hook against every file
 pre-commit:

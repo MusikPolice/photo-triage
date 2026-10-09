@@ -1,4 +1,5 @@
-"""Run the worker: `python -m photo_triage.worker [--once]` (`just worker`).
+"""Run the worker: `python -m photo_triage.worker [--once]` (`just worker`). Only
+one runs per `DATA_DIR`: a second exits 1 at startup.
 
 `python -m photo_triage.worker noop N` queues N jobs for the `noop` stage, to
 exercise the worker by hand (needs `WORKER_NOOP_STAGE=true`).
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session
 from photo_triage import logs
 from photo_triage.db.engine import open_database
 from photo_triage.db.migrate import SchemaError, check_schema
+from photo_triage.files import LockHeldError, exclusive_lock
 from photo_triage.settings import (
     Settings,
     SettingsError,
@@ -39,6 +41,9 @@ from photo_triage.worker.state import observed_state
 
 # Named, since `__name__` is "__main__" when run with `python -m`.
 logger = logging.getLogger("photo_triage.worker")
+
+LOCK_FILENAME = "worker.lock"
+"""In `DATA_DIR`. A running worker holds it, so that only one runs (plan §6.11)."""
 
 THREAD_ENV_VARS = [
     "OMP_NUM_THREADS",
@@ -100,29 +105,53 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
                 settings, engine, clock, args.command == "pause", args.stage, args.actor
             )
 
-        logs.configure(settings, "worker")
-        logger.info("Worker starting: %s", settings.summary())
-        if (warning := trash_filesystem_warning(settings)) is not None:
-            logger.warning(warning)
-        worker = Worker(
-            engine,
-            build_runners(settings) if runners is None else runners,
-            queue=queue,
-            clock=clock,
-            quiet_hours=settings.worker_quiet_hours,
-            zone=settings.tz,
-        )
-        # Real time, not `clock`: see `photo_triage.worker.heartbeat`.
-        with Heartbeat(engine, utc_now):
-            worker.recover()
-            if args.once:
-                worker.drain()
-            else:
-                run_until_signalled(worker)
-        logger.info("Worker stopped")
-        return 0
+        # Before anything else, since a second worker would requeue the first one's
+        # running job in `recover`, and write to its worker.log.
+        lock_path = settings.data_dir / LOCK_FILENAME
+        try:
+            with exclusive_lock(lock_path):
+                return run(settings, engine, queue, clock, runners, once=args.once)
+        except LockHeldError:
+            print(
+                f"A worker is already running for {settings.data_dir} (it holds "
+                f"{lock_path}). Only one worker may run at a time; stop that one first.",
+                file=sys.stderr,
+            )
+            return 1
     finally:
         engine.dispose()
+
+
+def run(
+    settings: Settings,
+    engine: Engine,
+    queue: JobQueue,
+    clock: Clock,
+    runners: Mapping[str, Runner] | None,
+    *,
+    once: bool,
+) -> int:
+    logs.configure(settings, "worker")
+    logger.info("Worker starting: %s", settings.summary())
+    if (warning := trash_filesystem_warning(settings)) is not None:
+        logger.warning(warning)
+    worker = Worker(
+        engine,
+        build_runners(settings) if runners is None else runners,
+        queue=queue,
+        clock=clock,
+        quiet_hours=settings.worker_quiet_hours,
+        zone=settings.tz,
+    )
+    # Real time, not `clock`: see `photo_triage.worker.heartbeat`.
+    with Heartbeat(engine, utc_now):
+        worker.recover()
+        if once:
+            worker.drain()
+        else:
+            run_until_signalled(worker)
+    logger.info("Worker stopped")
+    return 0
 
 
 def limit_threads(count: int) -> None:

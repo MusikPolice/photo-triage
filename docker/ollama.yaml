@@ -1,0 +1,18 @@
+# The Ollama service, extended by compose.yaml and compose.dev.yaml so its pinned
+# image is written once (dev-environment §2). CPU only: no GPU flags (plan §4).
+# Models persist in the `ollama` named volume, which each of those declares.
+
+services:
+  ollama:
+    image: ollama/ollama:0.40.2
+    volumes:
+      - ollama:/root/.ollama
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    restart: unless-stopped
+    # Caps (plan §6.11), so the media server's other services keep running.
+    cpus: 4
+    mem_limit: 4g

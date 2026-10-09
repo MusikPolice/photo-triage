@@ -17,6 +17,7 @@ node_modules/
 .env
 /data/
 /trash/
+/.stack/
 
 # `just shot` screenshots and `just preview`'s state (docs/dev-environment.md §5)
 /.screenshots/

@@ -72,8 +72,8 @@ WORKDIR /app/backend
 # groups: dev and export (torch, open_clip) stay out of the image.
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --locked --no-install-project
+# The migrate step runs Alembic from the package, so alembic.ini stays out.
 COPY README.md /app/
-COPY backend/alembic.ini ./
 COPY backend/src/ src/
 RUN uv sync --locked
 
@@ -92,8 +92,8 @@ RUN ln -s /opt/exiftool/exiftool /usr/local/bin/exiftool
 # A fixed UID, so bind-mounted folders can be given to it on the host.
 RUN groupadd --gid 1000 app \
     && useradd --uid 1000 --gid app --create-home app \
-    && mkdir /photos /trash /data \
-    && chown app:app /photos /trash /data
+    && mkdir /photos /data \
+    && chown app:app /photos /data
 
 # The repo's layout, so the app finds the frontend at /app/frontend/dist.
 WORKDIR /app
@@ -103,8 +103,9 @@ COPY --from=frontend /app/frontend/dist /app/frontend/dist
 ENV PATH=/app/backend/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PHOTO_DIR=/photos \
-    TRASH_DIR=/trash \
     DATA_DIR=/data
+# TRASH_DIR is left to its default, /photos/.photo-triage-trash, on the photo
+# library's filesystem, so trashing a file is a rename (plan §6.8).
 
 USER 1000:1000
 EXPOSE 8000

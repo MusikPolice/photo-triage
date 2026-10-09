@@ -4,7 +4,6 @@
 !README.md
 !backend/pyproject.toml
 !backend/uv.lock
-!backend/alembic.ini
 !backend/src/
 !frontend/
 frontend/node_modules/

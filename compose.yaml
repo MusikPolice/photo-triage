@@ -1,0 +1,99 @@
+# The production stack (plan §3, §4; dev-environment §5): the migrate step, the
+# app, the worker and Ollama.
+#   docker compose up -d        from the folder holding this file and its .env
+#   just stack                  the same against a test folder, `.stack/`
+#
+# The app and the worker run the image `just image` builds (photo-triage:dev, or
+# PHOTO_TRIAGE_IMAGE). Compose reads `.env` next to this file twice:
+# - for the host side: PHOTO_DIR and DATA_DIR are the host folders mounted at
+#   /photos and /data, and APP_PORT is the host port;
+# - as each app container's environment, for the other settings in plan §9.
+#   The container paths below override the host ones.
+# Both folders must exist and be writable by UID 1000, the image's user. Compose
+# won't create them, since Docker would make them owned by root.
+
+name: photo-triage
+
+x-logging: &logging
+  # Docker's copy of stderr. The app's own rotated logs are in DATA_DIR/logs.
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+x-app: &app
+  image: ${PHOTO_TRIAGE_IMAGE:-photo-triage:dev}
+  env_file:
+    - path: ${APP_ENV_FILE:-.env}
+      required: false
+  environment:
+    PHOTO_DIR: /photos
+    DATA_DIR: /data
+    # Empty means the default, /photos/.photo-triage-trash: inside the library's
+    # mount, so trashing a file is a rename (plan §6.8). No separate trash mount.
+    TRASH_DIR: ""
+    APP_PORT: "8000"  # inside the container; the host port is APP_PORT below
+  volumes:
+    - type: bind
+      source: ${PHOTO_DIR:?Set PHOTO_DIR, the photo library's host folder, in .env}
+      target: /photos
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${DATA_DIR:?Set DATA_DIR, the host folder for the database and derived files, in .env}
+      target: /data
+      bind:
+        create_host_path: false
+  logging: *logging
+  restart: unless-stopped
+
+services:
+  # Upgrades the database, backing it up first, then exits. The app and the
+  # worker never migrate, and start only once this has succeeded.
+  migrate:
+    <<: *app
+    command: ["python", "-m", "photo_triage.db", "migrate"]
+    restart: "no"
+
+  app:
+    <<: *app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      start_interval: 1s
+    # Caps (plan §6.11), so the media server's other services keep running.
+    cpus: 1
+    mem_limit: 1g
+
+  # A single worker (plan §6.11). A second one, e.g. `docker compose run worker`,
+  # exits at once: it holds DATA_DIR/worker.lock.
+  worker:
+    <<: *app
+    command: ["python", "-m", "photo_triage.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # SIGTERM lets the job in progress finish before the worker stops.
+    stop_grace_period: 60s
+    # WORKER_THREADS (default 4) sets the threads it uses within this.
+    cpus: 4
+    mem_limit: 6g
+
+  ollama:
+    extends:
+      file: docker/ollama.yaml
+      service: ollama
+
+volumes:
+  ollama:
