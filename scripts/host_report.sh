@@ -37,8 +37,12 @@ echo "Sampling for $minutes minute(s); writing $out"
   section "Swap and out-of-memory kills (last 30 days)"
   swapon --show
   echo "swappiness: $(cat /proc/sys/vm/swappiness)"
-  journalctl -k --since "-30 days" 2>/dev/null | grep -i 'out of memory' | tail -5 \
-    || echo "none found (or the kernel log isn't readable without sudo)"
+  kernel_log="$(journalctl -k --since "-30 days" 2>/dev/null)"
+  if [[ -z "$kernel_log" ]]; then
+    echo "unknown: this user can't read the kernel log (the adm or systemd-journal group can)"
+  else
+    grep -i 'out of memory' <<<"$kernel_log" | tail -5 || echo "none in the kernel log"
+  fi
 
   section "Disks"
   df -hT -x tmpfs -x devtmpfs -x overlay -x squashfs
@@ -55,7 +59,7 @@ echo "Sampling for $minutes minute(s); writing $out"
   section "Containers and their limits (cpus in billionths, memory in bytes; 0 = none)"
   if $docker_ok; then
     docker ps --format '{{.Names}}' | while read -r name; do
-      docker inspect "$name" --format '{{.Name}}  image={{.Config.Image}} cpus={{.HostConfig.NanoCpus}} cpuset={{.HostConfig.CpusetCpus}} memory={{.HostConfig.Memory}} restart={{.HostConfig.RestartPolicy.Name}}'
+      docker inspect "$name" --format '{{.Name}}  image={{.Config.Image}} cpus={{.HostConfig.NanoCpus}} cpuset={{.HostConfig.CpusetCpus}} memory={{.HostConfig.Memory}} restart={{.HostConfig.RestartPolicy.Name}} restarts={{.RestartCount}} oom_killed={{.State.OOMKilled}} started={{.State.StartedAt}}'
     done
   else
     no_docker
