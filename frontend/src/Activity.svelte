@@ -9,14 +9,12 @@
     groupStages,
     stageCounts,
     stageName,
-    workerLabel,
   } from "./lib/format";
 
   let { feed }: { feed: ActivityFeed } = $props();
 
   const activity = $derived(feed.activity);
   const groups = $derived(groupStages(activity?.stages ?? []));
-  const label = $derived(workerLabel(activity?.worker ?? null, feed.connection, new Date()));
 
   /** What an idle stage has to show: its done and parked counts. */
   function idleSummary(stage: StageActivity): string {
@@ -43,15 +41,10 @@
   }
 </script>
 
-<h1>Activity</h1>
-
-{#if activity === null}
-  <p class="muted">
-    {feed.connection === "lost" ? "Can't reach the API. Retrying…" : "Loading…"}
-  </p>
-{:else}
-  <section class="worker">
-    <p>Worker: <strong>{label.text}</strong></p>
+<!-- The worker's status is in the header's status indicator, so this page doesn't repeat it. -->
+<div class="title">
+  <h1>Activity</h1>
+  {#if activity !== null}
     <button
       type="button"
       disabled={busy !== null}
@@ -59,8 +52,14 @@
     >
       {activity.worker.paused ? "Resume all" : "Pause all"}
     </button>
-  </section>
+  {/if}
+</div>
 
+{#if activity === null}
+  <p class="muted">
+    {feed.connection === "lost" ? "Can't reach the API. Retrying…" : "Loading…"}
+  </p>
+{:else}
   {#if failure !== null}
     <p class="failure" role="alert">{failure}</p>
   {/if}
@@ -133,16 +132,7 @@
 {/if}
 
 <style>
-  h1 {
-    margin-top: 0;
-    font-size: 1.5rem;
-  }
-
-  .muted {
-    color: var(--muted);
-  }
-
-  .worker {
+  .title {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -151,8 +141,13 @@
     margin-bottom: 1rem;
   }
 
-  .worker p {
+  h1 {
     margin: 0;
+    font-size: 1.5rem;
+  }
+
+  .muted {
+    color: var(--muted);
   }
 
   .failure {
@@ -161,7 +156,6 @@
 
   h2 {
     margin: 1.25rem 0 0.5rem;
-    color: var(--muted);
     font-size: 0.875rem;
     font-weight: 600;
     letter-spacing: 0.04em;
