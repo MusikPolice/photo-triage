@@ -74,9 +74,11 @@
         {@const counts = stageCounts(stage)}
         <li class:paused={stage.paused}>
           <div class="head">
-            <span class="name">{stageName(stage.stage)}</span>
-            {#if stage.kind === "batch"}<span class="tag">batch</span>{/if}
-            {#if stage.paused}<span class="tag">paused</span>{/if}
+            <div class="label">
+              <span class="name">{stageName(stage.stage)}</span>
+              {#if stage.kind === "batch"}<span class="tag">batch</span>{/if}
+              {#if stage.paused}<span class="tag">paused</span>{/if}
+            </div>
             <button
               type="button"
               disabled={busy !== null}
@@ -110,10 +112,12 @@
       {#each groups.idle as stage (stage.stage)}
         <li>
           <div class="head">
-            <span class="name">{stageName(stage.stage)}</span>
-            {#if stage.kind === "batch"}<span class="tag">batch</span>{/if}
-            {#if stage.paused}<span class="tag">paused</span>{/if}
-            <span class="muted summary">{idleSummary(stage)}</span>
+            <div class="label">
+              <span class="name">{stageName(stage.stage)}</span>
+              {#if stage.kind === "batch"}<span class="tag">batch</span>{/if}
+              {#if stage.paused}<span class="tag">paused</span>{/if}
+              <span class="muted summary">{idleSummary(stage)}</span>
+            </div>
             <button
               type="button"
               disabled={busy !== null}
@@ -178,11 +182,21 @@
     border-radius: 0.5rem;
   }
 
+  /* The button keeps the top right; the label wraps in the space to its left. */
   .head {
     display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+
+  .label {
+    display: flex;
+    flex: 1;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: baseline;
     gap: 0.25rem 0.5rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .idle {
@@ -216,7 +230,7 @@
   }
 
   .head button {
-    margin-left: auto;
+    flex-shrink: 0;
   }
 
   .bar {
