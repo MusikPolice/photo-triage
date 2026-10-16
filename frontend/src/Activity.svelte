@@ -2,6 +2,7 @@
   import type { ActivityFeed } from "./lib/activity.svelte";
   import type { Stage, StageActivity } from "./lib/api";
   import {
+    barTone,
     doneOfTotal,
     formatCount,
     formatPercent,
@@ -9,12 +10,14 @@
     groupStages,
     stageCounts,
     stageName,
+    workerHold,
   } from "./lib/format";
 
   let { feed }: { feed: ActivityFeed } = $props();
 
   const activity = $derived(feed.activity);
   const groups = $derived(groupStages(activity?.stages ?? []));
+  const hold = $derived(activity === null ? null : workerHold(activity.worker, new Date()));
 
   /** What an idle stage has to show: its done and parked counts. */
   function idleSummary(stage: StageActivity): string {
@@ -41,7 +44,8 @@
   }
 </script>
 
-<!-- The worker's status is in the header's status indicator, so this page doesn't repeat it. -->
+<!-- The worker's status is in the header's status indicator. This page says only
+     when it holds every stage up. -->
 <div class="title">
   <h1>Activity</h1>
   {#if activity !== null}
@@ -60,6 +64,9 @@
     {feed.connection === "lost" ? "Can't reach the API. Retrying…" : "Loading…"}
   </p>
 {:else}
+  {#if hold !== null}
+    <p class="notice tone-{hold.tone}" role="status">{hold.notice}</p>
+  {/if}
   {#if failure !== null}
     <p class="failure" role="alert">{failure}</p>
   {/if}
@@ -71,7 +78,7 @@
     <ul class="stages">
       {#each groups.working as stage (stage.stage)}
         {@const counts = stageCounts(stage)}
-        <li class:paused={stage.paused}>
+        <li>
           <div class="head">
             <div class="label">
               <span class="name">{stageName(stage.stage)}</span>
@@ -87,7 +94,7 @@
             </button>
           </div>
           <div
-            class="bar"
+            class="bar tone-{barTone(stage, hold)}"
             role="progressbar"
             aria-label={stageName(stage.stage)}
             aria-valuemin={0}
@@ -237,11 +244,28 @@
 
   .bar div {
     height: 100%;
-    background: var(--ok);
+    background: var(--tone);
   }
 
-  .paused .bar div {
-    background: var(--idle);
+  .tone-ok {
+    --tone: var(--ok);
+  }
+
+  .tone-idle {
+    --tone: var(--idle);
+  }
+
+  .tone-alert {
+    --tone: var(--alert);
+  }
+
+  /* A bar of the tone's colour down the left, so the line reads as a notice. */
+  .notice {
+    margin: 0 0 1rem;
+    padding: 0.5rem 0.75rem;
+    border-left: 0.25rem solid var(--tone);
+    border-radius: 0.25rem;
+    background: var(--header-bg);
   }
 
   .numbers {

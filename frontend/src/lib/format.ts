@@ -112,6 +112,43 @@ export function workerLabel(
   }
 }
 
+export interface WorkerHold {
+  /** One line under the Activity heading, giving the reason. */
+  notice: string;
+  /** For every working stage's progress bar, matching the status indicator. */
+  tone: Exclude<Tone, "ok">;
+}
+
+/** Why no stage can run, or null while the worker is running. A stage's own
+ * pause is separate, and shown on its card. */
+export function workerHold(
+  worker: WorkerActivity,
+  now: Date,
+  locale: Locale = {},
+): WorkerHold | null {
+  switch (worker.status) {
+    case "running":
+      return null;
+    case "paused":
+      return { notice: "Everything is paused.", tone: "idle" };
+    case "quiet":
+      return worker.quiet_until_at === null
+        ? { notice: "Quiet hours: nothing runs until they end.", tone: "idle" }
+        : {
+            notice: `Quiet hours: nothing runs until ${formatTime(new Date(worker.quiet_until_at), now, locale)}.`,
+            tone: "idle",
+          };
+    case "stopped":
+      return { notice: "The worker isn't running, so nothing is being processed.", tone: "alert" };
+  }
+}
+
+/** The progress bar's colour: the worker's hold if there is one, else amber for
+ * the stage's own pause. */
+export function barTone(stage: StageActivity, hold: WorkerHold | null): Tone {
+  return hold?.tone ?? (stage.paused ? "idle" : "ok");
+}
+
 export interface StageGroups {
   /** Stages with work: running first, then queued, then paused. */
   working: StageActivity[];
