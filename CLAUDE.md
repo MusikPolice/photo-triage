@@ -80,6 +80,17 @@ before opening its PR.
   `just shot --base` against your own `just dev` can show real photos, so those
   stay local.
 
+## Database
+
+- **Index every table that's read regularly.** A query that runs routinely (an
+  event-feed poll, a page load, a worker claim) gets an index that covers it, in
+  the migration of the PR that adds the query. Check its plan with
+  `EXPLAIN QUERY PLAN`.
+- **Stop at indexes until real data shows a problem.** Counter tables, caches and
+  denormalisation wait for evidence from the real library (`just dry-run-full`),
+  not just a synthetic benchmark. If a target is met only narrowly, report the
+  margin in the PR and leave it there.
+
 ## Checks
 
 `just check` runs everything CI runs on a PR: pre-commit, lint, the
