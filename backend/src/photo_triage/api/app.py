@@ -8,7 +8,6 @@ from types import FrameType
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.types import Scope
@@ -43,11 +42,8 @@ def create_app(
         clock = utc_now if settings.fake_now is None else running_from(settings.fake_now)
     engine = open_database(settings.data_dir)
 
-    def read() -> activity.Activity:
-        with Session(engine) as session:
-            return activity.read_activity(session, settings, clock(), real_clock())
-
-    feed = Feed(read, poll_s)
+    reader = activity.ActivityReader(engine, settings, clock, real_clock)
+    feed = Feed(reader, poll_s)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
@@ -59,6 +55,7 @@ def create_app(
             polling.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await polling
+            reader.close()
             engine.dispose()
 
     app = FastAPI(

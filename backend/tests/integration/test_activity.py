@@ -1,5 +1,6 @@
 """`GET /api/activity` and the pause and resume endpoints (plan §7, §6.11)."""
 
+import asyncio
 import datetime as dt
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
@@ -7,11 +8,14 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from photo_triage.api.activity import Activity, ActivityReader, StageActivity
 from photo_triage.api.app import create_app
 from photo_triage.api.deps import current_actor
+from photo_triage.api.feed import Feed
 from photo_triage.db.models import Job, JobStatus, WorkerControl
 from photo_triage.quiet_hours import parse
 from photo_triage.settings import Settings
@@ -293,3 +297,102 @@ async def test_the_openapi_schema_describes_the_responses(client: AsyncClient) -
         "last_seen_at",
     }
     assert components["StageActivity"]["properties"]["total"]["type"] == "integer"
+
+
+# --- the event feed's reader (#24) ------------------------------------------
+
+
+class CountQueries:
+    """Counts the statements on `engine` that count jobs."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.n = 0
+        event.listen(engine, "before_cursor_execute", self._seen)
+
+    def _seen(self, *args: Any) -> None:
+        statement: str = args[2]
+        if "count(" in statement.lower() and "jobs" in statement:
+            self.n += 1
+
+
+def _stage(activity: Activity, stage: Stage) -> StageActivity:
+    return next(s for s in activity.stages if s.stage == stage)
+
+
+async def _next(updates: AsyncIterator[Activity]) -> Activity:
+    return await asyncio.wait_for(anext(updates), timeout=5)
+
+
+async def test_the_feed_recounts_jobs_only_after_a_commit(
+    settings: Settings, migrated: Engine
+) -> None:
+    app = create_app(settings, poll_s=0.01)
+    counted = CountQueries(app.state.engine)
+    feed: Feed[Activity] = app.state.feed
+    async with app.router.lifespan_context(app):  # polls, and closes the reader after
+        updates = feed.updates()
+        try:
+            first = await _next(updates)
+            assert counted.n == 1
+
+            await asyncio.sleep(0.2)  # about 20 polls, and nothing committed
+
+            assert counted.n == 1
+
+            _add_jobs(migrated, Stage.CLIP, pending=1)
+
+            second = await _next(updates)
+            assert counted.n == 2
+        finally:
+            await updates.aclose()
+    assert _stage(first, Stage.CLIP).pending == 0
+    assert _stage(second, Stage.CLIP).pending == 1
+
+
+def test_the_reader_sees_a_stale_heartbeat_without_recounting(
+    settings: Settings, migrated: Engine, clock: FakeClock, real_clock: FakeClock
+) -> None:
+    counted = CountQueries(migrated)
+    reader = ActivityReader(migrated, settings, clock, real_clock)
+    _beat(migrated, START)
+    try:
+        assert reader().worker.status == "running"
+
+        real_clock.now = START + heartbeat.STALE_AFTER
+
+        assert reader().worker.status == "stopped"
+    finally:
+        reader.close()
+    assert counted.n == 1
+
+
+def test_the_reader_sees_quiet_hours_start_and_end_without_recounting(
+    settings: Settings, migrated: Engine, clock: FakeClock, real_clock: FakeClock
+) -> None:
+    settings = settings.model_copy(update={"worker_quiet_hours": parse("Mon 13:00-14:00")})
+    counted = CountQueries(migrated)
+    reader = ActivityReader(migrated, settings, clock, real_clock)
+    _beat(migrated, START)
+    statuses: list[str] = []
+    try:
+        for hour in (12, 13, 14):
+            clock.now = START.replace(hour=hour)
+            statuses.append(reader().worker.status)
+    finally:
+        reader.close()
+    assert statuses == ["running", "quiet", "running"]
+    assert counted.n == 1
+
+
+def test_the_reader_reconnects_after_closing(
+    settings: Settings, migrated: Engine, clock: FakeClock, real_clock: FakeClock
+) -> None:
+    reader = ActivityReader(migrated, settings, clock, real_clock)
+    reader()
+    reader.close()
+    _add_jobs(migrated, Stage.SCAN, done=2)
+    try:
+        scan = _stage(reader(), Stage.SCAN)
+    finally:
+        reader.close()
+    assert scan.done == 2
