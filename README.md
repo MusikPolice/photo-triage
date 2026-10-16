@@ -198,6 +198,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just stack` | The production Docker Compose stack (migrate, app, worker, Ollama), on an image of your checkout, against a test folder `.stack/`. `just stack exec worker python -m photo_triage.worker noop 50` queues jobs to watch |
 | `just test` | Unit, integration, and safety tests (fake ML models; fast) |
 | `just test-models` | Tests that run the real CLIP/InsightFace models (slow; cached weights) |
+| `just bench` | Benchmarks on large synthetic data, such as the Activity page's job counts over 1M jobs (slow) |
 | `just e2e` | Playwright end-to-end tests against `just stack` |
 | `just check` | Everything CI runs: format, lint, pyright, import contracts, tests, coverage, frontend checks, API types contract |
 | `just db-migrate` | Create or upgrade the database, backing it up first. The API and worker refuse to start until it's at the newest revision |
@@ -211,7 +212,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just shot PATH` | Screenshots of a page at desktop and phone widths, from a scratch copy of the app (no real photos) |
 | `just preview` | Keep a scratch copy of the app running, for many `just shot`s |
 
-Available today: `dev`, `api`, `worker`, `image`, `stack`, `shot`, `preview`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-migrate`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `dev`, `api`, `worker`, `image`, `stack`, `shot`, `preview`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-migrate`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `bench`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 

@@ -112,8 +112,11 @@ strict = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--strict-markers", "-m", "not models"]
-markers = ["models: runs real ML models on cached weights (slow; `just test-models`)"]
+addopts = ["--strict-markers", "-m", "not models and not bench"]
+markers = [
+    "models: runs real ML models on cached weights (slow; `just test-models`)",
+    "bench: times code on large synthetic data (slow; `just bench`)",
+]
 
 [tool.coverage.run]
 branch = true

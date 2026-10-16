@@ -81,6 +81,11 @@ test *args:
 test-models *args:
     uv run --no-sync pytest -m models {{args}}
 
+# Benchmarks on large synthetic data, printing their timings (slow; not in `just check`)
+[working-directory: 'backend']
+bench *args:
+    uv run --no-sync pytest -m bench -s {{args}}
+
 # Known vulnerabilities in runtime dependencies
 [working-directory: 'backend']
 audit:
