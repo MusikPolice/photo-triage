@@ -130,6 +130,8 @@ class Job(Base):
             unique=True,
             sqlite_where=sa.text(JOB_IS_OPEN),
         ),
+        # The Activity page counts jobs by stage and status, one range at a time.
+        sa.Index("ix_jobs_stage_status", "stage", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

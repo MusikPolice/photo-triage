@@ -138,6 +138,7 @@ def test_logs_the_backup_and_each_migration_at_info(
         f"Backed up the database to {backup}",
         "Applied migration 0004: worker_controls: pause and resume, globally or per stage",
         "Applied migration 0005: worker_heartbeat: whether the worker process is running",
+        "Applied migration 0006: jobs: index on (stage, status) for the Activity page's counts",
         f"The database is at revision {head_revision()}",
     ]
 
