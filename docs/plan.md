@@ -227,22 +227,27 @@ Naming writes to the file: `XMP-iptcExt:PersonInImage`, the person's name as a k
 
 All file metadata writes go through a **write queue** in SQLite, applied by the worker:
 
-- `exiftool -overwrite_original_in_place` (no `_original` backup files littering the library; preserves inode/permissions), file mtime preserved.
+- `exiftool -overwrite_original_in_place` (no `_original` backup files littering the library; preserves inode/permissions), file mtime preserved. exiftool's `-P` keeps the mtime only to the whole second, so the worker restores the exact `file_mtime_ns` itself after each write.
 - `EXIF_WRITES_ENABLED=false` dry-run mode: writes are queued and logged but not applied — for early testing against the real library.
 - A **write log** records before/after values for every field changed, enabling audit and revert.
 - Writes to the same file are coalesced.
 
 **Field mapping:**
 
-| Data | JPEG / HEIC | MOV / MP4 |
-|---|---|---|
-| Tags | `IPTC:Keywords` + `XMP-dc:Subject` | `XMP-dc:Subject` + `QuickTime:Keywords` |
-| Caption | `XMP-dc:Description` + `EXIF:ImageDescription` | `XMP-dc:Description` |
-| People | `XMP-iptcExt:PersonInImage` + keyword | same (XMP) |
-| Face regions | `XMP-mwg-rs:RegionInfo` | `XMP-mwg-rs:RegionInfo` |
-| Reviewed marker | `XMP-phototriage:Reviewed` (e.g. `quality,duplicates`) | same |
+| Data | JPEG | HEIC | MOV / MP4 |
+|---|---|---|---|
+| Tags | `IPTC:Keywords` + `XMP-dc:Subject` | `XMP-dc:Subject` | `XMP-dc:Subject` + `Keys:Keywords` (one comma-separated string) |
+| Caption | `XMP-dc:Description` + `EXIF:ImageDescription` | same as JPEG | `XMP-dc:Description` |
+| People | `XMP-iptcExt:PersonInImage` + keyword | same | same |
+| Face regions | `XMP-mwg-rs:RegionInfo` | same | same |
+| Reviewed marker | `XMP-phototriage:Reviewed` (e.g. `quality,duplicates`) | same | same |
 
-(Exact tag support per container to be verified with `exiftool` during Phase 2.)
+Verified with exiftool 13.59 in Phase 2 (`tests/integration/test_metadata_writeback.py`): every field above round-trips on each container, and the pixels, media streams, inode and mtime are unchanged. Two mappings differ from the JPEG one:
+
+- **HEIC has no IPTC.** exiftool writes nothing for `IPTC:Keywords` there, without a warning, so HEIC tags are XMP only.
+- **QuickTime keywords are a single string.** `Keys:Keywords` (what `QuickTime:Keywords` writes) and `ItemList:Keyword` each hold one value, so the tags are joined with `, ` for QuickTime-only readers, and `XMP-dc:Subject` is the list that's read back.
+
+`XMP-phototriage` is defined in `photo_triage/files/exiftool.config`, passed to every exiftool call with `-config`. Its namespace URI is `https://github.com/MusikPolice/photo-triage/xmp/1.0/`, and it never changes once files carry it.
 
 ### 6.11 Background Worker & Scheduling
 
@@ -445,6 +450,6 @@ Ollama service, model evaluation (moondream vs. alternatives) on real photos for
 - **Threshold calibration:** duplicate similarity (0.95), quality/junk thresholds, face match distance, UMAP parameters (`n_neighbors`, `min_dist`) — all need tuning against the real library.
 - **Video aggregation details:** whether 5 frames is enough, how long videos should be sampled, and whether per-frame quality should flag only the worst segment.
 - **Layout churn:** "always re-fit" is the chosen behavior; if reshuffling after each scan proves disorienting, fall back to fitting once and placing new items with `umap.transform()`.
+- ~~**exiftool coverage:** confirm MWG regions and custom XMP namespaces write cleanly to HEIC and MP4/MOV.~~ Answered in Phase 2: they do. HEIC takes no IPTC and QuickTime keywords are one string, so the mapping in §6.10 differs by container.
 - **Vector storage:** plain SQLite blobs + numpy vs. `sqlite-vec` — decide during Phase 2 based on memory footprint and query latency.
-- **exiftool coverage:** confirm MWG regions and custom XMP namespaces write cleanly to HEIC and MP4/MOV.
 - **Mobile map performance:** whether 100k points + atlases are smooth on the household's actual phones; fallback is dots-only on mobile.

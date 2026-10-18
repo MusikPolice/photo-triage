@@ -104,7 +104,7 @@ photo-triage/
       worker/       job queue, scheduler, stage runners
       pipeline/     scan, thumbnails, clip, quality, faces, tagging, layout, dupes
       ml/           pluggable adapters (embedder, face detector, tagger) + fakes
-      files/        THE ONLY module allowed to mutate files: trash, restore, purge, exif writes, log rotation, backup pruning, the worker's lock file
+      files/        THE ONLY module allowed to mutate files: trash, restore, purge, exif writes (exiftool.config defines the XMP-phototriage namespace), log rotation, backup pruning, the worker's lock file
       logs.py       logging setup shared by every process (§5 "Logging")
       db/           engine, models, migrations/ (Alembic), the migrate step, repositories
     tests/
@@ -203,7 +203,7 @@ Get a logger with `logging.getLogger(__name__)` (in a `__main__` module, name it
 |---|---|---|
 | Pure logic | pytest (+ Hypothesis) | Quality scoring, union-find grouping, content hashing, ETA math against quiet hours, quiet-hours parsing, search score blending, FTS query building. Property-based where there are invariants. |
 | Database & migrations | pytest + Alembic | Every migration upgrades from empty and downgrades; `alembic check` confirms models and migrations agree. Migrations have a single head and import only Alembic, SQLAlchemy and the standard library, never app code, so later code changes can't alter what an old migration does. |
-| Metadata write-back | pytest + real exiftool | Round-trip each field mapping (plan §6.10) per container type on tier-1 copies in a temp dir; read back and assert. |
+| Metadata write-back | pytest + real exiftool | Round-trip each field mapping (plan §6.10) per container type on tier-1 copies in a temp dir; read back and assert. `tests/integration/test_metadata_writeback.py` does this for JPEG, HEIC, MOV and MP4, and checks the content hash, inode and mtime are unchanged; Phase 4's write-back tests extend it. |
 | Pipelines & worker | pytest + fake ML adapters | Run the worker `--once` over tier-1 fixtures with fake embedders/detectors (deterministic vectors derived from file hashes). Assert job states, stage ordering, resumability (kill mid-run, restart), retry/park behaviour. |
 | ML adapters (model tier) | pytest `-m models` | Real CLIP / InsightFace / UMAP on fixtures with **tolerance** assertions: burst pair cosine > threshold, distinct scenes below it, expected face counts, text query ranks the right fixture first. Weights cached. Not in the default suite. |
 | API | pytest + httpx `AsyncClient` | Endpoint behaviour, `current_actor` in both `AUTH_MODE`s, SSE progress stream. The in-process client waits for a whole response, so the event stream is read from uvicorn running in a thread (`test_events.py`). |
