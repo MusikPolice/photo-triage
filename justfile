@@ -47,6 +47,10 @@ db-reset:
     uv run --no-sync --project backend alembic -c backend/alembic.ini downgrade base
     uv run --no-sync --project backend alembic -c backend/alembic.ini upgrade head
 
+# Regenerate the tier-1 synthetic fixtures in backend/tests/fixtures/synthetic/ (needs the pinned exiftool and ffmpeg)
+fixtures *args:
+    uv run --no-sync --project backend python scripts/make_synthetic_fixtures.py {{args}}
+
 # Install backend dependencies exactly as locked
 [working-directory: 'backend']
 sync:
