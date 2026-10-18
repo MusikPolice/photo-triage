@@ -36,8 +36,44 @@ jobs:
           key: backend-${{ hashFiles('backend/uv.lock', '.pre-commit-config.yaml') }}
           restore-keys: backend-
 
+      # exiftool and ffmpeg pinned in versions.env, as scripts/bootstrap.sh and
+      # docker/Dockerfile install them. The fixture tests run them.
+      - uses: actions/cache@v6
+        id: media-tools
+        with:
+          path: ~/media-tools
+          key: media-tools-${{ env.EXIFTOOL_SHA256 }}-${{ env.FFMPEG_SHA256 }}
+
+      - name: Download exiftool and ffmpeg
+        if: steps.media-tools.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/media-tools/exiftool ~/media-tools/ffmpeg
+          curl --fail --silent --show-error --location --retry 3 --output /tmp/exiftool.tar.gz \
+            "https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${EXIFTOOL_VERSION}.tar.gz/download"
+          echo "${EXIFTOOL_SHA256}  /tmp/exiftool.tar.gz" | sha256sum --check
+          tar -xzf /tmp/exiftool.tar.gz -C ~/media-tools/exiftool --strip-components=1
+          # The release URL is rolling, so old-releases comes first and the checksum guards against drift.
+          for url in \
+            "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz" \
+            "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"; do
+            curl --fail --silent --show-error --location --retry 3 --output /tmp/ffmpeg.tar.xz "$url" \
+              && echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum --check --status \
+              && break
+            rm -f /tmp/ffmpeg.tar.xz
+          done
+          test -f /tmp/ffmpeg.tar.xz
+          tar -xJf /tmp/ffmpeg.tar.xz -C ~/media-tools/ffmpeg --strip-components=1
+
+      - name: Put exiftool and ffmpeg on PATH and check their versions
+        run: |
+          echo ~/media-tools/exiftool >> "$GITHUB_PATH"
+          echo ~/media-tools/ffmpeg >> "$GITHUB_PATH"
+          PATH=~/media-tools/exiftool:~/media-tools/ffmpeg:$PATH
+          test "$(exiftool -ver)" = "$EXIFTOOL_VERSION"
+          ffmpeg -version | head -1 | grep -F "ffmpeg version ${FFMPEG_VERSION}-static "
+          ffprobe -version | head -1 | grep -F "ffprobe version ${FFMPEG_VERSION}-static "
+
       # The export group (torch, open_clip) is only for the one-off CLIP export.
-      # TODO(Phase 2): install the pinned exiftool and ffmpeg once tests use them.
       - name: Install dependencies
         working-directory: backend
         run: |
