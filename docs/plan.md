@@ -119,11 +119,11 @@ Search blends all three (§6.5).
 
 Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MOV, MP4). It never walks `TRASH_DIR`, which may be inside `PHOTO_DIR` (§6.8), so a trashed file isn't seen as moved.
 
-**Identity.** Each item is identified by a **content hash** of its decoded pixel data (for video: hash of the media stream, excluding metadata atoms). This is stable across metadata writes (ours and others') and across elodie moving/renaming files. `(path, mtime, size)` is used as a cheap "maybe changed?" pre-check; only when it changes is the content hash recomputed. A known content hash at a new path is treated as a move, not a new item — all history is preserved.
+**Identity.** Each item is identified by a **content hash** of its decoded pixel data (for video: hash of the media stream, excluding metadata atoms). This is stable across metadata writes (ours and others') and across elodie moving/renaming files. `(path, mtime, size)` is used as a cheap "maybe changed?" pre-check; only when it changes is the content hash recomputed. A known content hash at a new path is treated as a move, not a new item — all history is preserved — when the item that had it is no longer at its old path. If it still is, the new file is an exact copy and becomes an item of its own, so duplicate grouping (§6.7) can offer to remove one. A file changed in place keeps its item and takes the new hash.
 
 **Per item, the scanner records:** path, type, dimensions, duration (video), `taken_at_local` (`DateTimeOriginal` → `CreateDate` → `DateTime` → file mtime), existing keywords/people/regions/review markers already in the file.
 
-The scanner itself is cheap; heavy per-item work (thumbnails, CLIP, quality, faces, tagging) is enqueued as separate pipeline stages (§6.11).
+A scan is a batch `walk` job, which lists the library and compares it with `items`, plus one `scan` job per new or changed file, which hashes it. So scanning shows progress, throughput and ETA like every other stage (§7). The scanner itself is cheap; heavy per-item work (thumbnails, CLIP, quality, faces, tagging) is enqueued as separate pipeline stages (§6.11).
 
 **Discovery.** A scheduled nightly incremental scan (`SCAN_SCHEDULE`, cron syntax) plus a "Scan now" button. Files that have disappeared are marked missing (not deleted from the DB) until a later scan confirms they're gone or finds them at a new path.
 
@@ -254,14 +254,14 @@ Verified with exiftool 13.59 in Phase 2 (`tests/integration/test_metadata_writeb
 A **single worker** processes a persistent, priority-ordered job queue in SQLite. Pipeline stages per item form a dependency chain:
 
 ```
-scan ─► thumbnail ─► clip ─┬─► quality/junk
-                           ├─► faces ─► recognize
-                           └─► (layout re-fit, duplicate grouping, atlases — batch jobs)
-                     llm_tag (lowest priority; waits for faces when available)
+walk ─► scan ─► thumbnail ─► clip ─┬─► quality/junk
+                                   ├─► faces ─► recognize
+                                   └─► (layout re-fit, duplicate grouping, atlases — batch jobs)
+                             llm_tag (lowest priority; waits for faces when available)
 metadata writes (high priority, small)
 ```
 
-- **Priority order:** metadata writes > scan > thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
+- **Priority order:** metadata writes > walk and scan > thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
 - **Resource limits:** CPU/memory caps via Compose (`cpus:`, `mem_limit:`); `WORKER_THREADS` for ONNX/BLAS. The worker sets the OpenMP, BLAS and numba thread variables from it at startup, but ONNX Runtime ignores those: every ONNX Runtime session must be created with `intra_op_num_threads=WORKER_THREADS`.
 - **Quiet hours:** optional `WORKER_QUIET_HOURS` lists the times when the household is using the host, in its local time (`TZ`), e.g. `Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00`. Each period names the days it starts on, and one whose end is at or before its start ends the next day. The whole worker stays idle during them, and a job already running finishes. Unset means it always runs.
 - **Pause / resume** from the UI or the command line, globally or per stage. A pause is stored in `worker_controls`, so it survives a restart, and a job already running finishes.
@@ -275,7 +275,7 @@ The initial processing of a large library will take **weeks** (LLM tagging possi
 
 **Global status indicator.** A compact indicator in the app header, visible from every view: overall "library readiness" and whether the worker is running, paused, waiting for quiet hours to end ("Quiet until 02:00"), or stopped (the worker process isn't running, from a heartbeat it writes every few seconds). Tapping it opens the Activity page.
 
-**Activity page.** One row per pipeline stage (scan, thumbnails, CLIP, quality, faces, recognition, LLM tagging, metadata writes, and each batch job: layout re-fit, duplicate grouping, atlases):
+**Activity page.** One row per pipeline stage (scan, thumbnails, CLIP, quality, faces, recognition, LLM tagging, metadata writes, and each batch job: the library walk, layout re-fit, duplicate grouping, atlases):
 
 - done / total, with a progress bar, and counts of pending, in-progress, errored, skipped
 - **throughput** (rolling average, items/min) and **ETA** — computed against the hours outside quiet hours, not wall-clock (e.g. "~23 nights remaining" rather than a misleading "~8 days")
@@ -301,7 +301,9 @@ The initial processing of a large library will take **weeks** (LLM tagging possi
 
 ```
 items
-  id, content_hash (unique), path, media_type (photo | video)
+  id, content_hash, path, media_type (photo | video)  -- content_hash: null until the
+                                                      -- scan hashes the file; not unique,
+                                                      -- since exact copies are items too
   file_size_bytes, file_mtime_ns, width, height, duration_s
   taken_at_local, first_seen_at, last_seen_at, missing_since
   status (active | trashed | purged | missing)

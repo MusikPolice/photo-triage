@@ -8,8 +8,9 @@
 # `up` (also with options, e.g. `up -d`) builds the image first.
 #
 # `.stack/` holds the library (photos/, with the trash inside it) and DATA_DIR
-# (data/), bind-mounted as on the server, and app.env, the settings the
-# containers get in place of `.env` (created with the noop stage on, so jobs can
+# (data/), bind-mounted as on the server. An empty library is filled with a copy
+# of the tier-1 fixtures, so a scan has something to find. `.stack/` also holds
+# app.env, the settings the containers get in place of `.env` (created with the noop stage on, so jobs can
 # be queued by hand; edit it to try others). The host port is APP_PORT, from the
 # environment or `.env`, as for `just dev`, so stop that first. The project name
 # is photo-triage-stack, so this never touches a real deployment's containers.
@@ -21,6 +22,10 @@ image="photo-triage:dev"
 stack="$root/.stack"
 
 mkdir -p "$stack/photos" "$stack/data"
+if [[ -z "$(ls -A "$stack/photos")" ]]; then
+  cp -r backend/tests/fixtures/synthetic/. "$stack/photos/"
+  echo "Copied the tier-1 fixtures into $stack/photos" >&2
+fi
 if [[ ! -f "$stack/app.env" ]]; then
   cat >"$stack/app.env" <<'EOF'
 # Settings for `just stack`'s containers, in place of `.env` (plan §9). PHOTO_DIR,

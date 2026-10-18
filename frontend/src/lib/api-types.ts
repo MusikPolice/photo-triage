@@ -162,6 +162,7 @@ export interface components {
      */
     Stage:
       | "metadata_write"
+      | "walk"
       | "scan"
       | "thumbnail"
       | "clip"
