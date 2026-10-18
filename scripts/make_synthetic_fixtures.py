@@ -88,12 +88,14 @@ def exiftool(path: Path, *args: str) -> None:
 
 def ffmpeg(path: Path, *args: str) -> None:
     # One thread and bitexact flags, so the encoders and muxers write the same bytes
-    # every time, with no encoder name or creation time.
+    # every time, with no encoder name or creation time. No SIMD (`-cpuflags 0`,
+    # x264's `asm=0`): the AAC and H.264 encoders pick code paths by CPU, and those
+    # give different bytes on different machines.
     subprocess.run(
         [
-            "ffmpeg", "-loglevel", "error", "-y",
+            "ffmpeg", "-loglevel", "error", "-y", "-cpuflags", "0",
             *args,
-            "-threads", "1", "-x264-params", "threads=1",
+            "-threads", "1", "-x264-params", "threads=1:asm=0",
             "-map_metadata", "-1",
             "-fflags", "+bitexact", "-flags:v", "+bitexact", "-flags:a", "+bitexact",
             str(path),
@@ -203,7 +205,8 @@ def jpeg(image: Image.Image) -> Callable[[Path], None]:
 
 
 def heic(image: Image.Image) -> Callable[[Path], None]:
-    return lambda path: image.save(path, "HEIF", quality=HEIC_QUALITY)
+    # x265 gives the same bytes with or without SIMD, but say so rather than rely on it.
+    return lambda path: image.save(path, "HEIF", quality=HEIC_QUALITY, enc_params={"x265:asm": "0"})
 
 
 def png(image: Image.Image) -> Callable[[Path], None]:
