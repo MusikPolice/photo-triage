@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { StageActivity, WorkerActivity } from "../src/lib/api";
 import {
+  barTone,
   doneOfTotal,
   formatPercent,
   formatTime,
@@ -9,6 +10,7 @@ import {
   fraction,
   stageCounts,
   stageName,
+  workerHold,
   workerLabel,
 } from "../src/lib/format";
 
@@ -101,6 +103,50 @@ describe("workerLabel", () => {
   it("says when it can't reach the API, or hasn't heard yet", () => {
     expect(workerLabel(worker(), "lost", NOW).text).toBe("Offline");
     expect(workerLabel(null, "connecting", NOW).text).toBe("Connecting…");
+  });
+});
+
+describe("workerHold", () => {
+  it("is null while the worker runs", () => {
+    expect(workerHold(worker(), NOW, TORONTO)).toBeNull();
+  });
+
+  it.each([
+    ["paused", "Everything is paused.", "idle"],
+    ["stopped", "The worker isn't running, so nothing is being processed.", "alert"],
+  ] as const)("says why nothing runs while %s", (status, notice, tone) => {
+    expect(workerHold(worker({ status }), NOW, TORONTO)).toEqual({ notice, tone });
+  });
+
+  it("says when quiet hours end, in local time", () => {
+    const quiet = worker({ status: "quiet", quiet_until_at: "2026-10-08T03:00:00Z" });
+    expect(workerHold(quiet, NOW, TORONTO)).toEqual({
+      notice: "Quiet hours: nothing runs until 23:00.",
+      tone: "idle",
+    });
+  });
+
+  it("names the day when quiet hours end on another one", () => {
+    const quiet = worker({ status: "quiet", quiet_until_at: "2026-10-08T06:00:00Z" });
+    expect(workerHold(quiet, NOW, TORONTO)?.notice).toBe(
+      "Quiet hours: nothing runs until Thu 02:00.",
+    );
+  });
+});
+
+describe("barTone", () => {
+  const paused = { notice: "Everything is paused.", tone: "idle" } as const;
+  const stopped = { notice: "The worker isn't running…", tone: "alert" } as const;
+
+  it("is green while the worker runs, and amber for a stage's own pause", () => {
+    expect(barTone(stage(), null)).toBe("ok");
+    expect(barTone(stage({ paused: true }), null)).toBe("idle");
+  });
+
+  it("takes the worker's hold for every stage", () => {
+    expect(barTone(stage(), paused)).toBe("idle");
+    expect(barTone(stage(), stopped)).toBe("alert");
+    expect(barTone(stage({ paused: true }), stopped)).toBe("alert");
   });
 });
 
