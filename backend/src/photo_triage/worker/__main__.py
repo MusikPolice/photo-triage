@@ -4,6 +4,9 @@ one runs per `DATA_DIR`: a second exits 1 at startup.
 `python -m photo_triage.worker scan` queues a walk of the library, which queues a
 scan job for each new or changed file.
 
+`python -m photo_triage.worker reconcile` queues every item stage that's due
+(`photo_triage.worker.reconcile`), as the worker does at startup and after a walk.
+
 `python -m photo_triage.worker noop N` queues N jobs for the `noop` stage, to
 exercise the worker by hand (needs `WORKER_NOOP_STAGE=true`).
 
@@ -39,7 +42,8 @@ from photo_triage.worker.clock import Clock, running_from, utc_now
 from photo_triage.worker.heartbeat import Heartbeat
 from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import JobQueue, Stage
-from photo_triage.worker.stages import Runner, build_runners
+from photo_triage.worker.reconcile import reconcile
+from photo_triage.worker.stages import ItemStage, Runner, build_runners, item_stages
 from photo_triage.worker.state import observed_state
 
 # Named, since `__name__` is "__main__" when run with `python -m`.
@@ -59,12 +63,20 @@ NumPy, and numba (UMAP) when they load. ONNX Runtime sessions also take the coun
 directly."""
 
 
-def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | None = None) -> int:
-    """Runs the worker. `runners` replaces the stages from `build_runners` (tests)."""
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    runners: Mapping[str, Runner] | None = None,
+    stages: Mapping[str, ItemStage] | None = None,
+) -> int:
+    """Runs the worker. For tests, `runners` replaces the stages from `build_runners`,
+    and `stages` the item stages from `item_stages`. Passing `runners` alone leaves
+    no item stages, so nothing is reconciled."""
     parser = argparse.ArgumentParser(prog="python -m photo_triage.worker")
     parser.add_argument("--once", action="store_true", help="run every ready job, then exit")
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
     commands.add_parser("scan", help="queue a scan of the library and exit")
+    commands.add_parser("reconcile", help="queue every item stage that's due and exit")
     noop = commands.add_parser(
         "noop", help="queue N noop jobs and exit (needs WORKER_NOOP_STAGE=true)"
     )
@@ -94,6 +106,8 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
         return 1
 
     limit_threads(settings.worker_threads)  # before any ML library loads
+    if stages is None:
+        stages = item_stages(settings) if runners is None else {}
     clock = utc_now if settings.fake_now is None else running_from(settings.fake_now)
     queue = JobQueue(clock)
     engine = open_database(settings.data_dir)
@@ -101,6 +115,10 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
         if args.command == "scan":
             logs.configure(settings, "worker", to_file=False)  # as for noop
             return enqueue_scan(engine, queue)
+        if args.command == "reconcile":
+            logs.configure(settings, "worker", to_file=False)  # as for noop
+            reconcile(engine, stages, clock())
+            return 0
         if args.command == "noop":
             # The worker may be running and writing worker.log, and two processes
             # can't share a rotating file.
@@ -117,7 +135,7 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
         lock_path = settings.data_dir / LOCK_FILENAME
         try:
             with exclusive_lock(lock_path):
-                return run(settings, engine, queue, clock, runners, once=args.once)
+                return run(settings, engine, queue, clock, runners, stages, once=args.once)
         except LockHeldError:
             print(
                 f"A worker is already running for {settings.data_dir} (it holds "
@@ -135,6 +153,7 @@ def run(
     queue: JobQueue,
     clock: Clock,
     runners: Mapping[str, Runner] | None,
+    stages: Mapping[str, ItemStage],
     *,
     once: bool,
 ) -> int:
@@ -149,10 +168,12 @@ def run(
         clock=clock,
         quiet_hours=settings.worker_quiet_hours,
         zone=settings.tz,
+        item_stages=stages,
     )
     # Real time, not `clock`: see `photo_triage.worker.heartbeat`.
     with Heartbeat(engine, utc_now):
         worker.recover()
+        worker.reconcile()
         if once:
             worker.drain()
         else:

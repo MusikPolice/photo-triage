@@ -45,6 +45,8 @@ PHASE_1_COLUMNS = {
         "retry_at",
         "started_at",
         "finished_at",
+        "stage_version",
+        "output_changed_at",
     },
     "job_stats": {"hour_start_at", "stage", "processed", "errors", "busy_seconds"},
     "worker_controls": {"scope", "paused", "actor", "changed_at"},

@@ -440,3 +440,74 @@ def test_a_job_that_keeps_killing_the_worker_is_parked(
 def test_noop_jobs_are_never_merged(queue: JobQueue, session: Session) -> None:
     ids = {queue.enqueue(session, Stage.NOOP) for _ in range(3)}
     assert len(ids) == 3
+
+
+def _park(queue: JobQueue, session: Session, stage: Stage, item_id: int, version: str) -> int:
+    job_id = queue.enqueue(session, stage, item_id)
+    for _ in range(queue.max_attempts):
+        session.execute(sa.update(Job).where(Job.id == job_id).values(retry_at=None))  # no wait
+        assert _claim_id(queue, session) == job_id
+        queue.fail(session, job_id, _boom(), 1.0, version=version)
+    return job_id
+
+
+def test_done_and_failed_runs_record_the_stage_version(queue: JobQueue, session: Session) -> None:
+    a, b = _items(session, 2)
+    done = queue.enqueue(session, Stage.CLIP, a)
+    queue.claim(session)
+    queue.complete(session, done, 1.0, version="2+ViT-B-32")
+    parked = _park(queue, session, Stage.CLIP, b, "2+ViT-B-32")
+
+    assert session.get_one(Job, done).stage_version == "2+ViT-B-32"
+    assert session.get_one(Job, parked).stage_version == "2+ViT-B-32"
+
+
+def test_output_changed_at_carries_over_when_a_run_reproduces_the_output(
+    queue: JobQueue, session: Session, clock: FakeClock
+) -> None:
+    (item,) = _items(session, 1)
+    first = _run(queue, session, Stage.SCAN, item)
+    assert session.get_one(Job, first).output_changed_at == START
+
+    clock.advance(dt.timedelta(hours=1))
+    same = queue.enqueue(session, Stage.SCAN, item)
+    queue.claim(session)
+    queue.complete(session, same, 1.0, output_changed=False)
+    job = session.get_one(Job, same)
+    assert (job.finished_at, job.output_changed_at) == (START + dt.timedelta(hours=1), START)
+
+    clock.advance(dt.timedelta(hours=1))
+    changed = _run(queue, session, Stage.SCAN, item)
+    assert session.get_one(Job, changed).output_changed_at == START + dt.timedelta(hours=2)
+
+
+def test_an_unchanged_first_run_counts_as_a_change(queue: JobQueue, session: Session) -> None:
+    (item,) = _items(session, 1)
+    job_id = queue.enqueue(session, Stage.SCAN, item)
+    queue.claim(session)
+    queue.complete(session, job_id, 1.0, output_changed=False)
+    assert session.get_one(Job, job_id).output_changed_at == START
+
+
+def test_a_success_drops_the_parked_job_and_a_new_park_replaces_the_old(
+    queue: JobQueue, session: Session
+) -> None:
+    a, b = _items(session, 2)
+    _park(queue, session, Stage.CLIP, a, "1")
+    newer = _park(queue, session, Stage.CLIP, a, "2")
+    assert session.scalars(sa.select(Job.id).where(Job.item_id == a)).all() == [newer]
+
+    other_item = _park(queue, session, Stage.CLIP, b, "2")
+    succeeded = _run(queue, session, Stage.CLIP, a)
+    remaining = session.scalars(sa.select(Job.id).order_by(Job.id)).all()
+    assert remaining == [other_item, succeeded]
+
+
+def test_a_job_parked_by_recover_records_the_version(queue: JobQueue, session: Session) -> None:
+    (item,) = _items(session, 1)
+    job_id = queue.enqueue(session, Stage.CLIP, item)
+    for _ in range(queue.max_attempts):
+        assert _claim_id(queue, session) == job_id
+        queue.recover(session, {Stage.CLIP: "3"})
+    job = session.get_one(Job, job_id)
+    assert (job.status, job.stage_version) == (JobStatus.PARKED, "3")
