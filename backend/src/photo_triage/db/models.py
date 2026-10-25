@@ -137,12 +137,13 @@ class Job(Base):
         ),
         # The Activity page counts jobs by stage and status, one range at a time.
         sa.Index("ix_jobs_stage_status", "stage", "status"),
+        # Reconcile reads an item's jobs for a stage, and deleting an item finds its
+        # jobs. Without it, SQLite reads all of a stage's done jobs for every item.
+        sa.Index("ix_jobs_item_stage_status", "item_id", "stage", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    item_id: Mapped[int | None] = mapped_column(
-        sa.ForeignKey("items.id", ondelete="CASCADE"), index=True
-    )
+    item_id: Mapped[int | None] = mapped_column(sa.ForeignKey("items.id", ondelete="CASCADE"))
     stage: Mapped[str] = mapped_column(sa.String(32))
     priority: Mapped[int]
     status: Mapped[JobStatus] = mapped_column(
@@ -156,6 +157,13 @@ class Job(Base):
     """Set while a failed job waits out its backoff; it isn't claimed before then."""
     started_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
     finished_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    stage_version: Mapped[str | None] = mapped_column(sa.String(64))
+    """The item stage's version when the job last ran (`ItemStage.version`), set when
+    it's done or fails. Null for batch stages, and for jobs done before versions."""
+    output_changed_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    """Done jobs only: when this stage's output for the item last changed. A run that
+    leaves it as it was keeps the previous done job's time, so later stages that read
+    it aren't run again (`photo_triage.worker.reconcile`)."""
 
 
 class JobStats(Base):

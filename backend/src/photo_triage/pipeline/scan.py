@@ -150,10 +150,13 @@ def walk(
     )
 
 
-def scan(sessions: sessionmaker[Session], job: Job, photo_dir: Path, now: dt.datetime) -> None:
+def scan(sessions: sessionmaker[Session], job: Job, photo_dir: Path, now: dt.datetime) -> bool:
     """Hash the file of `job`'s item, and treat it as a move if it's a placeholder
     whose hash belongs to an item whose file is gone. Raises `identity.HashError` if
     the file can't be decoded, so the job is retried and then parked.
+
+    Returns whether the item's content hash changed, so later stages run again only
+    for new content: a move, or a file whose metadata alone was edited, keeps it.
 
     The hashing happens between two short transactions, so the API can write
     meanwhile."""
@@ -161,7 +164,7 @@ def scan(sessions: sessionmaker[Session], job: Job, photo_dir: Path, now: dt.dat
     with sessions() as session:
         item = session.get(Item, job.item_id)
         if item is None:
-            return  # deleted since the job was queued
+            return False  # deleted since the job was queued
         relative, kind = item.path, item.media_type
     path = photo_dir / relative
     try:
@@ -169,14 +172,14 @@ def scan(sessions: sessionmaker[Session], job: Job, photo_dir: Path, now: dt.dat
     except FileNotFoundError:
         # Gone since the walk. The next walk deals with it as with any missing file.
         logger.info("Item %d is gone from %s before its scan", job.item_id, relative)
-        return
+        return False
     # Stat before hashing: if the file changes meanwhile, the next walk sees it.
     content_hash = identity.content_hash(path, kind)
 
     with sessions.begin() as session:
         item = session.get(Item, job.item_id)
         if item is None or item.path != relative:
-            return  # changed meanwhile; the next walk catches up
+            return False  # changed meanwhile; the next walk catches up
         item.file_size_bytes = stat.st_size
         item.file_mtime_ns = stat.st_mtime_ns
         item.last_seen_at = now
@@ -184,8 +187,10 @@ def scan(sessions: sessionmaker[Session], job: Job, photo_dir: Path, now: dt.dat
             moved = _moved_from(session, content_hash, photo_dir)
             if moved is not None:
                 _move(session, job, placeholder=item, moved=moved, now=now)
-                return
+                return False
+        changed = item.content_hash != content_hash
         item.content_hash = content_hash
+        return changed
 
 
 def _moved_from(session: Session, content_hash: str, photo_dir: Path) -> Item | None:

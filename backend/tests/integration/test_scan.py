@@ -19,7 +19,7 @@ from photo_triage.settings import TRASH_FOLDER, Settings
 from photo_triage.worker.__main__ import main
 from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import JobQueue, RetryPolicy, Stage
-from photo_triage.worker.stages import build_runners
+from photo_triage.worker.stages import build_runners, item_stages
 
 START = dt.datetime(2026, 10, 18, 2, tzinfo=dt.UTC)
 
@@ -49,6 +49,7 @@ class Scanner:
             build_runners(settings, engine, self.queue, self.clock),
             queue=self.queue,
             clock=self.clock,
+            item_stages=item_stages(settings),
         )
 
     def walk(self) -> scan.WalkResult:
@@ -69,6 +70,15 @@ class Scanner:
     def items(self) -> dict[str, Item]:
         with self.sessions() as session:
             return {i.path: i for i in session.scalars(sa.select(Item))}
+
+    def output_changed_at(self, path: str) -> dt.datetime | None:
+        """When the scan of the item at `path` last changed its content hash."""
+        with self.sessions() as session:
+            return session.scalar(
+                sa.select(Job.output_changed_at)
+                .join(Item, Item.id == Job.item_id)
+                .where(Item.path == path, Job.stage == Stage.SCAN, Job.status == JobStatus.DONE)
+            )
 
     def open_scans(self) -> int:
         with self.sessions() as session:
@@ -194,6 +204,8 @@ def test_a_moved_file_keeps_its_item(scanner: Scanner, library: Path) -> None:
         scanner.clock(),
     )
     assert len(items) == SUPPORTED + 1  # the placeholder is gone
+    # Same content, so the stages after scan aren't run again.
+    assert scanner.output_changed_at("2024/renamed.jpg") == START
 
 
 def test_a_move_keeps_the_items_jobs_and_records_the_scan_against_it(
@@ -304,6 +316,7 @@ def test_a_file_changed_in_place_keeps_its_item_and_takes_the_new_hash(
     scanner.run()
     before = scanner.items()["edited.jpg"]
 
+    scanner.later()
     _photo(photo, "blue", size=(9, 9))
     os.utime(photo, ns=(before.file_mtime_ns + 10**9, before.file_mtime_ns + 10**9))
     result = scanner.walk()
@@ -315,6 +328,7 @@ def test_a_file_changed_in_place_keeps_its_item_and_takes_the_new_hash(
     assert after.content_hash != before.content_hash
     assert after.file_mtime_ns == before.file_mtime_ns + 10**9
     assert after.file_size_bytes == photo.stat().st_size
+    assert scanner.output_changed_at("edited.jpg") == START + dt.timedelta(days=1)
 
 
 def test_a_changed_mtime_alone_rehashes_to_the_same_hash(
@@ -325,11 +339,13 @@ def test_a_changed_mtime_alone_rehashes_to_the_same_hash(
     before = scanner.items()["touched.jpg"]
 
     os.utime(photo, ns=(0, before.file_mtime_ns + 1))
+    scanner.later()
     scanner.run()
 
     after = scanner.items()["touched.jpg"]
     assert (after.id, after.content_hash) == (before.id, before.content_hash)
     assert after.file_mtime_ns == before.file_mtime_ns + 1
+    assert scanner.output_changed_at("touched.jpg") == START
 
 
 # --- Placeholders ---------------------------------------------------------------------
