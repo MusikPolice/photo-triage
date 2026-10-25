@@ -266,6 +266,7 @@ metadata writes (high priority, small)
 - **Quiet hours:** optional `WORKER_QUIET_HOURS` lists the times when the household is using the host, in its local time (`TZ`), e.g. `Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00`. Each period names the days it starts on, and one whose end is at or before its start ends the next day. The whole worker stays idle during them, and a job already running finishes. Unset means it always runs.
 - **Pause / resume** from the UI or the command line, globally or per stage. A pause is stored in `worker_controls`, so it survives a restart, and a job already running finishes.
 - **Resumable:** job state is durable; the worker picks up where it left off after restart. Failed jobs retry with backoff, then park in an error list. A run cut short by the worker dying counts as a failed attempt, so a job that keeps killing the worker (e.g. running it out of memory) ends up parked rather than retried forever.
+- **Reconciled from outputs:** each stage queues the next when it finishes, so new items flow straight through. Behind that, the worker reconciles every per-item stage with what it has already produced, at startup, after each library walk, and on `just worker reconcile`. Each per-item stage has a version, plus a fingerprint of any setting its output depends on (e.g. `CLIP_MODEL`), and its done job records the version it ran at and when its output for the item last changed. A stage is due for an active item when every stage it reads from is done, and it has no done job at its current version that's newer than their output, and no parked job at that version. So deploying a new stage, or a fix that bumps a stage's version, re-runs it on the existing library with no user action, then the stages after it; a job lost between stages, e.g. in a crash, is queued again. A run that reproduces its output keeps the old time: a moved file, or one whose metadata alone changed, keeps its content hash, so the stages after the scan don't run again. Metadata writes and batch jobs aren't reconciled.
 
 ---
 
@@ -348,7 +349,9 @@ captions
 
 jobs                               -- error: retries after retry_at; parked: gave up
   id, item_id (nullable), stage, priority, status (pending | running | done | error | parked),
-  attempts, last_error, enqueued_at, retry_at, started_at, finished_at
+  attempts, last_error, enqueued_at, retry_at, started_at, finished_at,
+  stage_version, output_changed_at  -- per-item stages: the version it ran at; when its
+                                    -- output last changed (§6.11, reconciling)
 
 job_stats                          -- one row per stage per UTC hour; history, throughput, ETA
   hour_start_at, stage, processed, errors, busy_seconds

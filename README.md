@@ -208,7 +208,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just doctor` | Verify the environment, then `.env` and the settings it gives |
 | `just fmt` | Format and auto-fix lint |
 | `just web` | Vite dev server for the frontend, proxying `/api` to `just api` |
-| `just worker` | The background worker alone; `just worker --once` runs every ready job and exits; `just worker scan` queues a scan of the library; `just worker pause [STAGE]` / `resume [STAGE]` pause and resume it |
+| `just worker` | The background worker alone; `just worker --once` runs every ready job and exits; `just worker scan` queues a scan of the library; `just worker reconcile` queues every item stage that's due, as the worker does at startup; `just worker pause [STAGE]` / `resume [STAGE]` pause and resume it |
 | `just image` | Build the Docker image and smoke-test it, as CI does |
 | `just shot PATH` | Screenshots of a page at desktop and phone widths, from a scratch copy of the app (no real photos) |
 | `just preview` | Keep a scratch copy of the app running, for many `just shot`s |
