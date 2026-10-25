@@ -7,6 +7,8 @@ job stays `running` until `recover` puts it back at the next start.
 
 Before each claim the worker checks whether it's paused (`controls`) or in quiet
 hours, so a job that's running when either starts is finished first.
+
+After each walk it reconciles the item stages (`photo_triage.worker.reconcile`).
 """
 
 import logging
@@ -23,8 +25,9 @@ from sqlalchemy.orm import sessionmaker
 from photo_triage.db.models import JOB_IS_OPEN, Job, JobStatus
 from photo_triage.quiet_hours import UTC_ZONE, QuietHours
 from photo_triage.worker.clock import Clock, Timer, utc_now
-from photo_triage.worker.queue import JobQueue
-from photo_triage.worker.stages import Runner
+from photo_triage.worker.queue import JobQueue, Stage
+from photo_triage.worker.reconcile import reconcile
+from photo_triage.worker.stages import ItemStage, Runner
 from photo_triage.worker.state import WorkerState, WorkerStatus, read_state
 
 logger = logging.getLogger(__name__)
@@ -48,10 +51,15 @@ class Worker:
         quiet_hours: QuietHours | None = None,
         zone: ZoneInfo = UTC_ZONE,
         summary_interval_s: float = SUMMARY_INTERVAL_S,
+        item_stages: Mapping[str, ItemStage] | None = None,
     ) -> None:
-        """`clock` should be the queue's clock. `zone` is the one quiet hours are in."""
+        """`clock` should be the queue's clock. `zone` is the one quiet hours are in.
+        `item_stages` are the stages to reconcile, whose versions jobs record."""
+        self._engine = engine
         self._sessions = sessionmaker(engine, expire_on_commit=False)
         self._runners = dict(runners)
+        self._item_stages = dict(item_stages or {})
+        self._versions = {name: stage.version for name, stage in self._item_stages.items()}
         self._queue = queue or JobQueue(clock)
         self._clock = clock
         self._timer = timer
@@ -69,7 +77,7 @@ class Worker:
         """Count jobs left running when the worker last stopped as failed attempts,
         requeueing or parking them. Call at startup. Returns how many there were."""
         with self._sessions.begin() as session:
-            jobs = self._queue.recover(session)
+            jobs = self._queue.recover(session, self._versions)
         for job in jobs:
             if job.status == JobStatus.PARKED:
                 # No traceback: the process that ran it is gone.
@@ -88,6 +96,10 @@ class Worker:
                 )
         return len(jobs)
 
+    def reconcile(self) -> dict[str, int]:
+        """Queue every item stage that's due. Returns how many jobs each stage got."""
+        return reconcile(self._engine, self._item_stages, self._clock())
+
     def run_one(self) -> bool:
         """Claim the next job for a stage this worker runs, run it, and record the
         result. Returns False if there was nothing to run, or the worker is paused or
@@ -105,15 +117,23 @@ class Worker:
         logger.debug("Running %s", _describe(job))
         started_s = self._timer()
         try:
-            self._runners[job.stage](job)
+            changed = self._runners[job.stage](job)
         except Exception as exc:
             self._record_failure(job, exc, self._timer() - started_s)
         else:
             duration_s = self._timer() - started_s
             with self._sessions.begin() as session:
-                self._queue.complete(session, job.id, duration_s)
+                self._queue.complete(
+                    session,
+                    job.id,
+                    duration_s,
+                    version=self._versions.get(job.stage),
+                    output_changed=changed is not False,
+                )
             logger.debug("Finished %s in %.3f s", _describe(job), duration_s)
             self._progress.processed[job.stage] += 1
+            if job.stage == Stage.WALK:
+                self.reconcile()
         self._summarize_if_due()
         return True
 
@@ -143,7 +163,9 @@ class Worker:
 
     def _record_failure(self, job: Job, exc: Exception, duration_s: float) -> None:
         with self._sessions.begin() as session:
-            status = self._queue.fail(session, job.id, exc, duration_s)
+            status = self._queue.fail(
+                session, job.id, exc, duration_s, version=self._versions.get(job.stage)
+            )
             failed = session.get_one(Job, job.id)
             attempts, retry_at = failed.attempts, failed.retry_at
         self._progress.errors[job.stage] += 1

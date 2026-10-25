@@ -9,7 +9,9 @@ A job's life:
                         └─(after `max_attempts` failures)─► parked ─retry─► pending
 
 Every state lives in SQLite, so nothing is lost when the process stops. Only the
-latest done job is kept for each stage and item (see `complete`).
+latest done job, and the latest parked one, is kept for each stage and item (see
+`complete`). Done and failed runs of item stages record the stage's version, which
+`photo_triage.worker.reconcile` compares with the current one.
 
 Methods take the caller's `Session` and don't commit, so enqueueing can share a
 transaction with the change that caused it. Keep transactions short: SQLite has
@@ -21,7 +23,7 @@ transaction as the job's new status, so the two can't disagree after a crash.
 
 import datetime as dt
 import traceback
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -191,7 +193,7 @@ class JobQueue:
             .order_by(Job.priority, Job.enqueued_at, Job.id)
         )
 
-    def recover(self, session: Session) -> list[Job]:
+    def recover(self, session: Session, versions: Mapping[str, str] | None = None) -> list[Job]:
         """Deal with jobs left running by a worker that stopped mid-run, and return
         them in their new state.
 
@@ -202,7 +204,8 @@ class JobQueue:
         long it ran is unknown, so its `job_stats` row gets an error and no busy time.
 
         Call it only at worker startup: there's a single worker, so at that point
-        nothing is really running.
+        nothing is really running. `versions` gives each item stage's version, which
+        a parked job records as the version it failed at.
         """
         jobs = session.scalars(
             sa.select(Job).where(Job.status == JobStatus.RUNNING).order_by(Job.id),
@@ -216,52 +219,84 @@ class JobQueue:
             if job.attempts >= self._policy.max_attempts:
                 job.status = JobStatus.PARKED
                 job.finished_at = now
+                job.stage_version = (versions or {}).get(job.stage)
+                self._delete_others(session, job, JobStatus.PARKED)
             else:
                 job.status = JobStatus.PENDING
                 job.started_at = None
         session.flush()
         return list(jobs)
 
-    def complete(self, session: Session, job_id: int, duration_s: float) -> None:
-        """Mark a running job done, and delete older done jobs for the same stage
-        and item (or batch stage). `duration_s` is how long the run took.
+    def complete(
+        self,
+        session: Session,
+        job_id: int,
+        duration_s: float,
+        *,
+        version: str | None = None,
+        output_changed: bool = True,
+    ) -> None:
+        """Mark a running job done at the stage's `version`, and delete older done
+        and parked jobs for the same stage and item (or batch stage). `duration_s` is
+        how long the run took.
+
+        Its `output_changed_at` is now, unless `output_changed` is False and an older
+        done job holds one: then that time carries over, so a run that reproduced the
+        same output doesn't make later stages run again.
 
         Counting done jobs then counts items finished, not runs, and the table can't
-        grow past one done row per stage per item. `job_stats` keeps the history.
-        Noop jobs are kept: each stands for a unit of work of its own, so the
-        Activity page counts them as they finish.
+        grow past one done row per stage per item. `job_stats` keeps the history. A
+        parked job is dropped since the stage has now succeeded. Noop jobs are kept:
+        each stands for a unit of work of its own, so the Activity page counts them
+        as they finish.
         """
         job = self._get(session, job_id, JobStatus.RUNNING)
         now = self._clock()
         job.status = JobStatus.DONE
         job.finished_at = now
+        job.stage_version = version
+        job.output_changed_at = now
         self._record_stats(session, job.stage, now, processed=1, errors=0, duration_s=duration_s)
         if job.stage == Stage.NOOP:
             session.flush()
             return
-        session.execute(
-            sa.delete(Job).where(
-                Job.status == JobStatus.DONE,
-                Job.stage == job.stage,
-                _same_item(job.item_id),
-                Job.id != job.id,
+        if not output_changed:
+            previous = session.scalar(
+                sa.select(Job.output_changed_at).where(
+                    Job.status == JobStatus.DONE,
+                    Job.stage == job.stage,
+                    _same_item(job.item_id),
+                    Job.id != job.id,
+                )
             )
-        )
+            if previous is not None:
+                job.output_changed_at = previous
+        self._delete_others(session, job, JobStatus.DONE, JobStatus.PARKED)
         session.flush()
 
     def fail(
-        self, session: Session, job_id: int, exc: BaseException, duration_s: float
+        self,
+        session: Session,
+        job_id: int,
+        exc: BaseException,
+        duration_s: float,
+        *,
+        version: str | None = None,
     ) -> JobStatus:
-        """Record a failed run that took `duration_s`. Returns `ERROR` if the job will
-        be retried after its backoff, or `PARKED` if it has used up its attempts."""
+        """Record a failed run at the stage's `version` that took `duration_s`.
+        Returns `ERROR` if the job will be retried after its backoff, or `PARKED` if it
+        has used up its attempts. A parked job replaces any older one for the same
+        stage and item."""
         job = self._get(session, job_id, JobStatus.RUNNING)
         now = self._clock()
         job.attempts += 1
         job.last_error = describe_error(exc)
         job.finished_at = now
+        job.stage_version = version
         self._record_stats(session, job.stage, now, processed=0, errors=1, duration_s=duration_s)
         if job.attempts >= self._policy.max_attempts:
             job.status = JobStatus.PARKED
+            self._delete_others(session, job, JobStatus.PARKED)
         else:
             job.status = JobStatus.ERROR
             job.retry_at = now + self._policy.backoff(job.attempts)
@@ -322,6 +357,21 @@ class JobQueue:
                     JobStats.errors: JobStats.errors + row.excluded.errors,
                     JobStats.busy_seconds: JobStats.busy_seconds + row.excluded.busy_seconds,
                 },
+            )
+        )
+
+    @staticmethod
+    def _delete_others(session: Session, job: Job, *statuses: JobStatus) -> None:
+        """Delete the other jobs in `statuses` for `job`'s stage and item. Noop jobs
+        are each their own unit of work, so they're never merged."""
+        if job.stage == Stage.NOOP:
+            return
+        session.execute(
+            sa.delete(Job).where(
+                Job.status.in_(statuses),
+                Job.stage == job.stage,
+                _same_item(job.item_id),
+                Job.id != job.id,
             )
         )
 
