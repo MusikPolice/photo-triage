@@ -260,7 +260,7 @@ Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`; pretti
 | frontend | `pnpm install --frozen-lockfile`; svelte-check (strict, fails on warnings); eslint (typescript-eslint `strictTypeChecked`); prettier; Vitest; `vite build`. The backend job's pre-commit run skips the frontend hooks, since it has no `node_modules`. |
 | contract | `scripts/api_types.sh --check` (`just contract`): export OpenAPI from the app, regenerate the TS types with `openapi-typescript`, and fail if they differ from the committed `frontend/src/lib/api-types.ts` |
 | docker | build the image with the build args from `scripts/image_pins.sh` (layers cached in GitHub Actions); `scripts/docker_smoke.sh`: the container starts, `/api/health` is ok, `/` and `/activity` serve the frontend, its script is served, it runs as a non-root user, `exiftool -ver`, `ffmpeg -version` and `ffprobe -version` match the pins in `versions.env`, there's no Node toolchain and no `dev` or `export` packages, the runtime dependencies import, the app refuses an unmigrated database, the migrate step runs, and the app and then the worker (`--once`) run against the database it migrated; then `compose.yaml`'s migrate, app and worker services (not Ollama) on temporary bind-mounted folders: the app gets healthy after the migrate service, answers on `APP_PORT`, the database lands in the `DATA_DIR` mount, the trash is `/photos/.photo-triage-trash` with no filesystem warning, and a second worker exits saying one is already running |
-| audit | `pip-audit` on the runtime dependencies (`just audit`; fails on any known vulnerability, since pip-audit has no severity filter), `pnpm audit --prod` — fail on high/critical |
+| audit | `pip-audit` on the runtime dependencies (`just audit`; fails on any known vulnerability, since pip-audit has no severity filter), `pnpm audit --prod` — fail on high/critical. Fixes come from Dependabot's grouped security-update PRs (§9) |
 
 ### CI on `main` and nightly
 
@@ -307,6 +307,7 @@ These are set in the GitHub repo settings, not in files:
   - A required job must run on every PR. GitHub waits indefinitely for a required check that never reports, so don't add `paths:` filters to these jobs; skip steps inside the job instead. Renaming a required job also needs this setting updated.
   - Because `audit` is required, a newly published vulnerability in a runtime dependency blocks merges until the dependency is upgraded or the advisory is dealt with.
   - This is deliberate. If it ever blocks urgent work, an admin can relax the rule temporarily.
+- **Dependabot security updates are on, and grouped.** `.github/dependabot.yml` puts every open advisory in an ecosystem into one PR: one for `backend/` (uv) and one for `frontend/` (npm). Per-package PRs would each fail `audit` on the other packages' advisories, so none of them could merge. Version updates are off (`open-pull-requests-limit: 0`).
 - **Squash merges only.** Each PR lands as one commit whose message is the PR title and body.
 - **Branches are deleted** automatically after merge.
 
