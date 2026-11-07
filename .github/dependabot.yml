@@ -1,0 +1,29 @@
+# Dependabot security updates (turned on in the repo settings) arrive as one
+# grouped PR per ecosystem rather than one PR per package. The `audit` CI job
+# is required and fails on any known vulnerability, so a PR that fixes only one
+# of several advisories can never pass it. See dev-environment §9.
+#
+# Version updates are off (open-pull-requests-limit: 0); the limit doesn't
+# apply to security updates. `schedule` is required by the format.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    groups:
+      backend-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  # pnpm-lock.yaml is handled by the npm ecosystem.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    groups:
+      frontend-security:
+        applies-to: security-updates
+        patterns: ["*"]
