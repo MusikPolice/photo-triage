@@ -195,7 +195,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | Command | What it does |
 |---|---|
 | `just dev` | Migrate, then the API, worker and Vite dev server (hot reload) against the sample library, and Ollama in Docker, together; Ctrl-C stops them all |
-| `just stack` | The production Docker Compose stack (migrate, app, worker, Ollama), on an image of your checkout, against a test folder `.stack/`. `just stack exec worker python -m photo_triage.worker noop 50` queues jobs to watch |
+| `just stack` | The production Docker Compose stack (migrate, app, worker, Ollama), on an image of your checkout, against a test folder `.stack/`, whose library starts as a copy of the tier-1 fixtures. `just stack exec worker python -m photo_triage.worker scan` scans it, and `… worker noop 50` queues jobs to watch |
 | `just test` | Unit, integration, and safety tests (fake ML models; fast) |
 | `just test-models` | Tests that run the real CLIP/InsightFace models (slow; cached weights) |
 | `just fixtures` | Regenerate the synthetic test photos and videos in `backend/tests/fixtures/synthetic/` |
@@ -208,7 +208,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just doctor` | Verify the environment, then `.env` and the settings it gives |
 | `just fmt` | Format and auto-fix lint |
 | `just web` | Vite dev server for the frontend, proxying `/api` to `just api` |
-| `just worker` | The background worker alone; `just worker --once` runs every ready job and exits; `just worker pause [STAGE]` / `resume [STAGE]` pause and resume it |
+| `just worker` | The background worker alone; `just worker --once` runs every ready job and exits; `just worker scan` queues a scan of the library; `just worker pause [STAGE]` / `resume [STAGE]` pause and resume it |
 | `just image` | Build the Docker image and smoke-test it, as CI does |
 | `just shot PATH` | Screenshots of a page at desktop and phone widths, from a scratch copy of the app (no real photos) |
 | `just preview` | Keep a scratch copy of the app running, for many `just shot`s |

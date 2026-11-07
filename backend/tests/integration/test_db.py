@@ -107,7 +107,7 @@ def test_phase_1_tables_have_the_plan_columns(migrated: Engine) -> None:
         assert {c["name"] for c in inspector.get_columns(table)} == columns, table
 
 
-def _item(content_hash: str = "a" * 64) -> Item:
+def _item(content_hash: str | None = "a" * 64) -> Item:
     return Item(
         content_hash=content_hash,
         path="2024/01/a.jpg",
@@ -132,11 +132,11 @@ def test_enums_are_stored_as_their_values_and_checked(migrated: Engine) -> None:
             conn.exec_driver_sql("UPDATE items SET status = 'deleted'")
 
 
-def test_content_hash_is_unique(migrated: Engine) -> None:
+def test_copies_and_unhashed_files_are_items_of_their_own(migrated: Engine) -> None:
     with Session(migrated) as session:
-        session.add_all([_item(), _item()])
-        with pytest.raises(IntegrityError):
-            session.commit()
+        session.add_all([_item(), _item(), _item(None), _item(None)])
+        session.commit()
+        assert session.scalar(sa.select(sa.func.count()).select_from(Item)) == 4
 
 
 def test_jobs_need_an_existing_item_and_go_with_it(migrated: Engine) -> None:

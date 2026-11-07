@@ -1,6 +1,9 @@
 """Run the worker: `python -m photo_triage.worker [--once]` (`just worker`). Only
 one runs per `DATA_DIR`: a second exits 1 at startup.
 
+`python -m photo_triage.worker scan` queues a walk of the library, which queues a
+scan job for each new or changed file.
+
 `python -m photo_triage.worker noop N` queues N jobs for the `noop` stage, to
 exercise the worker by hand (needs `WORKER_NOOP_STAGE=true`).
 
@@ -61,6 +64,7 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
     parser = argparse.ArgumentParser(prog="python -m photo_triage.worker")
     parser.add_argument("--once", action="store_true", help="run every ready job, then exit")
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
+    commands.add_parser("scan", help="queue a scan of the library and exit")
     noop = commands.add_parser(
         "noop", help="queue N noop jobs and exit (needs WORKER_NOOP_STAGE=true)"
     )
@@ -94,6 +98,9 @@ def main(argv: Sequence[str] | None = None, *, runners: Mapping[str, Runner] | N
     queue = JobQueue(clock)
     engine = open_database(settings.data_dir)
     try:
+        if args.command == "scan":
+            logs.configure(settings, "worker", to_file=False)  # as for noop
+            return enqueue_scan(engine, queue)
         if args.command == "noop":
             # The worker may be running and writing worker.log, and two processes
             # can't share a rotating file.
@@ -137,7 +144,7 @@ def run(
         logger.warning(warning)
     worker = Worker(
         engine,
-        build_runners(settings) if runners is None else runners,
+        build_runners(settings, engine, queue, clock) if runners is None else runners,
         queue=queue,
         clock=clock,
         quiet_hours=settings.worker_quiet_hours,
@@ -158,6 +165,13 @@ def limit_threads(count: int) -> None:
     """Apply `WORKER_THREADS`. Must run before NumPy or ONNX Runtime is imported."""
     for name in THREAD_ENV_VARS:
         os.environ[name] = str(count)
+
+
+def enqueue_scan(engine: Engine, queue: JobQueue) -> int:
+    with Session(engine) as session, session.begin():
+        queue.enqueue(session, Stage.WALK)
+    logger.info("Queued a scan of the library")
+    return 0
 
 
 def enqueue_noop(settings: Settings, engine: Engine, queue: JobQueue, count: int) -> int:

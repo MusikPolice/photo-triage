@@ -29,6 +29,7 @@ START = dt.datetime(2026, 10, 5, 12, tzinfo=dt.UTC)  # a Monday
 
 STAGES_IN_ORDER = [
     "metadata_write",
+    "walk",
     "scan",
     "thumbnail",
     "clip",

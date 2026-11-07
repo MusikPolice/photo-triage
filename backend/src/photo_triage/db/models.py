@@ -68,12 +68,17 @@ class JobStatus(StrEnum):
 
 
 class Item(Base):
-    """A photo or video, identified by its content hash so it survives moves."""
+    """A photo or video at one path, recognised by its content hash when it moves.
+
+    `photo_triage.pipeline.scan` owns how items are found, hashed and moved.
+    """
 
     __tablename__ = "items"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    content_hash: Mapped[str] = mapped_column(sa.String(64), unique=True)
+    content_hash: Mapped[str | None] = mapped_column(sa.String(64), index=True)
+    """`photo_triage.pipeline.identity.content_hash`. Null until the file's first scan
+    job. Not unique: exact copies at two paths are two items."""
     path: Mapped[str]
     """Relative to `PHOTO_DIR`."""
     media_type: Mapped[MediaType] = mapped_column(_enum(MediaType, "media_type"))

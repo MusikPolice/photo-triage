@@ -35,6 +35,8 @@ from photo_triage.worker.clock import Clock, utc_now
 
 class Stage(StrEnum):
     METADATA_WRITE = "metadata_write"
+    WALK = "walk"
+    """Lists the library and queues a `scan` job per new or changed file."""
     SCAN = "scan"
     THUMBNAIL = "thumbnail"
     CLIP = "clip"
@@ -52,6 +54,7 @@ class Stage(StrEnum):
 
 PRIORITY: dict[Stage, int] = {
     Stage.METADATA_WRITE: 0,
+    Stage.WALK: 1,
     Stage.SCAN: 1,
     Stage.THUMBNAIL: 2,
     Stage.CLIP: 3,
@@ -67,7 +70,7 @@ PRIORITY: dict[Stage, int] = {
 """Lower runs first: metadata writes > scan > thumbnails > CLIP > quality > faces >
 batch jobs > LLM tagging, so the map and search become usable first."""
 
-BATCH_STAGES = frozenset({Stage.LAYOUT, Stage.DUPLICATES, Stage.ATLASES, Stage.NOOP})
+BATCH_STAGES = frozenset({Stage.WALK, Stage.LAYOUT, Stage.DUPLICATES, Stage.ATLASES, Stage.NOOP})
 """Stages whose jobs cover the whole library rather than one item."""
 
 LAST_ERROR_MAX_CHARS = 4096
