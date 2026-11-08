@@ -97,12 +97,17 @@ class Pipeline:
             return {item_id: version for item_id, version in rows if item_id is not None}
 
 
-def _items(engine: Engine, count: int, status: ItemStatus = ItemStatus.ACTIVE) -> list[int]:
+def _items(
+    engine: Engine,
+    count: int,
+    status: ItemStatus = ItemStatus.ACTIVE,
+    kind: MediaType = MediaType.PHOTO,
+) -> list[int]:
     with Session(engine) as session:
         items = [
             Item(
-                path=f"{status}-{n}.jpg",
-                media_type=MediaType.PHOTO,
+                path=f"{status}-{kind}-{n}",
+                media_type=kind,
                 file_size_bytes=1,
                 file_mtime_ns=0,
                 first_seen_at=START,
@@ -256,7 +261,7 @@ def test_a_running_job_is_not_queued_again(
 
 
 def test_due_reads_each_items_jobs_through_the_item_stage_index(migrated: Engine) -> None:
-    sql = due(Stage.CLIP, CLIP).compile(migrated, compile_kwargs={"literal_binds": True})
+    sql = due(Stage.CLIP, CHAIN).compile(migrated, compile_kwargs={"literal_binds": True})
     with migrated.connect() as conn:
         details = [row[3] for row in conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {sql}")]
     assert [d for d in details if d.startswith("SCAN")] == ["SCAN items"], details
@@ -285,11 +290,91 @@ def test_versions_carry_their_settings_fingerprint() -> None:
     assert ItemStage(code_version=3, settings_fingerprint="ViT-B-32").version == "3+ViT-B-32"
 
 
-def test_scan_and_reading_metadata_are_registered_stages(settings: Settings) -> None:
+def test_scan_reading_metadata_and_frames_are_registered_stages(settings: Settings) -> None:
     assert item_stages(settings) == {
         Stage.SCAN: ItemStage(code_version=1),
         Stage.METADATA_READ: ItemStage(code_version=1, upstream=(Stage.SCAN,)),
+        Stage.FRAMES: ItemStage(
+            code_version=1,
+            upstream=(Stage.SCAN,),
+            settings_fingerprint="5-frames",
+            media_types=frozenset({MediaType.VIDEO}),
+        ),
     }
+
+
+def test_the_number_of_frames_is_part_of_the_frames_version(settings: Settings) -> None:
+    more = settings.model_copy(update={"video_sample_frames": 8})
+    assert item_stages(settings)[Stage.FRAMES].version == "1+5-frames"
+    assert item_stages(more)[Stage.FRAMES].version == "1+8-frames"
+
+
+# --- Stages for some kinds of item -----------------------------------------------------
+
+VIDEOS_ONLY = ItemStage(
+    code_version=1, upstream=(Stage.SCAN,), media_types=frozenset({MediaType.VIDEO})
+)
+"""Stands for `frames`, here registered as the thumbnail stage's upstream."""
+BY_KIND: dict[str, ItemStage] = {
+    Stage.SCAN: SCAN,
+    Stage.QUALITY: VIDEOS_ONLY,
+    Stage.THUMBNAIL: ItemStage(code_version=1, upstream=(Stage.SCAN, Stage.QUALITY)),
+}
+
+
+def test_a_stage_for_videos_is_queued_only_for_videos(
+    pipeline: Pipeline, items: list[int], migrated: Engine
+) -> None:
+    videos = _items(migrated, 2, kind=MediaType.VIDEO)
+    pipeline.register({Stage.SCAN: SCAN, Stage.QUALITY: VIDEOS_ONLY})
+    pipeline.reconcile()
+    pipeline.run()
+
+    assert set(pipeline.done(Stage.QUALITY)) == set(videos)
+    assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.QUALITY: 0}
+
+
+def test_a_stage_after_one_for_videos_waits_for_it_only_on_videos(
+    pipeline: Pipeline, items: list[int], migrated: Engine
+) -> None:
+    videos = _items(migrated, 2, kind=MediaType.VIDEO)
+    pipeline.register(BY_KIND)
+    _queue_scans(pipeline, migrated, [*items, *videos])
+
+    ran = pipeline.run()
+
+    # Each photo goes straight on; each video only after its frames.
+    for photo in items:
+        assert ran.index((Stage.THUMBNAIL, photo)) > ran.index((Stage.SCAN, photo))
+        assert (Stage.QUALITY, photo) not in ran
+    for clip in videos:
+        assert ran.index((Stage.THUMBNAIL, clip)) > ran.index((Stage.QUALITY, clip))
+    assert set(pipeline.done(Stage.THUMBNAIL)) == {*items, *videos}
+    assert pipeline.reconcile() == dict.fromkeys(BY_KIND, 0)
+
+
+def test_a_video_whose_frames_are_missing_waits_for_them(
+    pipeline: Pipeline, items: list[int], migrated: Engine
+) -> None:
+    [clip] = _items(migrated, 1, kind=MediaType.VIDEO)
+    pipeline.register({Stage.SCAN: SCAN})
+    _queue_scans(pipeline, migrated, [*items, clip])
+    pipeline.run()
+
+    pipeline.register(BY_KIND)
+    assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.QUALITY: 1, Stage.THUMBNAIL: ITEMS}
+    pipeline.run()
+    assert set(pipeline.done(Stage.THUMBNAIL)) == {*items, clip}
+
+
+def test_kinds_keep_due_on_the_item_stage_index(migrated: Engine) -> None:
+    for query in (due(Stage.THUMBNAIL, BY_KIND), due(Stage.THUMBNAIL, BY_KIND).where(Item.id == 1)):
+        sql = query.compile(migrated, compile_kwargs={"literal_binds": True})
+        with migrated.connect() as conn:
+            details = [row[3] for row in conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {sql}")]
+        assert not [d for d in details if d.startswith("SCAN") and "jobs" in d], details
+        index = "USING INDEX ix_jobs_item_stage_status (item_id=? AND stage=?"
+        assert all(index in d for d in details if d.startswith("SEARCH") and "jobs" in d), details
 
 
 def test_reconciling_logs_what_it_queued(
@@ -481,7 +566,7 @@ def test_chain_queues_only_the_stages_straight_after(
 
 
 def test_chaining_reads_the_items_jobs_through_the_item_stage_index(migrated: Engine) -> None:
-    query = due(Stage.CLIP, CLIP).where(Item.id == 1)
+    query = due(Stage.CLIP, CHAIN).where(Item.id == 1)
     sql = query.compile(migrated, compile_kwargs={"literal_binds": True})
     with migrated.connect() as conn:
         details = [row[3] for row in conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {sql}")]

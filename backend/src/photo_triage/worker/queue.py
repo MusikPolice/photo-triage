@@ -42,6 +42,8 @@ class Stage(StrEnum):
     SCAN = "scan"
     METADATA_READ = "metadata_read"
     """Reads dimensions, duration, capture time and keywords. Each scan queues it."""
+    FRAMES = "frames"
+    """Samples a video's frames, which the stages after it read. Videos only."""
     THUMBNAIL = "thumbnail"
     CLIP = "clip"
     QUALITY = "quality"
@@ -61,6 +63,7 @@ PRIORITY: dict[Stage, int] = {
     Stage.WALK: 1,
     Stage.SCAN: 1,
     Stage.METADATA_READ: 1,
+    Stage.FRAMES: 2,  # a video's input to its thumbnails
     Stage.THUMBNAIL: 2,
     Stage.CLIP: 3,
     Stage.QUALITY: 4,

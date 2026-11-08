@@ -30,6 +30,7 @@ PUBLIC_SETTINGS = {
     "worker_threads",
     "worker_quiet_hours",
     "tz",
+    "video_sample_frames",
     "worker_noop_stage",
     "fake_now",
 }
@@ -104,6 +105,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.worker_threads == 4
     assert settings.worker_quiet_hours is None
     assert settings.tz == ZoneInfo("UTC")
+    assert settings.video_sample_frames == 5
     assert settings.worker_noop_stage is False
     assert settings.fake_now is None
 
@@ -259,6 +261,24 @@ def test_worker_threads_must_be_a_positive_number(
 
     with pytest.raises(SettingsError, match="WORKER_THREADS"):
         load_settings()
+
+
+@pytest.mark.parametrize("value", ["0", "-2", "five"])
+def test_video_sample_frames_must_be_at_least_one(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("VIDEO_SAMPLE_FRAMES", value)
+
+    with pytest.raises(SettingsError, match="VIDEO_SAMPLE_FRAMES"):
+        load_settings()
+
+
+def test_derived_files_have_a_folder_of_their_own_in_the_data_dir(tmp_path: Path) -> None:
+    settings = Settings(photo_dir=tmp_path, data_dir=tmp_path / "data")
+
+    assert settings.derived_dir == tmp_path / "data" / "derived"
 
 
 def test_fake_now_needs_a_utc_offset(monkeypatch: pytest.MonkeyPatch) -> None:

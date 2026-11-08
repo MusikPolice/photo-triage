@@ -42,6 +42,10 @@ TRASH_FOLDER = ".photo-triage-trash"
 """The trash's name inside `PHOTO_DIR`, where it is by default (plan §6.8)."""
 
 
+DERIVED_FOLDER = "derived"
+"""The folder in `DATA_DIR` that holds regenerable files."""
+
+
 def _default_trash_dir(data: dict[str, Any]) -> Path:
     photo_dir = data.get("photo_dir")
     # Without a valid PHOTO_DIR, validation fails anyway and this is never used.
@@ -92,6 +96,9 @@ class Settings(BaseSettings):
     hours and for capture times taken from a file's mtime or a video's UTC
     `CreateDate`. Timestamps and logs stay UTC."""
 
+    video_sample_frames: Annotated[int, Field(ge=1)] = 5
+    """Frames sampled from each video, which the stages after it read (plan §6.1)."""
+
     # Development only (dev-environment §5), so not in plan §9 or `.env.example`.
 
     worker_noop_stage: bool = False
@@ -123,6 +130,12 @@ class Settings(BaseSettings):
                 "the trash may be inside the library, not around it"
             )
         return value
+
+    @property
+    def derived_dir(self) -> Path:
+        """Where regenerable files go (video frames, then thumbnails), so a backup
+        of `data_dir` can skip them (plan §4)."""
+        return self.data_dir / DERIVED_FOLDER
 
     def summary(self) -> str:
         """Every setting as `NAME=value`, for the startup log line. Secrets must be

@@ -109,6 +109,25 @@ class Item(Base):
     )
 
 
+class ItemFrame(Base):
+    """A frame sampled from a video, which the stages after `frames` read instead of
+    the video (plan §6.1). Its image is `photo_triage.pipeline.frames.frame_path`.
+
+    `photo_triage.pipeline.frames` replaces an item's frames together with their files.
+    """
+
+    __tablename__ = "item_frames"
+    # Also serves reading an item's frames in order.
+    __table_args__ = (sa.UniqueConstraint("item_id", "frame_index"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(sa.ForeignKey("items.id", ondelete="CASCADE"))
+    frame_index: Mapped[int]
+    """0 for the first frame, in the order they appear."""
+    timestamp_s: Mapped[float]
+    """Seconds from the start of the video."""
+
+
 class Tag(Base):
     """A keyword on an item, and where it came from (plan §8).
 
