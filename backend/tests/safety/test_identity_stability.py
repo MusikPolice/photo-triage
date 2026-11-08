@@ -11,6 +11,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from photo_triage.db.models import Item, ItemStatus
+from photo_triage.files import ExifTool
 from photo_triage.settings import Settings
 from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import JobQueue, Stage
@@ -28,7 +29,9 @@ def _scan(engine: Engine, settings: Settings, now: dt.datetime) -> dict[str, tup
     queue = JobQueue(clock)
     with Session(engine) as session, session.begin():
         queue.enqueue(session, Stage.WALK)
-    Worker(engine, build_runners(settings, engine, queue, clock), queue=queue, clock=clock).drain()
+    with ExifTool() as exiftool:
+        runners = build_runners(settings, engine, queue, clock, exiftool)
+        Worker(engine, runners, queue=queue, clock=clock).drain()
     with Session(engine) as session:
         items = session.scalars(sa.select(Item).where(Item.status == ItemStatus.ACTIVE)).all()
         return {i.path: (i.id, i.content_hash or "") for i in items if i.path != CORRUPT}

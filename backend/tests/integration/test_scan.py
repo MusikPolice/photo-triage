@@ -13,6 +13,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from photo_triage.db.models import Item, ItemStatus, Job, JobStatus, MediaType
+from photo_triage.files import ExifTool
 from photo_triage.pipeline import scan
 from photo_triage.pipeline.identity import HashError
 from photo_triage.settings import TRASH_FOLDER, Settings
@@ -39,14 +40,14 @@ class Clock:
 class Scanner:
     """Runs walks and scan jobs against a migrated database, as the worker would."""
 
-    def __init__(self, engine: Engine, settings: Settings) -> None:
+    def __init__(self, engine: Engine, settings: Settings, exiftool: ExifTool) -> None:
         self.clock = Clock()
         self.queue = JobQueue(self.clock, RetryPolicy(max_attempts=2))
         self.sessions = sessionmaker(engine)
         self.settings = settings
         self.worker = Worker(
             engine,
-            build_runners(settings, engine, self.queue, self.clock),
+            build_runners(settings, engine, self.queue, self.clock, exiftool),
             queue=self.queue,
             clock=self.clock,
             item_stages=item_stages(settings),
@@ -93,9 +94,9 @@ class Scanner:
 
 
 @pytest.fixture
-def scanner(migrated: Engine, settings: Settings) -> Scanner:
+def scanner(migrated: Engine, settings: Settings, exiftool: ExifTool) -> Scanner:
     settings.photo_dir.mkdir(exist_ok=True)
-    return Scanner(migrated, settings)
+    return Scanner(migrated, settings, exiftool)
 
 
 def _photo(path: Path, color: str = "red", size: tuple[int, int] = (8, 8)) -> Path:
@@ -223,7 +224,11 @@ def test_a_move_keeps_the_items_jobs_and_records_the_scan_against_it(
         jobs = session.execute(
             sa.select(Job.stage, Job.status).where(Job.item_id == item_id).order_by(Job.stage)
         ).all()
-    assert jobs == [(Stage.SCAN, JobStatus.DONE), (Stage.THUMBNAIL, JobStatus.PENDING)]
+    assert jobs == [
+        (Stage.METADATA_READ, JobStatus.DONE),  # read again at its new path
+        (Stage.SCAN, JobStatus.DONE),
+        (Stage.THUMBNAIL, JobStatus.PENDING),
+    ]
 
 
 def test_a_missing_file_is_marked_and_comes_back_at_its_path(
@@ -379,7 +384,7 @@ def test_a_scan_for_an_item_deleted_since_does_nothing(
     with scanner.sessions.begin() as session:
         session.execute(sa.delete(Item))
 
-    scan.scan(scanner.sessions, job, settings.photo_dir, scanner.clock())
+    scan.scan(scanner.sessions, scanner.queue, job, settings.photo_dir, scanner.clock())
 
     assert scanner.items() == {}
 
@@ -401,7 +406,7 @@ def test_a_scan_whose_item_moves_while_hashing_records_nothing(
 
     monkeypatch.setattr(scan.identity, "content_hash", hash_while_moving)
 
-    scan.scan(scanner.sessions, job, settings.photo_dir, scanner.clock())
+    scan.scan(scanner.sessions, scanner.queue, job, settings.photo_dir, scanner.clock())
 
     assert scanner.items()["b.jpg"].content_hash is None
 
@@ -449,7 +454,7 @@ def test_scan_raises_hash_error_for_a_corrupt_file(scanner: Scanner, library: Pa
         session.expunge(job)
 
     with pytest.raises(HashError):
-        scan.scan(scanner.sessions, job, library, scanner.clock())
+        scan.scan(scanner.sessions, scanner.queue, job, library, scanner.clock())
 
 
 # --- The worker -----------------------------------------------------------------------

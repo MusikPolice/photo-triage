@@ -164,6 +164,7 @@ export interface components {
       | "metadata_write"
       | "walk"
       | "scan"
+      | "metadata_read"
       | "thumbnail"
       | "clip"
       | "quality"

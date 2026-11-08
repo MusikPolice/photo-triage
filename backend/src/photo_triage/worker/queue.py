@@ -40,6 +40,8 @@ class Stage(StrEnum):
     WALK = "walk"
     """Lists the library and queues a `scan` job per new or changed file."""
     SCAN = "scan"
+    METADATA_READ = "metadata_read"
+    """Reads dimensions, duration, capture time and keywords. Each scan queues it."""
     THUMBNAIL = "thumbnail"
     CLIP = "clip"
     QUALITY = "quality"
@@ -58,6 +60,7 @@ PRIORITY: dict[Stage, int] = {
     Stage.METADATA_WRITE: 0,
     Stage.WALK: 1,
     Stage.SCAN: 1,
+    Stage.METADATA_READ: 1,
     Stage.THUMBNAIL: 2,
     Stage.CLIP: 3,
     Stage.QUALITY: 4,
@@ -69,8 +72,8 @@ PRIORITY: dict[Stage, int] = {
     Stage.LLM_TAG: 7,
     Stage.NOOP: 8,
 }
-"""Lower runs first: metadata writes > scan > thumbnails > CLIP > quality > faces >
-batch jobs > LLM tagging, so the map and search become usable first."""
+"""Lower runs first: metadata writes > scan and reading metadata > thumbnails > CLIP >
+quality > faces > batch jobs > LLM tagging, so the map and search become usable first."""
 
 BATCH_STAGES = frozenset({Stage.WALK, Stage.LAYOUT, Stage.DUPLICATES, Stage.ATLASES, Stage.NOOP})
 """Stages whose jobs cover the whole library rather than one item."""

@@ -15,7 +15,9 @@ same walk) means the file moved: that item takes the new path and becomes active
 keeping its history, and the placeholder is deleted. Otherwise, including when the
 item with that hash is still at its own path (an exact copy), the placeholder keeps
 the hash and becomes an item of its own. A known item whose file changed in place
-takes its new hash and stays the same item.
+takes its new hash and stays the same item. Either way, the scan queues a
+`metadata_read` job for the item (`photo_triage.pipeline.metadata`), in the same
+transaction, since its file is new or has changed.
 
 Both only read files. Deleting a placeholder is a database delete.
 """
@@ -150,7 +152,9 @@ def walk(
     )
 
 
-def scan(sessions: sessionmaker[Session], job: Job, photo_dir: Path, now: dt.datetime) -> bool:
+def scan(
+    sessions: sessionmaker[Session], queue: JobQueue, job: Job, photo_dir: Path, now: dt.datetime
+) -> bool:
     """Hash the file of `job`'s item, and treat it as a move if it's a placeholder
     whose hash belongs to an item whose file is gone. Raises `identity.HashError` if
     the file can't be decoded, so the job is retried and then parked.
@@ -187,9 +191,12 @@ def scan(sessions: sessionmaker[Session], job: Job, photo_dir: Path, now: dt.dat
             moved = _moved_from(session, content_hash, photo_dir)
             if moved is not None:
                 _move(session, job, placeholder=item, moved=moved, now=now)
+                queue.enqueue(session, Stage.METADATA_READ, moved.id)
                 return False
         changed = item.content_hash != content_hash
         item.content_hash = content_hash
+        # Even when the hash is the same: the metadata alone may have changed.
+        queue.enqueue(session, Stage.METADATA_READ, item.id)
         return changed
 
 
