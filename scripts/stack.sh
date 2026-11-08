@@ -29,7 +29,7 @@ fi
 if [[ ! -f "$stack/app.env" ]]; then
   cat >"$stack/app.env" <<'EOF'
 # Settings for `just stack`'s containers, in place of `.env` (plan §9). PHOTO_DIR,
-# DATA_DIR, TRASH_DIR and APP_PORT are set by compose.yaml and ignored here.
+# DATA_DIR, MODELS_DIR, TRASH_DIR and APP_PORT are set by compose.yaml and ignored here.
 WORKER_NOOP_STAGE=true
 EOF
 fi
@@ -39,7 +39,11 @@ fi
 
 export COMPOSE_PROJECT_NAME=photo-triage-stack
 export PHOTO_TRIAGE_IMAGE="$image"
-export PHOTO_DIR="$stack/photos" DATA_DIR="$stack/data" APP_ENV_FILE="$stack/app.env"
+# The bootstrap's models, or an empty folder if there are none.
+models="$HOME/.cache/photo-triage/models"
+[[ -d "$models" ]] || { models="$stack/models"; mkdir -p "$models"; }
+export PHOTO_DIR="$stack/photos" DATA_DIR="$stack/data" MODELS_DIR="$models" \
+  APP_ENV_FILE="$stack/app.env"
 
 (($#)) || set -- up
 if [[ "$1" == up ]]; then

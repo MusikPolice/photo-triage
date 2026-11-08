@@ -42,6 +42,9 @@ TRASH_FOLDER = ".photo-triage-trash"
 """The trash's name inside `PHOTO_DIR`, where it is by default (plan §6.8)."""
 
 
+DEFAULT_MODELS_DIR = Path.home() / ".cache" / "photo-triage" / "models"
+"""Where `scripts/bootstrap.sh` downloads and exports the models."""
+
 DERIVED_FOLDER = "derived"
 """The folder in `DATA_DIR` that holds regenerable files."""
 
@@ -87,6 +90,13 @@ class Settings(BaseSettings):
     worker_threads: Annotated[int, Field(gt=0)] = 4
     """Threads for ONNX and BLAS inference in the worker."""
 
+    models_dir: Path = Field(default_factory=lambda: DEFAULT_MODELS_DIR)
+    """The model weights: CLIP's export, InsightFace's and the aesthetic predictor's.
+    Where `scripts/bootstrap.sh` puts them by default; `/models` in the container."""
+
+    clip_model: str = "ViT-B-32"
+    """The CLIP model, as exported to `models_dir/clip/<name>` (plan §6.3)."""
+
     worker_quiet_hours: QuietHoursSetting = None
     """When the whole worker stays idle, in `tz` (see `photo_triage.quiet_hours`).
     Unset or empty means it always runs."""
@@ -110,6 +120,11 @@ class Settings(BaseSettings):
     fake_now: AwareDatetime | None = None
     """Starts the worker's clock at this time (with a UTC offset, e.g.
     `2026-10-03T21:59:00Z`), from where it advances in real time."""
+
+    @field_validator("models_dir")
+    @classmethod
+    def _expand_home(cls, value: Path) -> Path:
+        return value.expanduser()
 
     @field_validator("trash_dir", mode="before")
     @classmethod

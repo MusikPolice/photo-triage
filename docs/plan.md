@@ -395,6 +395,7 @@ Environment variables, documented in `.env.example`:
 | `WORKER_THREADS` | `4` | Threads for ONNX/BLAS inference |
 | `OLLAMA_MODEL` | `moondream` | Vision model for tagging |
 | `CLIP_MODEL` | `ViT-B-32` | CLIP model |
+| `MODELS_DIR` | `~/.cache/photo-triage/models` | Model weights: CLIP's ONNX export, InsightFace's and the aesthetic predictor's (in Docker: `/models`, bind-mounted read-only from a host folder) |
 | `QUALITY_THRESHOLD` | `0.35` | Composite quality score below which items are flagged |
 | `JUNK_THRESHOLD` | `0.7` | Junk probability above which items are flagged |
 | `DUPLICATE_SIMILARITY_THRESHOLD` | `0.95` | CLIP cosine similarity for duplicate linking |

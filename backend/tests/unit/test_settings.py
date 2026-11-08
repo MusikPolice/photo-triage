@@ -28,6 +28,8 @@ PUBLIC_SETTINGS = {
     "log_level",
     "auth_mode",
     "worker_threads",
+    "models_dir",
+    "clip_model",
     "worker_quiet_hours",
     "tz",
     "thumbnail_size",
@@ -108,6 +110,8 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.tz == ZoneInfo("UTC")
     assert settings.video_sample_frames == 5
     assert settings.thumbnail_size == 400
+    assert settings.models_dir == Path.home() / ".cache/photo-triage/models"
+    assert settings.clip_model == "ViT-B-32"
     assert settings.worker_noop_stage is False
     assert settings.fake_now is None
 
@@ -287,6 +291,14 @@ def test_thumbnail_size_is_at_least_the_map_size(
 
     with pytest.raises(SettingsError, match="THUMBNAIL_SIZE"):
         load_settings()
+
+
+def test_models_dir_may_start_at_the_home_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("MODELS_DIR", "~/models")
+
+    assert load_settings().models_dir == Path.home() / "models"
 
 
 def test_derived_files_have_a_folder_of_their_own_in_the_data_dir(tmp_path: Path) -> None:

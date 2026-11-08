@@ -502,17 +502,18 @@ elif needs_fix "Aesthetic predictor weights missing or corrupt ($FIX_HINT)"; the
   ok "aesthetic predictor"
 fi
 
-# CLIP is exported from open_clip to ONNX, which needs the backend's Python deps.
+# CLIP is exported from open_clip to ONNX, which needs the backend's Python deps
+# (the export group). open_clip's download checks the weights' SHA-256.
 clip_dir="$MODELS_DIR/clip"
-if [[ ! -f "$REPO_ROOT/scripts/export_clip_onnx.py" ]]; then
-  warn "CLIP ONNX export skipped (scripts/export_clip_onnx.py is added in Phase 2)"
-elif [[ ! -f "$REPO_ROOT/backend/pyproject.toml" ]]; then
+clip_model="ViT-B-32"
+if [[ ! -f "$REPO_ROOT/backend/pyproject.toml" ]]; then
   warn "CLIP ONNX export skipped (needs backend/pyproject.toml)"
-elif compgen -G "$clip_dir/*.onnx" >/dev/null; then
-  ok "CLIP ONNX"
+elif [[ -f "$clip_dir/$clip_model/clip.json" && -f "$clip_dir/$clip_model/image.onnx" && -f "$clip_dir/$clip_model/text.onnx" ]]; then
+  ok "CLIP ONNX ($clip_model)"
 elif needs_fix "CLIP ONNX model not exported ($FIX_HINT)"; then
-  (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv run python ../scripts/export_clip_onnx.py --out "$clip_dir")
-  ok "CLIP ONNX export"
+  echo "  Exporting CLIP $clip_model to ONNX (downloads ~350 MB of weights the first time)..."
+  (cd "$REPO_ROOT/backend" && "$MISE" exec -- uv run python ../scripts/export_clip_onnx.py --out "$clip_dir" --model "$clip_model")
+  ok "CLIP ONNX ($clip_model)"
 fi
 
 # ---------------------------------------------------------------------------

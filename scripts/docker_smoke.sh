@@ -150,12 +150,13 @@ fi
 # compose.yaml on this image, with the library and DATA_DIR bind-mounted from
 # temporary folders. Not Ollama: nothing uses it yet, and its image is large.
 stack_dir="$(mktemp -d)"
-mkdir "$stack_dir/photos" "$stack_dir/data"
+mkdir "$stack_dir/photos" "$stack_dir/data" "$stack_dir/models"
 chmod 777 "$stack_dir/photos" "$stack_dir/data"  # for the containers' UID 1000
 stack_port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 stack() {
   COMPOSE_PROJECT_NAME="photo-triage-smoke-$$" PHOTO_TRIAGE_IMAGE="$image" \
-    PHOTO_DIR="$stack_dir/photos" DATA_DIR="$stack_dir/data" APP_ENV_FILE=/dev/null \
+    PHOTO_DIR="$stack_dir/photos" DATA_DIR="$stack_dir/data" MODELS_DIR="$stack_dir/models" \
+    APP_ENV_FILE=/dev/null \
     APP_PORT="$stack_port" docker compose -f "$here/../compose.yaml" "$@"
 }
 
@@ -180,6 +181,12 @@ if [[ "$stack_log" == *"TRASH_DIR=/photos/.photo-triage-trash "* && "$stack_log"
   ok "compose: the trash is in the library, on its filesystem"
 else
   fail "compose: TRASH_DIR isn't /photos/.photo-triage-trash, or is on another filesystem"
+fi
+if [[ "$stack_log" == *"MODELS_DIR=/models "* ]] \
+  && ! stack exec -T worker touch /models/written 2>/dev/null; then
+  ok "compose: MODELS_DIR is /models, mounted read-only"
+else
+  fail "compose: MODELS_DIR isn't /models, or the container can write to it"
 fi
 second="$(stack run --rm --no-deps worker 2>&1)" && second_status=0 || second_status=$?
 if ((second_status != 0)) && [[ "$second" == *"A worker is already running"* ]]; then
