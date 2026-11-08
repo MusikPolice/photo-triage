@@ -5,6 +5,10 @@ Needs the export in `~/.cache/photo-triage/models/clip` (`scripts/bootstrap.sh`)
 the `export` dependency group, for open_clip to compare with. `just test-models`.
 """
 
+# torch comes with open_clip, in the export group, which CI's type check doesn't
+# install. The model-tier job has it.
+# pyright: reportMissingImports=false
+
 import itertools
 from collections.abc import Iterator
 from pathlib import Path

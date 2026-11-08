@@ -19,6 +19,9 @@ Files are written over any already there, `clip.json` last, so on a first export
 presence means the export finished. Nothing is deleted (dev-environment §7).
 """
 
+# torch and open_clip are in the export group, which CI's type check doesn't install.
+# pyright: reportMissingImports=false
+
 import argparse
 import json
 import shutil
