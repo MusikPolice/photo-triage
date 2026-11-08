@@ -198,6 +198,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just stack` | The production Docker Compose stack (migrate, app, worker, Ollama), on an image of your checkout, against a test folder `.stack/`, whose library starts as a copy of the tier-1 fixtures. `just stack exec worker python -m photo_triage.worker scan` scans it, and `… worker noop 50` queues jobs to watch |
 | `just test` | Unit, integration, and safety tests (fake ML models; fast) |
 | `just test-models` | Tests that run the real CLIP/InsightFace models (slow; cached weights) |
+| `just models DEST` | Copy the model weights the bootstrap downloaded and exported to `DEST`, e.g. to carry to the server |
 | `just fixtures` | Regenerate the synthetic test photos and videos in `backend/tests/fixtures/synthetic/` |
 | `just bench` | Benchmarks on large synthetic data, such as the Activity page's job counts over 1M jobs (slow) |
 | `just e2e` | Playwright end-to-end tests against `just stack` |
@@ -213,7 +214,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just shot PATH` | Screenshots of a page at desktop and phone widths, from a scratch copy of the app (no real photos) |
 | `just preview` | Keep a scratch copy of the app running, for many `just shot`s |
 
-Available today: `dev`, `api`, `worker`, `image`, `stack`, `shot`, `preview`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-migrate`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `bench`, `fixtures`, `audit`, `pre-commit`, `check`. Run `just` for the list.
+Available today: `dev`, `api`, `worker`, `image`, `stack`, `shot`, `preview`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-migrate`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `models`, `bench`, `fixtures`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
 See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
 
@@ -227,12 +228,13 @@ sudo mkdir -p /srv/photo-triage/data && sudo chown 1000:1000 /srv/photo-triage/d
 cat > .env <<'EOF'
 PHOTO_DIR=/mnt/pictures
 DATA_DIR=/srv/photo-triage/data
+MODELS_DIR=/srv/photo-triage/models
 APP_PORT=8000
 EOF
 docker compose up -d
 ```
 
-The UI is then on port `APP_PORT`. `PHOTO_DIR` must be writable by UID 1000, the image's user, and the trash is a hidden folder inside it. `DATA_DIR` holds the database, its backups and the logs, so it's the folder to back up. To upgrade, build the new image and run `docker compose up -d` again: the migrate service backs the database up before migrating it. See dev-environment §5, "The Compose stack", for the other settings, the resource caps and the logs.
+The UI is then on port `APP_PORT`. `PHOTO_DIR` must be writable by UID 1000, the image's user, and the trash is a hidden folder inside it. `DATA_DIR` holds the database, its backups and the logs, so it's the folder to back up (its `derived/` folder can be skipped). `MODELS_DIR` holds the model weights: copy them from the dev machine with `just models DEST` there, then to `/srv/photo-triage/models`. To upgrade, build the new image and run `docker compose up -d` again: the migrate service backs the database up before migrating it. See dev-environment §5, "The Compose stack", for the other settings, the resource caps and the logs.
 
 ## Safety rules for contributors
 

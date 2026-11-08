@@ -82,6 +82,14 @@ test *args:
     @# ≥ 90% branch coverage on identity and move detection (dev-environment §8)
     uv run --no-sync coverage report --fail-under=90 --include='src/photo_triage/pipeline/identity.py,src/photo_triage/pipeline/scan.py'
 
+# Copy the model weights (scripts/bootstrap.sh puts them in ~/.cache/photo-triage/models)
+# to DEST, the stack's MODELS_DIR host folder, e.g. to carry them to the NUC
+models dest:
+    @test -f ~/.cache/photo-triage/models/clip/ViT-B-32/clip.json || { echo "No CLIP export in ~/.cache/photo-triage/models: run scripts/bootstrap.sh first" >&2; exit 1; }
+    mkdir -p "{{dest}}"
+    cp -a ~/.cache/photo-triage/models/. "{{dest}}/"
+    @echo "Copied the models to {{dest}}. Set MODELS_DIR={{dest}} in the stack's .env."
+
 # Tests that run the real ML models on cached weights (slow)
 [working-directory: 'backend']
 test-models *args:

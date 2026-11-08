@@ -1,5 +1,5 @@
 # CI on every push and PR (docs/dev-environment.md §8).
-# Jobs still to come as their code lands: on main/nightly, the model tier and e2e.
+# The model tier is in models.yml. Still to come as its code lands: e2e on main/nightly.
 name: CI
 
 on:

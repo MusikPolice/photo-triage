@@ -926,6 +926,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
+    { name = "ftfy" },
     { name = "insightface" },
     { name = "numpy" },
     { name = "onnxruntime" },
@@ -934,6 +935,7 @@ dependencies = [
     { name = "pillow-heif" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "regex" },
     { name = "scikit-learn" },
     { name = "sqlalchemy" },
     { name = "tzdata" },
@@ -967,6 +969,7 @@ export = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "ftfy", specifier = ">=6.3" },
     { name = "insightface", specifier = ">=0.7.3" },
     { name = "numpy", specifier = ">=2.1" },
     { name = "onnxruntime", specifier = ">=1.20" },
@@ -975,6 +978,7 @@ requires-dist = [
     { name = "pillow-heif", specifier = ">=0.20" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
+    { name = "regex", specifier = ">=2024.11" },
     { name = "scikit-learn", specifier = ">=1.5" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "tzdata", specifier = ">=2026.5" },

@@ -1,0 +1,65 @@
+# The model tier (docs/dev-environment.md §6, §8): `pytest -m models`, the real ML
+# models on the tier-1 fixtures. Slow and needs ~1 GB of weights, so it runs on
+# main, nightly, and on PRs that touch the adapters or the export, not on every PR.
+# Not a required check.
+name: Models
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - backend/src/photo_triage/ml/**
+      - backend/tests/models/**
+      - backend/uv.lock
+      - scripts/export_clip_onnx.py
+      - .github/workflows/models.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: models-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  models:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: python uv just
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: models-uv-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: models-uv-
+
+      # The pretrained weights open_clip downloads (for the export, and to compare
+      # with), and the ONNX export made from them.
+      - uses: actions/cache@v6
+        id: weights
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/photo-triage/models/clip
+          key: clip-${{ hashFiles('scripts/export_clip_onnx.py', 'backend/uv.lock') }}
+
+      # All groups: the tests compare with open_clip, from the export group.
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --locked
+
+      - name: Export CLIP to ONNX
+        if: steps.weights.outputs.cache-hit != 'true'
+        working-directory: backend
+        run: uv run --no-sync python ../scripts/export_clip_onnx.py --out ~/.cache/photo-triage/models/clip
+
+      - name: Model tier
+        run: just test-models

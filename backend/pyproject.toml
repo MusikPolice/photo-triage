@@ -22,6 +22,9 @@ dependencies = [
     "insightface>=0.7.3",
     "umap-learn>=0.5.7",
     "scikit-learn>=1.5", # includes HDBSCAN
+    # CLIP's text tokenizer (photo_triage.ml.tokenizer), as open_clip has it
+    "regex>=2024.11",
+    "ftfy>=6.3",
     "tzdata>=2026.5",
 ]
 

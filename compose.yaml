@@ -5,12 +5,14 @@
 #
 # The app and the worker run the image `just image` builds (photo-triage:dev, or
 # PHOTO_TRIAGE_IMAGE). Compose reads `.env` next to this file twice:
-# - for the host side: PHOTO_DIR and DATA_DIR are the host folders mounted at
-#   /photos and /data, and APP_PORT is the host port;
+# - for the host side: PHOTO_DIR, DATA_DIR and MODELS_DIR are the host folders
+#   mounted at /photos, /data and /models (read-only), and APP_PORT is the host
+#   port;
 # - as each app container's environment, for the other settings in plan §9.
 #   The container paths below override the host ones.
-# Both folders must exist and be writable by UID 1000, the image's user. Compose
-# won't create them, since Docker would make them owned by root.
+# The folders must exist, and PHOTO_DIR and DATA_DIR be writable by UID 1000, the
+# image's user. Compose won't create them, since Docker would make them owned by
+# root. `just models DEST` fills a MODELS_DIR folder from the dev machine's.
 
 name: photo-triage
 
@@ -29,6 +31,7 @@ x-app: &app
   environment:
     PHOTO_DIR: /photos
     DATA_DIR: /data
+    MODELS_DIR: /models
     # Empty means the default, /photos/.photo-triage-trash: inside the library's
     # mount, so trashing a file is a rename (plan §6.8). No separate trash mount.
     TRASH_DIR: ""
@@ -42,6 +45,12 @@ x-app: &app
     - type: bind
       source: ${DATA_DIR:?Set DATA_DIR, the host folder for the database and derived files, in .env}
       target: /data
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${MODELS_DIR:?Set MODELS_DIR, the host folder holding the model weights (just models), in .env}
+      target: /models
+      read_only: true
       bind:
         create_host_path: false
   logging: *logging
