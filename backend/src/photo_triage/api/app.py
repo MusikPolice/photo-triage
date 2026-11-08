@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
-from photo_triage.api import activity, events, health
+from photo_triage.api import activity, events, health, items
 from photo_triage.api.errors import LogUnhandledErrors
 from photo_triage.api.feed import POLL_S, Feed
 from photo_triage.db.engine import open_database
@@ -73,6 +73,7 @@ def create_app(
     app.include_router(health.router, prefix="/api")
     app.include_router(activity.router, prefix="/api")
     app.include_router(events.router, prefix="/api")
+    app.include_router(items.router, prefix="/api")
     # Last, since it matches every path.
     if frontend_dir is not None:
         app.mount("/", SinglePageApp(directory=frontend_dir, html=True), name="frontend")

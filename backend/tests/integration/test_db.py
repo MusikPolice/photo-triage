@@ -27,6 +27,7 @@ PHASE_1_COLUMNS = {
         "width",
         "height",
         "duration_s",
+        "orientation",
         "taken_at_local",
         "first_seen_at",
         "last_seen_at",

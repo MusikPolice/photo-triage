@@ -215,7 +215,7 @@ def test_a_move_keeps_the_items_jobs_and_records_the_scan_against_it(
     scanner.run()
     item_id = scanner.items()["scenes/scene-02.jpg"].id
     with scanner.sessions.begin() as session:
-        scanner.queue.enqueue(session, Stage.THUMBNAIL, item_id)
+        scanner.queue.enqueue(session, Stage.CLIP, item_id)  # no runner yet, so it waits
 
     _move(library, "scenes/scene-02.jpg", "elsewhere.jpg")
     scanner.run()
@@ -225,9 +225,10 @@ def test_a_move_keeps_the_items_jobs_and_records_the_scan_against_it(
             sa.select(Job.stage, Job.status).where(Job.item_id == item_id).order_by(Job.stage)
         ).all()
     assert jobs == [
+        (Stage.CLIP, JobStatus.PENDING),
         (Stage.METADATA_READ, JobStatus.DONE),  # read again at its new path
         (Stage.SCAN, JobStatus.DONE),
-        (Stage.THUMBNAIL, JobStatus.PENDING),
+        (Stage.THUMBNAIL, JobStatus.DONE),  # drawn before the move, and not again
     ]
 
 

@@ -1,7 +1,7 @@
 """The runner for each stage the worker can run, and the item stages that reconcile
 keeps current (plan §6.11).
 
-`walk`, `scan`, `metadata_read` and `frames` always run. `noop` exists only when
+`walk`, `scan`, `metadata_read`, `frames` and `thumbnail` always run. `noop` exists only when
 `WORKER_NOOP_STAGE` is on.
 """
 
@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 
 from photo_triage.db.models import Job, MediaType
 from photo_triage.files import MetadataReader
-from photo_triage.pipeline import frames, metadata, scan
+from photo_triage.pipeline import frames, metadata, scan, thumbnails
 from photo_triage.settings import Settings
 from photo_triage.worker.clock import Clock
 from photo_triage.worker.queue import JobQueue, Stage
@@ -63,12 +63,19 @@ def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
         Stage.SCAN: ItemStage(code_version=1),
         # Separate from scan, so a new field to import re-reads every file without
         # hashing it again.
-        Stage.METADATA_READ: ItemStage(code_version=1, upstream=(Stage.SCAN,)),
+        # 2: records the orientation.
+        Stage.METADATA_READ: ItemStage(code_version=2, upstream=(Stage.SCAN,)),
         Stage.FRAMES: ItemStage(
             code_version=1,
             upstream=(Stage.SCAN,),
             settings_fingerprint=f"{settings.video_sample_frames}-frames",
             media_types=frozenset({MediaType.VIDEO}),
+        ),
+        # Metadata for the orientation; frames for a video's picture.
+        Stage.THUMBNAIL: ItemStage(
+            code_version=1,
+            upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES),
+            settings_fingerprint=f"{settings.thumbnail_size}px",
         ),
     }
 
@@ -122,11 +129,17 @@ def build_runners(
             settings.video_sample_frames,
         )
 
+    def run_thumbnail(job: Job) -> bool:
+        return thumbnails.make(
+            sessions, job, settings.photo_dir, settings.derived_dir, settings.thumbnail_size
+        )
+
     runners: dict[str, Runner] = {
         Stage.WALK: run_walk,
         Stage.SCAN: run_scan,
         Stage.METADATA_READ: run_metadata_read,
         Stage.FRAMES: run_frames,
+        Stage.THUMBNAIL: run_thumbnail,
     }
     if settings.worker_noop_stage:
         runners[Stage.NOOP] = run_noop

@@ -30,6 +30,7 @@ PUBLIC_SETTINGS = {
     "worker_threads",
     "worker_quiet_hours",
     "tz",
+    "thumbnail_size",
     "video_sample_frames",
     "worker_noop_stage",
     "fake_now",
@@ -106,6 +107,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.worker_quiet_hours is None
     assert settings.tz == ZoneInfo("UTC")
     assert settings.video_sample_frames == 5
+    assert settings.thumbnail_size == 400
     assert settings.worker_noop_stage is False
     assert settings.fake_now is None
 
@@ -272,6 +274,18 @@ def test_video_sample_frames_must_be_at_least_one(
     monkeypatch.setenv("VIDEO_SAMPLE_FRAMES", value)
 
     with pytest.raises(SettingsError, match="VIDEO_SAMPLE_FRAMES"):
+        load_settings()
+
+
+@pytest.mark.parametrize("value", ["63", "0", "big"])
+def test_thumbnail_size_is_at_least_the_map_size(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("THUMBNAIL_SIZE", value)
+
+    with pytest.raises(SettingsError, match="THUMBNAIL_SIZE"):
         load_settings()
 
 

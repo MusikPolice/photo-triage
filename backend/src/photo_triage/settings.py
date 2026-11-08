@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     hours and for capture times taken from a file's mtime or a video's UTC
     `CreateDate`. Timestamps and logs stay UTC."""
 
+    thumbnail_size: Annotated[int, Field(ge=64)] = 400
+    """Long edge of each item's thumbnail, in pixels (plan §6.2). The map's are 64."""
+
     video_sample_frames: Annotated[int, Field(ge=1)] = 5
     """Frames sampled from each video, which the stages after it read (plan §6.1)."""
 
@@ -133,7 +136,7 @@ class Settings(BaseSettings):
 
     @property
     def derived_dir(self) -> Path:
-        """Where regenerable files go (video frames, then thumbnails), so a backup
+        """Where regenerable files go (video frames and thumbnails), so a backup
         of `data_dir` can skip them (plan §4)."""
         return self.data_dir / DERIVED_FOLDER
 

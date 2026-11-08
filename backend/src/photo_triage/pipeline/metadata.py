@@ -3,6 +3,8 @@
 - **Dimensions**, in pixels as displayed: a photo's after its EXIF orientation, a
   video's after its rotation. Pillow and pillow-heif read photos (libheif applies a
   HEIC's own rotation, `irot`), ffprobe videos.
+- A photo's EXIF **orientation**, so a turn that leaves the dimensions as they were
+  (180°, or a mirror) still counts as a change, and redraws the thumbnails.
 - **Duration** of a video, from ffprobe.
 - **`taken_at_local`**, the capture time on the camera's clock, with no timezone.
   Photos: `DateTimeOriginal`, then `CreateDate`, each from EXIF and then XMP,
@@ -65,6 +67,7 @@ class FileMetadata:
     width: int
     height: int
     duration_s: float | None
+    orientation: int | None
     taken_at_local: dt.datetime
     keywords: tuple[str, ...]
 
@@ -79,7 +82,7 @@ def read(
     )
     tags = reader.read(path, [*date_tags, *KEYWORD_TAGS])
     if kind == MediaType.PHOTO:
-        width, height = _photo_size(path)
+        width, height, orientation = _photo_size(path)
         duration_s = None
     else:
         try:
@@ -87,10 +90,12 @@ def read(
         except video.ProbeError as e:
             raise MetadataError(str(e)) from e
         width, height, duration_s = found.width, found.height, found.duration_s
+        orientation = None
     return FileMetadata(
         width=width,
         height=height,
         duration_s=duration_s,
+        orientation=orientation,
         taken_at_local=taken_at_local(tags, kind, zone, mtime_ns),
         keywords=keywords(tags),
     )
@@ -163,6 +168,7 @@ def record(
             "width": found.width,
             "height": found.height,
             "duration_s": found.duration_s,
+            "orientation": found.orientation,
             "taken_at_local": found.taken_at_local,
         }
         changed = any(getattr(item, name) != value for name, value in fields.items())
@@ -213,12 +219,17 @@ def _first_date(tags: Mapping[str, Any], spec: str) -> dt.datetime | None:
     return None
 
 
-def _photo_size(path: Path) -> tuple[int, int]:
-    """Width and height as displayed. Opening reads only the headers."""
+def _photo_size(path: Path) -> tuple[int, int, int | None]:
+    """Width and height as displayed, and the EXIF orientation if it's a valid one.
+    Opening reads only the headers."""
     try:
         with Image.open(path) as image:
             width, height = image.size
             orientation = image.getexif().get(_ORIENTATION)
     except (OSError, ValueError, Image.DecompressionBombError) as e:
         raise MetadataError(f"can't read the size of {path.name}: {e}") from e
-    return (height, width) if orientation in _SIDEWAYS else (width, height)
+    if orientation not in range(1, 9):
+        orientation = None
+    if orientation in _SIDEWAYS:
+        return height, width, orientation
+    return width, height, orientation

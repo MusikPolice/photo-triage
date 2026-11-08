@@ -1,9 +1,10 @@
 """Regenerable files in `DATA_DIR/derived` (plan §4): replacing an item's set of
 them deletes the old ones, so it lives here (dev-environment §7).
 
-A stage writes a new set into a staging folder of its own, then swaps it in with
-`replace_derived`, so the old set stays whole until the new one is complete. Both
-functions refuse any folder outside the derived folder, or the folder itself.
+A stage writes a new set into a staging folder of its own, or a new file beside the
+old one, then swaps it in with `replace_derived`, so the old one stays whole until
+the new one is complete. Both functions refuse anything outside the derived folder,
+or the folder itself.
 """
 
 import shutil
@@ -15,15 +16,20 @@ class DerivedPathError(ValueError):
 
 
 def replace_derived(derived_dir: Path, staged: Path, target: Path) -> None:
-    """Make `target` the folder `staged` is, deleting what `target` held. Both must
-    be inside `derived_dir`, on the same filesystem, so this is a rename."""
+    """Make `target` the folder or file `staged` is, deleting what `target` held.
+    Both must be inside `derived_dir`, on the same filesystem, so this is a rename.
+    A file replaces the old one in a single step, so a reader sees one or the other,
+    never half of either."""
     _check_inside(derived_dir, staged)
     _check_inside(derived_dir, target)
-    if not staged.is_dir():
-        raise DerivedPathError(f"{staged} isn't a folder")
+    if staged.is_symlink() or not (staged.is_dir() or staged.is_file()):
+        raise DerivedPathError(f"{staged} isn't a folder or a file")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if staged.is_file() and not (target.is_dir() and not target.is_symlink()):
+        staged.replace(target)
+        return
     if target.exists() or target.is_symlink():
         _remove(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
     staged.rename(target)
 
 

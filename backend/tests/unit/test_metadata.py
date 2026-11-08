@@ -195,20 +195,21 @@ def test_the_fixtures_keywords_are_read(exiftool: ExifTool) -> None:
 
 
 @pytest.mark.parametrize(
-    ("path", "size"),
+    ("path", "size", "orientation"),
     [
-        ("scenes/scene-01.jpg", (640, 480)),
-        ("orientation/rotated-90.jpg", (640, 480)),  # stored 480 by 640, orientation 6
-        ("orientation/bad-orientation.jpg", (640, 480)),  # orientation 9 isn't one
-        ("quality/screenshot.jpg", (780, 1688)),
-        ("heic/scene.heic", (640, 480)),
+        ("scenes/scene-01.jpg", (640, 480), None),
+        ("orientation/rotated-90.jpg", (640, 480), 6),  # stored 480 by 640
+        ("orientation/bad-orientation.jpg", (640, 480), None),  # 9 isn't an orientation
+        ("quality/screenshot.jpg", (780, 1688), None),
+        ("heic/scene.heic", (640, 480), None),
     ],
 )
 def test_photo_dimensions_are_as_displayed(
-    exiftool: ExifTool, path: str, size: tuple[int, int]
+    exiftool: ExifTool, path: str, size: tuple[int, int], orientation: int | None
 ) -> None:
     found = metadata.read(SYNTHETIC / path, MediaType.PHOTO, exiftool, ZONE, MTIME_NS)
     assert (found.width, found.height, found.duration_s) == (*size, None)
+    assert found.orientation == orientation
 
 
 def test_a_turned_heic_is_measured_as_displayed(exiftool: ExifTool, tmp_path: Path) -> None:
@@ -224,6 +225,7 @@ def test_a_turned_heic_is_measured_as_displayed(exiftool: ExifTool, tmp_path: Pa
 def test_video_dimensions_and_duration_come_from_ffprobe(exiftool: ExifTool) -> None:
     found = metadata.read(SYNTHETIC / "video/clip.mov", MediaType.VIDEO, exiftool, ZONE, MTIME_NS)
     assert (found.width, found.height, found.duration_s) == (320, 240, 3.0)
+    assert found.orientation is None
 
 
 def test_a_rotated_video_is_measured_as_displayed(exiftool: ExifTool, tmp_path: Path) -> None:
