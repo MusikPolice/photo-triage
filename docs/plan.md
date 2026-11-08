@@ -127,7 +127,7 @@ A scan is a batch `walk` job, which lists the library and compares it with `item
 
 **Discovery.** A scheduled nightly incremental scan (`SCAN_SCHEDULE`, cron syntax) plus a "Scan now" button. Files that have disappeared are marked missing (not deleted from the DB) until a later scan confirms they're gone or finds them at a new path.
 
-**Videos.** Get full parity with photos: `ffmpeg` samples `VIDEO_SAMPLE_FRAMES` frames (default 5, evenly spaced, skipping first/last 5%), and each downstream stage runs over those frames. Aggregation rules: CLIP embedding = mean of frame embeddings; quality = median of frame scores; faces = union across frames (deduplicated per person); LLM tagging uses the most representative frame (closest to mean embedding).
+**Videos.** Get full parity with photos: `ffmpeg` samples `VIDEO_SAMPLE_FRAMES` frames (default 5, evenly spaced, skipping first/last 5%) in a `frames` job after the scan, into the derived files (§4), and no closer than a frame apart, so a very short clip gives fewer. Each downstream stage runs over those frames. Aggregation rules: CLIP embedding = mean of frame embeddings; quality = median of frame scores; faces = union across frames (deduplicated per person); LLM tagging uses the most representative frame (closest to mean embedding).
 
 ### 6.2 Thumbnails & Atlases
 
@@ -255,19 +255,20 @@ A **single worker** processes a persistent, priority-ordered job queue in SQLite
 
 ```
 walk ─► scan ─┬─► metadata_read
-              └─► thumbnail ─► clip ─┬─► quality/junk
-                                     ├─► faces ─► recognize
-                                     └─► (layout re-fit, duplicate grouping, atlases — batch jobs)
-                               llm_tag (lowest priority; waits for faces when available)
+              ├─► frames (videos) ─┐
+              └────────────────────┴─► thumbnail ─► clip ─┬─► quality/junk
+                                                          ├─► faces ─► recognize
+                                                          └─► (layout re-fit, duplicate grouping, atlases — batch jobs)
+                                                    llm_tag (lowest priority; waits for faces when available)
 metadata writes (high priority, small)
 ```
 
-- **Priority order:** metadata writes > walk, scan and metadata reads > thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
+- **Priority order:** metadata writes > walk, scan and metadata reads > video frames and thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
 - **Resource limits:** CPU/memory caps via Compose (`cpus:`, `mem_limit:`); `WORKER_THREADS` for ONNX/BLAS. The worker sets the OpenMP, BLAS and numba thread variables from it at startup, but ONNX Runtime ignores those: every ONNX Runtime session must be created with `intra_op_num_threads=WORKER_THREADS`.
 - **Quiet hours:** optional `WORKER_QUIET_HOURS` lists the times when the household is using the host, in its local time (`TZ`), e.g. `Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00`. Each period names the days it starts on, and one whose end is at or before its start ends the next day. The whole worker stays idle during them, and a job already running finishes. Unset means it always runs.
 - **Pause / resume** from the UI or the command line, globally or per stage. A pause is stored in `worker_controls`, so it survives a restart, and a job already running finishes.
 - **Resumable:** job state is durable; the worker picks up where it left off after restart. Failed jobs retry with backoff, then park in an error list. A run cut short by the worker dying counts as a failed attempt, so a job that keeps killing the worker (e.g. running it out of memory) ends up parked rather than retried forever.
-- **Reconciled from outputs:** each stage queues the next when it finishes, so new items flow straight through. Behind that, the worker reconciles every per-item stage with what it has already produced, at startup, after each library walk, and on `just worker reconcile`. Each per-item stage has a version, plus a fingerprint of any setting its output depends on (e.g. `CLIP_MODEL`), and its done job records the version it ran at and when its output for the item last changed. A stage is due for an active item when every stage it reads from is done, and it has no done job at its current version that's newer than their output, and no parked job at that version. So deploying a new stage, or a fix that bumps a stage's version, re-runs it on the existing library with no user action, then the stages after it; a job lost between stages, e.g. in a crash, is queued again. A run that reproduces its output keeps the old time: a moved file, or one whose metadata alone changed, keeps its content hash, so the stages that read it don't run again. Reading the metadata does: every scan queues it, since a scan runs only for a file that's new or changed. Metadata writes and batch jobs aren't reconciled.
+- **Reconciled from outputs:** each stage queues the next when it finishes, so new items flow straight through. Behind that, the worker reconciles every per-item stage with what it has already produced, at startup, after each library walk, and on `just worker reconcile`. Each per-item stage has a version, plus a fingerprint of any setting its output depends on (e.g. `CLIP_MODEL`), and its done job records the version it ran at and when its output for the item last changed. A stage is due for an active item when every stage it reads from is done, and it has no done job at its current version that's newer than their output, and no parked job at that version. So deploying a new stage, or a fix that bumps a stage's version, re-runs it on the existing library with no user action, then the stages after it; a job lost between stages, e.g. in a crash, is queued again. A run that reproduces its output keeps the old time: a moved file, or one whose metadata alone changed, keeps its content hash, so the stages that read it don't run again. Reading the metadata does: every scan queues it, since a scan runs only for a file that's new or changed. A stage that runs for only some kinds of item (`frames`, for videos) is due only for those, and the stages after it don't wait for it on the others. Metadata writes and batch jobs aren't reconciled.
 
 ---
 
