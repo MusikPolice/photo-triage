@@ -17,6 +17,9 @@ It runs at worker startup, after each walk, and by hand with `just worker
 reconcile`. Each stage's jobs go in with one statement, in its own transaction,
 upstream stages first. An open job for the same stage and item is left alone,
 through the unique open-job index.
+
+`chain` applies the same rule to one item when one of its jobs finishes, so new
+items flow straight through without waiting for a reconcile.
 """
 
 import datetime as dt
@@ -26,7 +29,7 @@ from collections.abc import Mapping
 
 import sqlalchemy as sa
 from sqlalchemy.engine import CursorResult, Engine
-from sqlalchemy.orm import aliased, sessionmaker
+from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from photo_triage.db.columns import UTCDateTime
 from photo_triage.db.models import Item, ItemStatus, Job, JobStatus
@@ -96,25 +99,8 @@ def reconcile(engine: Engine, stages: Mapping[str, ItemStage], now: dt.datetime)
     sessions = sessionmaker(engine)
     queued: dict[str, int] = {}
     for name in ordered(stages):
-        due_items = due(name, stages[name]).subquery()
-        insert = (
-            sa.insert(Job)
-            .from_select(
-                ["item_id", "stage", "priority", "status", "attempts", "enqueued_at"],
-                sa.select(
-                    due_items.c.id,
-                    sa.literal(name, Job.stage.type),
-                    sa.literal(PRIORITY[Stage(name)]),
-                    sa.literal(JobStatus.PENDING, Job.status.type),
-                    sa.literal(0),
-                    sa.literal(now, UTCDateTime()),
-                ),
-            )
-            .prefix_with("OR IGNORE")  # an open job for the item is already queued
-        )
         with sessions.begin() as session:
-            result: CursorResult[tuple[()]] = session.execute(insert)  # pyright: ignore[reportAssignmentType]
-            queued[name] = result.rowcount
+            queued[name] = _queue_due(session, name, stages[name], now)
     if any(queued.values()):
         logger.info(
             "Reconciled stages, queued %s",
@@ -123,3 +109,51 @@ def reconcile(engine: Engine, stages: Mapping[str, ItemStage], now: dt.datetime)
     else:
         logger.info("Reconciled stages, nothing due")
     return queued
+
+
+def chain(
+    session: Session,
+    stages: Mapping[str, ItemStage],
+    finished: str,
+    item_id: int,
+    now: dt.datetime,
+) -> list[str]:
+    """Queue the stages that read `finished` and are now due for `item_id`, in the
+    caller's transaction (the one that marked its job done). Returns their names.
+
+    Only the stages straight after it: each of those chains its own when it finishes.
+    """
+    return [
+        name
+        for name in ordered(stages)
+        if finished in stages[name].upstream
+        and _queue_due(session, name, stages[name], now, item_id=item_id)
+    ]
+
+
+def _queue_due(
+    session: Session, name: str, stage: ItemStage, now: dt.datetime, item_id: int | None = None
+) -> int:
+    """Queue `name` for every item it's due for, or for `item_id` alone. Returns how
+    many jobs went in."""
+    query = due(name, stage)
+    if item_id is not None:
+        query = query.where(Item.id == item_id)
+    due_items = query.subquery()
+    insert = (
+        sa.insert(Job)
+        .from_select(
+            ["item_id", "stage", "priority", "status", "attempts", "enqueued_at"],
+            sa.select(
+                due_items.c.id,
+                sa.literal(name, Job.stage.type),
+                sa.literal(PRIORITY[Stage(name)]),
+                sa.literal(JobStatus.PENDING, Job.status.type),
+                sa.literal(0),
+                sa.literal(now, UTCDateTime()),
+            ),
+        )
+        .prefix_with("OR IGNORE")  # an open job for the item is already queued
+    )
+    result: CursorResult[tuple[()]] = session.execute(insert)  # pyright: ignore[reportAssignmentType]
+    return result.rowcount

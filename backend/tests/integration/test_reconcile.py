@@ -1,5 +1,6 @@
-"""Reconciling item stages with what they've produced (plan §6.11), with test-only
-stages registered over a migrated database."""
+"""Reconciling item stages with what they've produced, and chaining each stage to the
+next as its jobs finish (plan §6.11), with test-only stages registered over a
+migrated database."""
 
 import datetime as dt
 import logging
@@ -15,7 +16,7 @@ from photo_triage.settings import Settings
 from photo_triage.worker.__main__ import main
 from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import JobQueue, RetryPolicy, Stage
-from photo_triage.worker.reconcile import RegistryError, due, ordered, reconcile
+from photo_triage.worker.reconcile import RegistryError, chain, due, ordered, reconcile
 from photo_triage.worker.stages import ItemStage, item_stages
 
 START = dt.datetime(2026, 10, 25, 2, tzinfo=dt.UTC)
@@ -24,6 +25,7 @@ ITEMS = 4
 SCAN = ItemStage(code_version=1)
 THUMBNAIL = ItemStage(code_version=1, upstream=(Stage.SCAN,))
 CLIP = ItemStage(code_version=1, upstream=(Stage.THUMBNAIL,))
+CHAIN: dict[str, ItemStage] = {Stage.SCAN: SCAN, Stage.THUMBNAIL: THUMBNAIL, Stage.CLIP: CLIP}
 
 
 class Clock:
@@ -42,18 +44,22 @@ class Runner:
         self.ran: list[tuple[str, int | None]] = []
         self.changed = True
         self.failing = False
+        self.during: Callable[[Job], None] | None = None
+        """Called inside each run, e.g. to change the database under the job."""
 
     def __call__(self, job: Job) -> bool:
         self.clock.now += dt.timedelta(seconds=1)
         self.ran.append((job.stage, job.item_id))
+        if self.during is not None:
+            self.during(job)
         if self.failing:
             raise OSError("can't decode")
         return self.changed
 
 
 class Pipeline:
-    """A worker running `Runner` for scan, thumbnail and CLIP, with the item stages
-    that `register` sets."""
+    """A worker running `Runner` for scan, thumbnail, CLIP and quality, with the item
+    stages that `register` sets."""
 
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
@@ -65,7 +71,7 @@ class Pipeline:
     def register(self, stages: Mapping[str, ItemStage]) -> None:
         self.worker = Worker(
             self.engine,
-            dict.fromkeys([Stage.SCAN, Stage.THUMBNAIL, Stage.CLIP], self.runner),
+            dict.fromkeys([Stage.SCAN, Stage.THUMBNAIL, Stage.CLIP, Stage.QUALITY], self.runner),
             queue=self.queue,
             clock=self.clock,
             item_stages=stages,
@@ -135,18 +141,19 @@ def test_a_new_stage_backfills_every_processed_item(
     pipeline.register({Stage.SCAN: SCAN, Stage.THUMBNAIL: THUMBNAIL, Stage.CLIP: CLIP})
     # CLIP waits for thumbnails, which none of the items has yet.
     assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: ITEMS, Stage.CLIP: 0}
-    assert pipeline.run() == _ran(Stage.THUMBNAIL, items)
+    # Each thumbnail queues the item's CLIP job as it finishes.
+    assert pipeline.run() == _ran(Stage.THUMBNAIL, items) + _ran(Stage.CLIP, items)
     assert pipeline.done(Stage.THUMBNAIL) == dict.fromkeys(items, "1")
-    assert pipeline.reconcile()[Stage.CLIP] == ITEMS
+    assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: 0, Stage.CLIP: 0}
 
 
 def test_reconciling_twice_queues_nothing_the_second_time(
     pipeline: Pipeline, items: list[int]
 ) -> None:
-    pipeline.register({Stage.SCAN: SCAN, Stage.THUMBNAIL: THUMBNAIL})
-    assert pipeline.reconcile() == {Stage.SCAN: ITEMS, Stage.THUMBNAIL: 0}
-    assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: 0}
+    assert pipeline.reconcile() == {Stage.SCAN: ITEMS}
+    assert pipeline.reconcile() == {Stage.SCAN: 0}
     pipeline.run()
+    pipeline.register({Stage.SCAN: SCAN, Stage.THUMBNAIL: THUMBNAIL})  # added later
     assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: ITEMS}
     assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: 0}
     pipeline.run()
@@ -168,10 +175,8 @@ def test_bumping_a_version_re_runs_the_stage_then_its_downstream_stages(
     fixed = ItemStage(code_version=2, upstream=(Stage.SCAN,))
     pipeline.register({Stage.SCAN: SCAN, Stage.THUMBNAIL: fixed, Stage.CLIP: CLIP})
     assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: ITEMS, Stage.CLIP: 0}
-    assert pipeline.run() == _ran(Stage.THUMBNAIL, items)
+    assert pipeline.run() == _ran(Stage.THUMBNAIL, items) + _ran(Stage.CLIP, items)
     assert pipeline.done(Stage.THUMBNAIL) == dict.fromkeys(items, "2")
-    assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: 0, Stage.CLIP: ITEMS}
-    assert pipeline.run() == _ran(Stage.CLIP, items)
     assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: 0, Stage.CLIP: 0}
 
 
@@ -206,9 +211,8 @@ def test_new_upstream_output_re_runs_the_downstream_stage(
     changed = items[0]  # its file changed, so the walk queued a scan
     with Session(migrated) as session, session.begin():
         pipeline.queue.enqueue(session, Stage.SCAN, changed)
-    assert pipeline.run() == [(Stage.SCAN, changed)]
-    assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: 1}
-    assert pipeline.run() == [(Stage.THUMBNAIL, changed)]
+    assert pipeline.run() == [(Stage.SCAN, changed), (Stage.THUMBNAIL, changed)]
+    assert pipeline.reconcile() == {Stage.SCAN: 0, Stage.THUMBNAIL: 0}
 
 
 def test_a_deleted_pending_job_is_queued_again(
@@ -347,3 +351,141 @@ def test_the_worker_reconciles_after_each_walk(migrated: Engine, items: list[int
     worker = Worker(migrated, runners, item_stages={Stage.SCAN: SCAN})
     assert worker.run_one()
     assert _pending(migrated, Stage.SCAN) == ITEMS
+
+
+# --- Chaining -------------------------------------------------------------------------
+
+
+def _queue_scans(pipeline: Pipeline, engine: Engine, items: list[int]) -> None:
+    with Session(engine) as session, session.begin():
+        for item in items:
+            pipeline.queue.enqueue(session, Stage.SCAN, item)
+
+
+def test_new_items_flow_through_every_stage_without_a_reconcile(
+    pipeline: Pipeline, items: list[int], migrated: Engine
+) -> None:
+    pipeline.register(CHAIN)
+    _queue_scans(pipeline, migrated, items)  # as a walk does
+
+    ran = pipeline.run()
+
+    assert sorted(ran) == sorted(
+        _ran(Stage.SCAN, items) + _ran(Stage.THUMBNAIL, items) + _ran(Stage.CLIP, items)
+    )
+    for item in items:  # each after the one it reads
+        order = [stage for stage, i in ran if i == item]
+        assert order == [Stage.SCAN, Stage.THUMBNAIL, Stage.CLIP]
+    assert pipeline.reconcile() == dict.fromkeys(CHAIN, 0)
+
+
+def test_unchanged_output_queues_nothing_after_it_that_is_already_done(
+    pipeline: Pipeline, items: list[int], migrated: Engine
+) -> None:
+    pipeline.register(CHAIN)
+    _queue_scans(pipeline, migrated, items)
+    pipeline.run()
+
+    pipeline.runner.changed = False  # e.g. only the file's metadata changed
+    _queue_scans(pipeline, migrated, items[:1])
+    assert pipeline.run() == [(Stage.SCAN, items[0])]
+
+
+def test_unchanged_output_still_queues_a_stage_that_never_ran(
+    pipeline: Pipeline, items: list[int], migrated: Engine
+) -> None:
+    pipeline.register({Stage.SCAN: SCAN})
+    _queue_scans(pipeline, migrated, items)
+    pipeline.run()
+    pipeline.register(CHAIN)  # thumbnails and CLIP deployed, not yet reconciled
+
+    pipeline.runner.changed = False
+    _queue_scans(pipeline, migrated, items[:1])
+
+    assert pipeline.run() == [
+        (Stage.SCAN, items[0]),
+        (Stage.THUMBNAIL, items[0]),
+        (Stage.CLIP, items[0]),
+    ]
+
+
+def test_a_stage_reading_two_others_waits_for_both(
+    pipeline: Pipeline, items: list[int], migrated: Engine
+) -> None:
+    both = ItemStage(code_version=1, upstream=(Stage.THUMBNAIL, Stage.CLIP))
+    clip_from_scan = ItemStage(code_version=1, upstream=(Stage.SCAN,))
+    pipeline.register(
+        {
+            Stage.SCAN: SCAN,
+            Stage.THUMBNAIL: THUMBNAIL,
+            Stage.CLIP: clip_from_scan,
+            Stage.QUALITY: both,
+        }
+    )
+    _queue_scans(pipeline, migrated, items[:1])
+
+    ran = [stage for stage, _ in pipeline.run()]
+
+    # Thumbnail runs first (higher priority), and quality isn't due until CLIP is done.
+    assert ran == [Stage.SCAN, Stage.THUMBNAIL, Stage.CLIP, Stage.QUALITY]
+
+
+def test_a_job_moved_to_another_item_chains_for_that_item(
+    pipeline: Pipeline, items: list[int], migrated: Engine
+) -> None:
+    pipeline.register({Stage.SCAN: SCAN, Stage.THUMBNAIL: THUMBNAIL})
+    placeholder, moved = items[0], items[1]
+
+    def merge(job: Job) -> None:  # as scan does when the placeholder's file moved
+        if job.stage == Stage.SCAN:
+            with Session(migrated) as session, session.begin():
+                session.execute(sa.update(Job).where(Job.id == job.id).values(item_id=moved))
+                session.execute(sa.delete(Item).where(Item.id == placeholder))
+
+    pipeline.runner.during = merge
+    _queue_scans(pipeline, migrated, [placeholder])
+
+    assert pipeline.run() == [(Stage.SCAN, placeholder), (Stage.THUMBNAIL, moved)]
+
+
+def test_a_job_whose_item_was_deleted_while_it_ran_is_dropped(
+    pipeline: Pipeline, items: list[int], migrated: Engine, caplog: pytest.LogCaptureFixture
+) -> None:
+    pipeline.register(CHAIN)
+    gone = items[0]
+
+    def delete(job: Job) -> None:
+        with Session(migrated) as session, session.begin():
+            session.execute(sa.delete(Item).where(Item.id == gone))
+
+    pipeline.runner.during = delete
+    _queue_scans(pipeline, migrated, [gone])
+    caplog.set_level(logging.INFO, logger="photo_triage.worker.loop")
+
+    assert pipeline.run() == [(Stage.SCAN, gone)]
+    assert "but its item is gone" in caplog.text
+    with Session(migrated) as session:
+        assert session.scalar(sa.select(sa.func.count()).select_from(Job)) == 0
+
+
+def test_chain_queues_only_the_stages_straight_after(
+    pipeline: Pipeline, items: list[int], migrated: Engine
+) -> None:
+    pipeline.register({Stage.SCAN: SCAN})
+    _queue_scans(pipeline, migrated, items[:1])
+    pipeline.run()
+    with Session(migrated) as session, session.begin():
+        assert chain(session, CHAIN, Stage.SCAN, items[0], START) == [Stage.THUMBNAIL]
+        assert chain(session, CHAIN, Stage.SCAN, items[0], START) == []  # already open
+        assert chain(session, CHAIN, Stage.CLIP, items[0], START) == []  # nothing after
+
+
+def test_chaining_reads_the_items_jobs_through_the_item_stage_index(migrated: Engine) -> None:
+    query = due(Stage.CLIP, CLIP).where(Item.id == 1)
+    sql = query.compile(migrated, compile_kwargs={"literal_binds": True})
+    with migrated.connect() as conn:
+        details = [row[3] for row in conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {sql}")]
+    assert [d for d in details if d.startswith("SCAN")] == [], details
+    assert any(d.startswith("SEARCH items USING INTEGER PRIMARY KEY") for d in details), details
+    index = "USING INDEX ix_jobs_item_stage_status (item_id=? AND stage=?"
+    assert all(index in d for d in details if d.startswith("SEARCH") and "jobs" in d), details
