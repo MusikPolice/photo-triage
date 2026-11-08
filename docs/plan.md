@@ -307,7 +307,7 @@ items
   id, content_hash, path, media_type (photo | video)  -- content_hash: null until the
                                                       -- scan hashes the file; not unique,
                                                       -- since exact copies are items too
-  file_size_bytes, file_mtime_ns, width, height, duration_s
+  file_size_bytes, file_mtime_ns, width, height, duration_s, orientation  -- orientation: EXIF 1-8, photos
   taken_at_local, first_seen_at, last_seen_at, missing_since
   status (active | trashed | purged | missing)
 

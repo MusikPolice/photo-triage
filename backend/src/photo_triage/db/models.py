@@ -99,6 +99,10 @@ class Item(Base):
     """Pixels."""
     duration_s: Mapped[float | None]
     """Videos only."""
+    orientation: Mapped[int | None]
+    """A photo's EXIF orientation, 1 to 8, if it has one. Its width and height are
+    already turned by it; this is kept so a turn that doesn't swap them (180°, or a
+    mirror) still counts as a change (`photo_triage.pipeline.metadata`)."""
     taken_at_local: Mapped[dt.datetime | None]
     """Capture time as the camera recorded it: local wall-clock time, no timezone."""
     first_seen_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)

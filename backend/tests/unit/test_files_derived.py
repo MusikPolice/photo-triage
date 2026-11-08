@@ -34,6 +34,26 @@ def test_creates_the_target_the_first_time(tmp_path: Path) -> None:
     assert (derived / "frames" / "7" / "0.jpg").read_text() == "0.jpg"
 
 
+def test_replaces_a_file_in_one_step(tmp_path: Path) -> None:
+    derived = tmp_path / "derived"
+    folder = _folder(derived / "thumbnails", "7.jpg", "7.jpg.new")
+
+    replace_derived(derived, folder / "7.jpg.new", folder / "7.jpg")
+
+    assert [p.name for p in folder.iterdir()] == ["7.jpg"]
+    assert (folder / "7.jpg").read_text() == "7.jpg.new"
+
+
+def test_a_link_is_never_staged(tmp_path: Path) -> None:
+    derived = _folder(tmp_path / "derived")
+    library = _folder(tmp_path / "library", "photo.jpg")
+    (derived / "link.jpg").symlink_to(library / "photo.jpg")
+
+    with pytest.raises(DerivedPathError):
+        replace_derived(derived, derived / "link.jpg", derived / "7.jpg")
+    assert (library / "photo.jpg").exists()
+
+
 def test_remove_deletes_a_folder_and_ignores_one_already_gone(tmp_path: Path) -> None:
     derived = tmp_path / "derived"
     folder = _folder(derived / "frames" / "7", "0.jpg")

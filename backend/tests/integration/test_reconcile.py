@@ -290,15 +290,20 @@ def test_versions_carry_their_settings_fingerprint() -> None:
     assert ItemStage(code_version=3, settings_fingerprint="ViT-B-32").version == "3+ViT-B-32"
 
 
-def test_scan_reading_metadata_and_frames_are_registered_stages(settings: Settings) -> None:
+def test_the_registered_item_stages(settings: Settings) -> None:
     assert item_stages(settings) == {
         Stage.SCAN: ItemStage(code_version=1),
-        Stage.METADATA_READ: ItemStage(code_version=1, upstream=(Stage.SCAN,)),
+        Stage.METADATA_READ: ItemStage(code_version=2, upstream=(Stage.SCAN,)),
         Stage.FRAMES: ItemStage(
             code_version=1,
             upstream=(Stage.SCAN,),
             settings_fingerprint="5-frames",
             media_types=frozenset({MediaType.VIDEO}),
+        ),
+        Stage.THUMBNAIL: ItemStage(
+            code_version=1,
+            upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES),
+            settings_fingerprint="400px",
         ),
     }
 

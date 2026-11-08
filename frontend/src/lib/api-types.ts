@@ -55,6 +55,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/items/{item_id}/thumbnail": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Thumbnail
+     * @description The item's thumbnail, `size` pixels on the long edge: `THUMBNAIL_SIZE` (400
+     *     by default) or 64, the map's.
+     */
+    get: operations["thumbnail_api_items__item_id__thumbnail_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/worker/pause": {
     parameters: {
       query?: never;
@@ -292,6 +313,53 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Health"];
+        };
+      };
+    };
+  };
+  thumbnail_api_items__item_id__thumbnail_get: {
+    parameters: {
+      query: {
+        size: number;
+      };
+      header?: never;
+      path: {
+        item_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The thumbnail, a JPEG */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/jpeg": unknown;
+        };
+      };
+      /** @description Unchanged since the copy the browser has */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description No such item, size or thumbnail */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
