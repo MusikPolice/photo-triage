@@ -121,9 +121,9 @@ Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MO
 
 **Identity.** Each item is identified by a **content hash** of its decoded pixel data (for video: hash of the media stream, excluding metadata atoms). This is stable across metadata writes (ours and others') and across elodie moving/renaming files. `(path, mtime, size)` is used as a cheap "maybe changed?" pre-check; only when it changes is the content hash recomputed. A known content hash at a new path is treated as a move, not a new item — all history is preserved — when the item that had it is no longer at its old path. If it still is, the new file is an exact copy and becomes an item of its own, so duplicate grouping (§6.7) can offer to remove one. A file changed in place keeps its item and takes the new hash.
 
-**Per item, the scanner records:** path, type, dimensions, duration (video), `taken_at_local` (`DateTimeOriginal` → `CreateDate` → `DateTime` → file mtime), existing keywords/people/regions/review markers already in the file.
+**Per item, the scanner records:** path, type, dimensions, duration (video), `taken_at_local` (`DateTimeOriginal` → `CreateDate` → `DateTime` → file mtime), existing keywords/people/regions/review markers already in the file. Videos take `taken_at_local` from `Keys:CreationDate`, which phones write in local time, then from `QuickTime:CreateDate`, which QuickTime stores in UTC and is converted to `TZ`, then the mtime. A file's mtime is read in `TZ` too.
 
-A scan is a batch `walk` job, which lists the library and compares it with `items`, plus one `scan` job per new or changed file, which hashes it. So scanning shows progress, throughput and ETA like every other stage (§7). The scanner itself is cheap; heavy per-item work (thumbnails, CLIP, quality, faces, tagging) is enqueued as separate pipeline stages (§6.11).
+A scan is a batch `walk` job, which lists the library and compares it with `items`, plus one `scan` job per new or changed file, which hashes it, and then a `metadata_read` job, which reads what's recorded above from inside the file. So scanning shows progress, throughput and ETA like every other stage (§7). The scanner itself is cheap; heavy per-item work (thumbnails, CLIP, quality, faces, tagging) is enqueued as separate pipeline stages (§6.11).
 
 **Discovery.** A scheduled nightly incremental scan (`SCAN_SCHEDULE`, cron syntax) plus a "Scan now" button. Files that have disappeared are marked missing (not deleted from the DB) until a later scan confirms they're gone or finds them at a new path.
 
@@ -254,19 +254,20 @@ Verified with exiftool 13.59 in Phase 2 (`tests/integration/test_metadata_writeb
 A **single worker** processes a persistent, priority-ordered job queue in SQLite. Pipeline stages per item form a dependency chain:
 
 ```
-walk ─► scan ─► thumbnail ─► clip ─┬─► quality/junk
-                                   ├─► faces ─► recognize
-                                   └─► (layout re-fit, duplicate grouping, atlases — batch jobs)
-                             llm_tag (lowest priority; waits for faces when available)
+walk ─► scan ─┬─► metadata_read
+              └─► thumbnail ─► clip ─┬─► quality/junk
+                                     ├─► faces ─► recognize
+                                     └─► (layout re-fit, duplicate grouping, atlases — batch jobs)
+                               llm_tag (lowest priority; waits for faces when available)
 metadata writes (high priority, small)
 ```
 
-- **Priority order:** metadata writes > walk and scan > thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
+- **Priority order:** metadata writes > walk, scan and metadata reads > thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
 - **Resource limits:** CPU/memory caps via Compose (`cpus:`, `mem_limit:`); `WORKER_THREADS` for ONNX/BLAS. The worker sets the OpenMP, BLAS and numba thread variables from it at startup, but ONNX Runtime ignores those: every ONNX Runtime session must be created with `intra_op_num_threads=WORKER_THREADS`.
 - **Quiet hours:** optional `WORKER_QUIET_HOURS` lists the times when the household is using the host, in its local time (`TZ`), e.g. `Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00`. Each period names the days it starts on, and one whose end is at or before its start ends the next day. The whole worker stays idle during them, and a job already running finishes. Unset means it always runs.
 - **Pause / resume** from the UI or the command line, globally or per stage. A pause is stored in `worker_controls`, so it survives a restart, and a job already running finishes.
 - **Resumable:** job state is durable; the worker picks up where it left off after restart. Failed jobs retry with backoff, then park in an error list. A run cut short by the worker dying counts as a failed attempt, so a job that keeps killing the worker (e.g. running it out of memory) ends up parked rather than retried forever.
-- **Reconciled from outputs:** each stage queues the next when it finishes, so new items flow straight through. Behind that, the worker reconciles every per-item stage with what it has already produced, at startup, after each library walk, and on `just worker reconcile`. Each per-item stage has a version, plus a fingerprint of any setting its output depends on (e.g. `CLIP_MODEL`), and its done job records the version it ran at and when its output for the item last changed. A stage is due for an active item when every stage it reads from is done, and it has no done job at its current version that's newer than their output, and no parked job at that version. So deploying a new stage, or a fix that bumps a stage's version, re-runs it on the existing library with no user action, then the stages after it; a job lost between stages, e.g. in a crash, is queued again. A run that reproduces its output keeps the old time: a moved file, or one whose metadata alone changed, keeps its content hash, so the stages after the scan don't run again. Metadata writes and batch jobs aren't reconciled.
+- **Reconciled from outputs:** each stage queues the next when it finishes, so new items flow straight through. Behind that, the worker reconciles every per-item stage with what it has already produced, at startup, after each library walk, and on `just worker reconcile`. Each per-item stage has a version, plus a fingerprint of any setting its output depends on (e.g. `CLIP_MODEL`), and its done job records the version it ran at and when its output for the item last changed. A stage is due for an active item when every stage it reads from is done, and it has no done job at its current version that's newer than their output, and no parked job at that version. So deploying a new stage, or a fix that bumps a stage's version, re-runs it on the existing library with no user action, then the stages after it; a job lost between stages, e.g. in a crash, is queued again. A run that reproduces its output keeps the old time: a moved file, or one whose metadata alone changed, keeps its content hash, so the stages that read it don't run again. Reading the metadata does: every scan queues it, since a scan runs only for a file that's new or changed. Metadata writes and batch jobs aren't reconciled.
 
 ---
 
@@ -389,7 +390,7 @@ Environment variables, documented in `.env.example`:
 | `LOG_LEVEL` | `INFO` | Lowest level logged by every process (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`); logs go to stderr and `DATA_DIR/logs` |
 | `SCAN_SCHEDULE` | `0 2 * * *` | Cron schedule for incremental scans |
 | `WORKER_QUIET_HOURS` | *(unset = always run)* | When the whole worker stays idle, in `TZ`, e.g. `Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00` (§6.11) |
-| `TZ` | `UTC` | The household's timezone (IANA name, e.g. `America/Toronto`), for quiet hours. Timestamps and logs stay UTC |
+| `TZ` | `UTC` | The household's timezone (IANA name, e.g. `America/Toronto`), for quiet hours, and for capture times taken from an mtime or a video's UTC `CreateDate` (§6.1). Timestamps and logs stay UTC |
 | `WORKER_THREADS` | `4` | Threads for ONNX/BLAS inference |
 | `OLLAMA_MODEL` | `moondream` | Vision model for tagging |
 | `CLIP_MODEL` | `ViT-B-32` | CLIP model |
