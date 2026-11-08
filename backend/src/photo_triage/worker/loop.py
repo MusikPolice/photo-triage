@@ -8,7 +8,9 @@ job stays `running` until `recover` puts it back at the next start.
 Before each claim the worker checks whether it's paused (`controls`) or in quiet
 hours, so a job that's running when either starts is finished first.
 
-After each walk it reconciles the item stages (`photo_triage.worker.reconcile`).
+When an item stage's job finishes, it queues the stages after it that are now due
+for the item (`reconcile.chain`), so new items flow straight through. After each
+walk it reconciles the item stages (`photo_triage.worker.reconcile`).
 """
 
 import logging
@@ -20,13 +22,13 @@ from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from photo_triage.db.models import JOB_IS_OPEN, Job, JobStatus
 from photo_triage.quiet_hours import UTC_ZONE, QuietHours
 from photo_triage.worker.clock import Clock, Timer, utc_now
 from photo_triage.worker.queue import JobQueue, Stage
-from photo_triage.worker.reconcile import reconcile
+from photo_triage.worker.reconcile import chain, reconcile
 from photo_triage.worker.stages import ItemStage, Runner
 from photo_triage.worker.state import WorkerState, WorkerStatus, read_state
 
@@ -123,6 +125,10 @@ class Worker:
         else:
             duration_s = self._timer() - started_s
             with self._sessions.begin() as session:
+                if session.get(Job, job.id) is None:
+                    # Deleted with its item while it ran, so there's nothing to record.
+                    logger.info("%s finished, but its item is gone", _describe(job).capitalize())
+                    return True
                 self._queue.complete(
                     session,
                     job.id,
@@ -130,7 +136,10 @@ class Worker:
                     version=self._versions.get(job.stage),
                     output_changed=changed is not False,
                 )
+                chained = self._chain(session, job)
             logger.debug("Finished %s in %.3f s", _describe(job), duration_s)
+            if chained:
+                logger.debug("Queued %s after it", ", ".join(chained))
             self._progress.processed[job.stage] += 1
             if job.stage == Stage.WALK:
                 self.reconcile()
@@ -155,6 +164,16 @@ class Worker:
                 self._summarize_if_due()
                 stop.wait(idle_poll_s)
         self._summarize()
+
+    def _chain(self, session: Session, job: Job) -> list[str]:
+        """Queue the item stages that `job`, just done, makes due for its item."""
+        if job.stage not in self._item_stages:
+            return []
+        # Its item now, which a move may have changed while it ran (`scan`).
+        item_id = session.scalar(sa.select(Job.item_id).where(Job.id == job.id))
+        if item_id is None:
+            return []
+        return chain(session, self._item_stages, job.stage, item_id, self._clock())
 
     def _set_state(self, state: WorkerState) -> None:
         if state != self._state:
