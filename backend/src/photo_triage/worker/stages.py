@@ -1,7 +1,8 @@
 """The runner for each stage the worker can run, and the item stages that reconcile
 keeps current (plan §6.11).
 
-`walk` and `scan` always run. `noop` exists only when `WORKER_NOOP_STAGE` is on.
+`walk`, `scan` and `metadata_read` always run. `noop` exists only when
+`WORKER_NOOP_STAGE` is on.
 """
 
 import logging
@@ -13,7 +14,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from photo_triage.db.models import Job
-from photo_triage.pipeline import scan
+from photo_triage.files import MetadataReader
+from photo_triage.pipeline import metadata, scan
 from photo_triage.settings import Settings
 from photo_triage.worker.clock import Clock
 from photo_triage.worker.queue import JobQueue, Stage
@@ -54,7 +56,12 @@ class ItemStage:
 
 def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
     """The item stages, with their versions. Each later stage's issue adds its own."""
-    return {Stage.SCAN: ItemStage(code_version=1)}
+    return {
+        Stage.SCAN: ItemStage(code_version=1),
+        # Separate from scan, so a new field to import re-reads every file without
+        # hashing it again.
+        Stage.METADATA_READ: ItemStage(code_version=1, upstream=(Stage.SCAN,)),
+    }
 
 
 NOOP_RUN_S = 0.2
@@ -66,9 +73,14 @@ def run_noop(job: Job) -> None:
 
 
 def build_runners(
-    settings: Settings, engine: Engine, queue: JobQueue, clock: Clock
+    settings: Settings,
+    engine: Engine,
+    queue: JobQueue,
+    clock: Clock,
+    metadata_reader: MetadataReader,
 ) -> Mapping[str, Runner]:
-    """The stages this worker runs. Jobs for any other stage stay in the queue."""
+    """The stages this worker runs. Jobs for any other stage stay in the queue.
+    The caller owns `metadata_reader`, and closes it once the worker stops."""
     sessions = sessionmaker(engine)
 
     def run_walk(job: Job) -> None:
@@ -85,9 +97,18 @@ def build_runners(
         )
 
     def run_scan(job: Job) -> bool:
-        return scan.scan(sessions, job, settings.photo_dir, clock())
+        return scan.scan(sessions, queue, job, settings.photo_dir, clock())
 
-    runners: dict[str, Runner] = {Stage.WALK: run_walk, Stage.SCAN: run_scan}
+    def run_metadata_read(job: Job) -> bool:
+        return metadata.record(
+            sessions, job, metadata_reader, settings.photo_dir, settings.tz, clock()
+        )
+
+    runners: dict[str, Runner] = {
+        Stage.WALK: run_walk,
+        Stage.SCAN: run_scan,
+        Stage.METADATA_READ: run_metadata_read,
+    }
     if settings.worker_noop_stage:
         runners[Stage.NOOP] = run_noop
     return runners

@@ -13,6 +13,7 @@ const STAGE_NAMES: Record<Stage, string> = {
   metadata_write: "Metadata writes",
   walk: "Library walk",
   scan: "Scan",
+  metadata_read: "Metadata reads",
   thumbnail: "Thumbnails",
   clip: "CLIP",
   quality: "Quality",

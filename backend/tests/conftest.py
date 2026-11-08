@@ -11,6 +11,7 @@ from alembic.config import Config
 from sqlalchemy.engine import Engine
 
 from photo_triage.db.engine import open_database
+from photo_triage.files import ExifTool
 from photo_triage.logs import LIBRARY_LOGGERS, PER_REQUEST_LOGGERS
 from photo_triage.settings import ENV_FILE, Settings
 
@@ -62,6 +63,13 @@ def library(settings: Settings) -> Path:
     """A copy of the tier-1 fixtures as `PHOTO_DIR`."""
     shutil.copytree(SYNTHETIC, settings.photo_dir, dirs_exist_ok=True)
     return settings.photo_dir
+
+
+@pytest.fixture
+def exiftool() -> Iterator[ExifTool]:
+    """The worker's exiftool process, stopped after the test."""
+    with ExifTool() as reader:
+        yield reader
 
 
 @pytest.fixture

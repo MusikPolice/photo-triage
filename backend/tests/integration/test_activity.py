@@ -31,6 +31,7 @@ STAGES_IN_ORDER = [
     "metadata_write",
     "walk",
     "scan",
+    "metadata_read",
     "thumbnail",
     "clip",
     "quality",

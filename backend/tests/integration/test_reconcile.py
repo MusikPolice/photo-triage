@@ -281,8 +281,11 @@ def test_versions_carry_their_settings_fingerprint() -> None:
     assert ItemStage(code_version=3, settings_fingerprint="ViT-B-32").version == "3+ViT-B-32"
 
 
-def test_scan_is_the_first_registered_stage(settings: Settings) -> None:
-    assert item_stages(settings) == {Stage.SCAN: ItemStage(code_version=1)}
+def test_scan_and_reading_metadata_are_registered_stages(settings: Settings) -> None:
+    assert item_stages(settings) == {
+        Stage.SCAN: ItemStage(code_version=1),
+        Stage.METADATA_READ: ItemStage(code_version=1, upstream=(Stage.SCAN,)),
+    }
 
 
 def test_reconciling_logs_what_it_queued(

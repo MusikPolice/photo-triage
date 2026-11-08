@@ -59,6 +59,13 @@ class ItemStatus(StrEnum):
     MISSING = "missing"
 
 
+class TagSource(StrEnum):
+    LLM = "llm"
+    USER = "user"
+    IMPORTED = "imported"
+    """Already in the file when it was scanned (plan §6.1)."""
+
+
 class JobStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
@@ -100,6 +107,27 @@ class Item(Base):
     status: Mapped[ItemStatus] = mapped_column(
         _enum(ItemStatus, "item_status"), default=ItemStatus.ACTIVE
     )
+
+
+class Tag(Base):
+    """A keyword on an item, and where it came from (plan §8).
+
+    `photo_triage.pipeline.metadata` keeps the imported ones in step with the file.
+    """
+
+    __tablename__ = "tags"
+
+    # The key also serves reading or replacing an item's tags from one source.
+    item_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("items.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[TagSource] = mapped_column(_enum(TagSource, "tag_source"), primary_key=True)
+    tag: Mapped[str] = mapped_column(sa.String(255), primary_key=True)
+    model: Mapped[str | None] = mapped_column(sa.String(64))
+    """The model that suggested it, for `llm` tags."""
+    created_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
+    actor: Mapped[str | None] = mapped_column(sa.String(255))
+    """Who added it (plan §10), for `user` tags."""
 
 
 JOB_IS_OPEN = "status IN ('pending', 'error')"

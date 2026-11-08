@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 from photo_triage import logs
 from photo_triage.db.engine import open_database
 from photo_triage.db.migrate import SchemaError, check_schema
-from photo_triage.files import LockHeldError, exclusive_lock
+from photo_triage.files import ExifTool, LockHeldError, exclusive_lock
 from photo_triage.settings import (
     Settings,
     SettingsError,
@@ -161,9 +161,11 @@ def run(
     logger.info("Worker starting: %s", settings.summary())
     if (warning := trash_filesystem_warning(settings)) is not None:
         logger.warning(warning)
+    # Starts on the first read, and stops with the worker.
+    exiftool = ExifTool()
     worker = Worker(
         engine,
-        build_runners(settings, engine, queue, clock) if runners is None else runners,
+        build_runners(settings, engine, queue, clock, exiftool) if runners is None else runners,
         queue=queue,
         clock=clock,
         quiet_hours=settings.worker_quiet_hours,
@@ -171,7 +173,7 @@ def run(
         item_stages=stages,
     )
     # Real time, not `clock`: see `photo_triage.worker.heartbeat`.
-    with Heartbeat(engine, utc_now):
+    with exiftool, Heartbeat(engine, utc_now):
         worker.recover()
         worker.reconcile()
         if once:

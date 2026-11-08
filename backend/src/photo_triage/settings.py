@@ -88,8 +88,9 @@ class Settings(BaseSettings):
     Unset or empty means it always runs."""
 
     tz: ZoneInfo = quiet_hours.UTC_ZONE
-    """The household's timezone, an IANA name such as `America/Toronto`. Only quiet
-    hours use it: timestamps and logs are UTC."""
+    """The household's timezone, an IANA name such as `America/Toronto`, for quiet
+    hours and for capture times taken from a file's mtime or a video's UTC
+    `CreateDate`. Timestamps and logs stay UTC."""
 
     # Development only (dev-environment §5), so not in plan §9 or `.env.example`.
 

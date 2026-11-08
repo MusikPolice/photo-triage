@@ -68,6 +68,7 @@ describe("progress", () => {
 
   it("names stages", () => {
     expect(stageName("metadata_write")).toBe("Metadata writes");
+    expect(stageName("metadata_read")).toBe("Metadata reads");
     expect(stageName("llm_tag")).toBe("LLM tagging");
   });
 });
