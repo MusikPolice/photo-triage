@@ -141,6 +141,8 @@ def test_logs_the_backup_and_each_migration_at_info(
         "Applied migration 0006: jobs: index on (stage, status) for the Activity page's counts",
         "Applied migration 0007: items: content_hash nullable until the file is hashed, "
         "and not unique",
+        "Applied migration 0008: jobs: stage_version, output_changed_at, and an index for "
+        "reconciling stages",
         f"The database is at revision {head_revision()}",
     ]
 
