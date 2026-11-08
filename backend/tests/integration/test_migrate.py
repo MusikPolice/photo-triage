@@ -143,6 +143,8 @@ def test_logs_the_backup_and_each_migration_at_info(
         "and not unique",
         "Applied migration 0008: jobs: stage_version, output_changed_at, and an index for "
         "reconciling stages",
+        "Applied migration 0009: tags: keywords on items, starting with those imported from "
+        "the files",
         f"The database is at revision {head_revision()}",
     ]
 
