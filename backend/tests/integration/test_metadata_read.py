@@ -240,7 +240,7 @@ def test_bumping_its_version_reads_every_file_again_without_hashing_them(
     )
     worker.drain()
 
-    assert queued == {Stage.SCAN: 0, Stage.METADATA_READ: len(EXPECTED)}
+    assert queued == {Stage.SCAN: 0, Stage.METADATA_READ: len(EXPECTED), Stage.FRAMES: 0}
     assert pipeline.done(Stage.SCAN) == scanned  # no file hashed again
     reread = pipeline.done(Stage.METADATA_READ)
     assert set(reread) == set(read)

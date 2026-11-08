@@ -145,6 +145,7 @@ def test_logs_the_backup_and_each_migration_at_info(
         "reconciling stages",
         "Applied migration 0009: tags: keywords on items, starting with those imported from "
         "the files",
+        "Applied migration 0010: item_frames: frames sampled from each video",
         f"The database is at revision {head_revision()}",
     ]
 

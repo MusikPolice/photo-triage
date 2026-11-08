@@ -14,6 +14,7 @@ const STAGE_NAMES: Record<Stage, string> = {
   walk: "Library walk",
   scan: "Scan",
   metadata_read: "Metadata reads",
+  frames: "Video frames",
   thumbnail: "Thumbnails",
   clip: "CLIP",
   quality: "Quality",

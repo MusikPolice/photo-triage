@@ -21,9 +21,7 @@ the stages after the scan read, as it was. Reading is all it does to the files.
 """
 
 import datetime as dt
-import json
 import logging
-import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +35,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from photo_triage.db.models import Item, Job, MediaType, Tag, TagSource
 from photo_triage.files import MetadataError, MetadataReader
+from photo_triage.pipeline import video
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +82,11 @@ def read(
         width, height = _photo_size(path)
         duration_s = None
     else:
-        width, height, duration_s = _probe_video(path)
+        try:
+            found = video.probe(path)
+        except video.ProbeError as e:
+            raise MetadataError(str(e)) from e
+        width, height, duration_s = found.width, found.height, found.duration_s
     return FileMetadata(
         width=width,
         height=height,
@@ -219,39 +222,3 @@ def _photo_size(path: Path) -> tuple[int, int]:
     except (OSError, ValueError, Image.DecompressionBombError) as e:
         raise MetadataError(f"can't read the size of {path.name}: {e}") from e
     return (height, width) if orientation in _SIDEWAYS else (width, height)
-
-
-def _probe_video(path: Path) -> tuple[int, int, float]:
-    """Width and height as displayed, and the duration in seconds, of the first video
-    stream that isn't cover art."""
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "V:0",
-            "-show_entries",
-            "stream=width,height:stream_side_data=rotation:format=duration",
-            "-of",
-            "json",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise MetadataError(f"ffprobe can't read {path.name}: {result.stderr.strip()}")
-    try:
-        probe = json.loads(result.stdout)
-        stream = probe["streams"][0]
-        width, height = int(stream["width"]), int(stream["height"])
-        duration_s = float(probe["format"]["duration"])
-    except (ValueError, KeyError, IndexError, TypeError) as e:
-        raise MetadataError(f"ffprobe found no video stream in {path.name}: {e!r}") from e
-    rotation = next(
-        (int(d["rotation"]) for d in stream.get("side_data_list", []) if "rotation" in d), 0
-    )
-    sideways = rotation % 180 != 0
-    return (height, width, duration_s) if sideways else (width, height, duration_s)

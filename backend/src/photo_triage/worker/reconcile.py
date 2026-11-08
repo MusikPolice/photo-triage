@@ -4,8 +4,8 @@ Stages queue the next one when they finish, so new items flow straight through.
 Reconcile is the backfill and the safety net. It queues every item stage that's
 **due** for an item:
 
-- the item is active;
-- every upstream stage has a done job for it;
+- the item is active, and of a kind the stage runs for (`media_types`);
+- every upstream stage that runs for its kind has a done job for it;
 - the stage has no parked job at its current version, and no done job at its
   current version that finished after every upstream stage's output last changed.
 
@@ -55,17 +55,21 @@ def ordered(stages: Mapping[str, ItemStage]) -> list[str]:
         raise RegistryError(f"item stages depend on each other: {e.args[1]}") from e
 
 
-def due(name: str, stage: ItemStage) -> sa.Select[int]:
-    """Ids of the active items for which `stage` is due, as described above."""
+def due(name: str, stages: Mapping[str, ItemStage]) -> sa.Select[int]:
+    """Ids of the active items for which stage `name` is due, as described above."""
+    stage = stages[name]
     upstream_done = [aliased(Job, name=f"upstream_{n}") for n in range(len(stage.upstream))]
     current = aliased(Job, name="current")
     query = sa.select(Item.id).where(Item.status == ItemStatus.ACTIVE)
+    if stage.media_types is not None:
+        query = query.where(Item.media_type.in_(stage.media_types))
     for upstream, job in zip(stage.upstream, upstream_done, strict=True):
-        query = query.where(
-            sa.exists().where(
-                job.item_id == Item.id, job.stage == upstream, job.status == JobStatus.DONE
-            )
+        done = sa.exists().where(
+            job.item_id == Item.id, job.stage == upstream, job.status == JobStatus.DONE
         )
+        if (kinds := stages[upstream].media_types) is not None:
+            done = sa.or_(Item.media_type.not_in(kinds), done)
+        query = query.where(done)
     newer_upstream_output = [
         sa.exists().where(
             job.item_id == current.item_id,
@@ -100,7 +104,7 @@ def reconcile(engine: Engine, stages: Mapping[str, ItemStage], now: dt.datetime)
     queued: dict[str, int] = {}
     for name in ordered(stages):
         with sessions.begin() as session:
-            queued[name] = _queue_due(session, name, stages[name], now)
+            queued[name] = _queue_due(session, name, stages, now)
     if any(queued.values()):
         logger.info(
             "Reconciled stages, queued %s",
@@ -127,16 +131,20 @@ def chain(
         name
         for name in ordered(stages)
         if finished in stages[name].upstream
-        and _queue_due(session, name, stages[name], now, item_id=item_id)
+        and _queue_due(session, name, stages, now, item_id=item_id)
     ]
 
 
 def _queue_due(
-    session: Session, name: str, stage: ItemStage, now: dt.datetime, item_id: int | None = None
+    session: Session,
+    name: str,
+    stages: Mapping[str, ItemStage],
+    now: dt.datetime,
+    item_id: int | None = None,
 ) -> int:
     """Queue `name` for every item it's due for, or for `item_id` alone. Returns how
     many jobs went in."""
-    query = due(name, stage)
+    query = due(name, stages)
     if item_id is not None:
         query = query.where(Item.id == item_id)
     due_items = query.subquery()

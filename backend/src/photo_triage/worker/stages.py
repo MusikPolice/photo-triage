@@ -1,7 +1,7 @@
 """The runner for each stage the worker can run, and the item stages that reconcile
 keeps current (plan §6.11).
 
-`walk`, `scan` and `metadata_read` always run. `noop` exists only when
+`walk`, `scan`, `metadata_read` and `frames` always run. `noop` exists only when
 `WORKER_NOOP_STAGE` is on.
 """
 
@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
-from photo_triage.db.models import Job
+from photo_triage.db.models import Job, MediaType
 from photo_triage.files import MetadataReader
-from photo_triage.pipeline import metadata, scan
+from photo_triage.pipeline import frames, metadata, scan
 from photo_triage.settings import Settings
 from photo_triage.worker.clock import Clock
 from photo_triage.worker.queue import JobQueue, Stage
@@ -43,8 +43,11 @@ class ItemStage:
 
     code_version: int
     upstream: tuple[Stage, ...] = ()
-    """Stages whose output this one reads. Each must be an item stage too."""
+    """Stages whose output this one reads. Each must be an item stage too. One that
+    doesn't apply to an item (`media_types`) isn't waited for."""
     settings_fingerprint: str = ""
+    media_types: frozenset[MediaType] | None = None
+    """The kinds of item it runs for, if not every kind (`frames`: videos)."""
 
     @property
     def version(self) -> str:
@@ -61,6 +64,12 @@ def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
         # Separate from scan, so a new field to import re-reads every file without
         # hashing it again.
         Stage.METADATA_READ: ItemStage(code_version=1, upstream=(Stage.SCAN,)),
+        Stage.FRAMES: ItemStage(
+            code_version=1,
+            upstream=(Stage.SCAN,),
+            settings_fingerprint=f"{settings.video_sample_frames}-frames",
+            media_types=frozenset({MediaType.VIDEO}),
+        ),
     }
 
 
@@ -104,10 +113,20 @@ def build_runners(
             sessions, job, metadata_reader, settings.photo_dir, settings.tz, clock()
         )
 
+    def run_frames(job: Job) -> bool | None:
+        return frames.sample(
+            sessions,
+            job,
+            settings.photo_dir,
+            settings.derived_dir,
+            settings.video_sample_frames,
+        )
+
     runners: dict[str, Runner] = {
         Stage.WALK: run_walk,
         Stage.SCAN: run_scan,
         Stage.METADATA_READ: run_metadata_read,
+        Stage.FRAMES: run_frames,
     }
     if settings.worker_noop_stage:
         runners[Stage.NOOP] = run_noop
