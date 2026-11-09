@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from photo_triage.db.models import Item, ItemStatus
 from photo_triage.files import ExifTool
+from photo_triage.ml import FakeClip
 from photo_triage.settings import Settings
 from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import JobQueue, Stage
@@ -30,7 +31,7 @@ def _scan(engine: Engine, settings: Settings, now: dt.datetime) -> dict[str, tup
     with Session(engine) as session, session.begin():
         queue.enqueue(session, Stage.WALK)
     with ExifTool() as exiftool:
-        runners = build_runners(settings, engine, queue, clock, exiftool)
+        runners = build_runners(settings, engine, queue, clock, exiftool, clip=FakeClip())
         Worker(engine, runners, queue=queue, clock=clock).drain()
     with Session(engine) as session:
         items = session.scalars(sa.select(Item).where(Item.status == ItemStatus.ACTIVE)).all()

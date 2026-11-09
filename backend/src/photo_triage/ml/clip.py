@@ -35,6 +35,11 @@ class ClipEmbedder(Protocol):
     @property
     def dim(self) -> int: ...
 
+    @property
+    def image_size(self) -> int:
+        """The side of the square it embeds pictures at, in pixels: 224 for ViT-B-32."""
+        ...
+
     def embed_images(self, images: Sequence[Image.Image]) -> Vectors:
         """One vector per picture, in order."""
         ...
@@ -103,6 +108,10 @@ class OnnxClip:
     @property
     def dim(self) -> int:
         return self.config.embedding_dim
+
+    @property
+    def image_size(self) -> int:
+        return self.config.image_size
 
     def embed_images(self, images: Sequence[Image.Image]) -> Vectors:
         if not images:
@@ -174,6 +183,10 @@ class FakeClip:
     @property
     def dim(self) -> int:
         return self._dim
+
+    @property
+    def image_size(self) -> int:
+        return 224
 
     def embed_images(self, images: Sequence[Image.Image]) -> Vectors:
         return self._vectors(

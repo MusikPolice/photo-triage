@@ -148,6 +148,7 @@ def test_logs_the_backup_and_each_migration_at_info(
         "Applied migration 0010: item_frames: frames sampled from each video",
         "Applied migration 0011: items: orientation, so a turn that keeps the dimensions "
         "still redraws thumbnails",
+        "Applied migration 0012: embeddings: each item's CLIP embedding",
         f"The database is at revision {head_revision()}",
     ]
 

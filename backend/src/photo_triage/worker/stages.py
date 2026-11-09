@@ -1,14 +1,18 @@
 """The runner for each stage the worker can run, and the item stages that reconcile
 keeps current (plan §6.11).
 
-`walk`, `scan`, `metadata_read`, `frames` and `thumbnail` always run. `noop` exists only when
-`WORKER_NOOP_STAGE` is on.
+`walk`, `scan`, `metadata_read`, `frames`, `thumbnail` and `clip` always run. `noop`
+exists only when `WORKER_NOOP_STAGE` is on.
+
+Nothing here imports NumPy or ONNX Runtime until a job needs them, so the worker can
+apply `WORKER_THREADS` first (`photo_triage.worker.__main__.limit_threads`).
 """
 
 import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
@@ -19,6 +23,9 @@ from photo_triage.pipeline import frames, metadata, scan, thumbnails
 from photo_triage.settings import Settings
 from photo_triage.worker.clock import Clock
 from photo_triage.worker.queue import JobQueue, Stage
+
+if TYPE_CHECKING:
+    from photo_triage.ml import ClipEmbedder
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +84,13 @@ def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
             upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES),
             settings_fingerprint=f"{settings.thumbnail_size}px",
         ),
+        # The photo, turned by its orientation, or a video's frames. After the
+        # thumbnails, which the map needs first (plan §6.11).
+        Stage.CLIP: ItemStage(
+            code_version=1,
+            upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES, Stage.THUMBNAIL),
+            settings_fingerprint=settings.clip_model,
+        ),
     }
 
 
@@ -94,10 +108,17 @@ def build_runners(
     queue: JobQueue,
     clock: Clock,
     metadata_reader: MetadataReader,
+    *,
+    clip: "ClipEmbedder | None" = None,
 ) -> Mapping[str, Runner]:
     """The stages this worker runs. Jobs for any other stage stay in the queue.
-    The caller owns `metadata_reader`, and closes it once the worker stops."""
+    The caller owns `metadata_reader`, and closes it once the worker stops.
+
+    `clip` embeds for the `clip` stage. By default it's `CLIP_MODEL` from
+    `MODELS_DIR`, loaded by the first `clip` job, so a worker with no models still
+    runs the other stages; each `clip` job fails, saying where the models should be."""
     sessions = sessionmaker(engine)
+    embedder = clip
 
     def run_walk(job: Job) -> None:
         with sessions.begin() as session:
@@ -134,12 +155,23 @@ def build_runners(
             sessions, job, settings.photo_dir, settings.derived_dir, settings.thumbnail_size
         )
 
+    def run_clip(job: Job) -> bool:
+        # Here, not at the top: see the module docstring.
+        from photo_triage.ml import OnnxClip
+        from photo_triage.pipeline import embed
+
+        nonlocal embedder
+        if embedder is None:
+            embedder = OnnxClip(settings.models_dir, settings.clip_model, settings.worker_threads)
+        return embed.embed(sessions, job, embedder, settings.photo_dir, settings.derived_dir)
+
     runners: dict[str, Runner] = {
         Stage.WALK: run_walk,
         Stage.SCAN: run_scan,
         Stage.METADATA_READ: run_metadata_read,
         Stage.FRAMES: run_frames,
         Stage.THUMBNAIL: run_thumbnail,
+        Stage.CLIP: run_clip,
     }
     if settings.worker_noop_stage:
         runners[Stage.NOOP] = run_noop

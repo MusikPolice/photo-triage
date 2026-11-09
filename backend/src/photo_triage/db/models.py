@@ -132,6 +132,24 @@ class ItemFrame(Base):
     """Seconds from the start of the video."""
 
 
+class Embedding(Base):
+    """An item's CLIP embedding (plan §6.3): a video's is the mean of its frames'.
+
+    One per item, from the model it was made with. `photo_triage.pipeline.embed`
+    replaces it when the item or `CLIP_MODEL` changes.
+    """
+
+    __tablename__ = "embeddings"
+
+    item_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("items.id", ondelete="CASCADE"), primary_key=True
+    )
+    model: Mapped[str] = mapped_column(sa.String(64))
+    """`CLIP_MODEL` when it was made, e.g. `ViT-B-32`."""
+    vector: Mapped[bytes] = mapped_column(sa.LargeBinary)
+    """Little-endian float32, of unit length: 2048 bytes for a 512-d model."""
+
+
 class Tag(Base):
     """A keyword on an item, and where it came from (plan §8).
 
