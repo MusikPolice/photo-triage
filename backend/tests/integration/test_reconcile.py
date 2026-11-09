@@ -305,7 +305,18 @@ def test_the_registered_item_stages(settings: Settings) -> None:
             upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES),
             settings_fingerprint="400px",
         ),
+        Stage.CLIP: ItemStage(
+            code_version=1,
+            upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES, Stage.THUMBNAIL),
+            settings_fingerprint="ViT-B-32",
+        ),
     }
+
+
+def test_the_clip_model_is_part_of_the_clip_version(settings: Settings) -> None:
+    other = settings.model_copy(update={"clip_model": "ViT-B-16"})
+    assert item_stages(settings)[Stage.CLIP].version == "1+ViT-B-32"
+    assert item_stages(other)[Stage.CLIP].version == "1+ViT-B-16"
 
 
 def test_the_number_of_frames_is_part_of_the_frames_version(settings: Settings) -> None:
@@ -399,6 +410,7 @@ def worker_env(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> Settings:
     monkeypatch.setenv("PHOTO_DIR", str(settings.photo_dir))
     monkeypatch.setenv("TRASH_DIR", str(settings.trash_dir))
     monkeypatch.setenv("DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("MODELS_DIR", str(settings.models_dir))
     settings.photo_dir.mkdir()
     return settings
 

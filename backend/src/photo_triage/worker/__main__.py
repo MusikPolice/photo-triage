@@ -23,6 +23,7 @@ import sys
 import threading
 from collections.abc import Mapping, Sequence
 from types import FrameType
+from typing import TYPE_CHECKING
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -46,6 +47,9 @@ from photo_triage.worker.reconcile import reconcile
 from photo_triage.worker.stages import ItemStage, Runner, build_runners, item_stages
 from photo_triage.worker.state import observed_state
 
+if TYPE_CHECKING:
+    from photo_triage.ml import ClipEmbedder
+
 # Named, since `__name__` is "__main__" when run with `python -m`.
 logger = logging.getLogger("photo_triage.worker")
 
@@ -68,10 +72,12 @@ def main(
     *,
     runners: Mapping[str, Runner] | None = None,
     stages: Mapping[str, ItemStage] | None = None,
+    clip: "ClipEmbedder | None" = None,
 ) -> int:
     """Runs the worker. For tests, `runners` replaces the stages from `build_runners`,
     and `stages` the item stages from `item_stages`. Passing `runners` alone leaves
-    no item stages, so nothing is reconciled."""
+    no item stages, so nothing is reconciled. `clip` replaces the CLIP model the
+    `clip` stage loads."""
     parser = argparse.ArgumentParser(prog="python -m photo_triage.worker")
     parser.add_argument("--once", action="store_true", help="run every ready job, then exit")
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
@@ -135,7 +141,7 @@ def main(
         lock_path = settings.data_dir / LOCK_FILENAME
         try:
             with exclusive_lock(lock_path):
-                return run(settings, engine, queue, clock, runners, stages, once=args.once)
+                return run(settings, engine, queue, clock, runners, stages, clip, once=args.once)
         except LockHeldError:
             print(
                 f"A worker is already running for {settings.data_dir} (it holds "
@@ -154,6 +160,7 @@ def run(
     clock: Clock,
     runners: Mapping[str, Runner] | None,
     stages: Mapping[str, ItemStage],
+    clip: "ClipEmbedder | None",
     *,
     once: bool,
 ) -> int:
@@ -165,7 +172,9 @@ def run(
     exiftool = ExifTool()
     worker = Worker(
         engine,
-        build_runners(settings, engine, queue, clock, exiftool) if runners is None else runners,
+        build_runners(settings, engine, queue, clock, exiftool, clip=clip)
+        if runners is None
+        else runners,
         queue=queue,
         clock=clock,
         quiet_hours=settings.worker_quiet_hours,

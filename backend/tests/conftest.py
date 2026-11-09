@@ -55,6 +55,8 @@ def settings(tmp_path: Path) -> Settings:
         photo_dir=tmp_path / "photos",
         trash_dir=tmp_path / "trash",
         data_dir=tmp_path / "data",
+        # Empty: no default-suite test loads a real model (dev-environment §6).
+        models_dir=tmp_path / "models",
     )
 
 

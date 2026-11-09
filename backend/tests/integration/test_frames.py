@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from photo_triage.db.models import Item, ItemFrame, Job, JobStatus, MediaType
 from photo_triage.files import ExifTool
+from photo_triage.ml import FakeClip
 from photo_triage.pipeline import frames
 from photo_triage.pipeline.frames import FRAMES_FOLDER, frame_path, timestamps
 from photo_triage.settings import Settings
@@ -42,7 +43,9 @@ class Pipeline:
         self.settings = settings
         self.worker = Worker(
             self.engine,
-            build_runners(settings, self.engine, self.queue, self.clock, self.exiftool),
+            build_runners(
+                settings, self.engine, self.queue, self.clock, self.exiftool, clip=FakeClip()
+            ),
             queue=self.queue,
             clock=self.clock,
             item_stages=item_stages(settings),

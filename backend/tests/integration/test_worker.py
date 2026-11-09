@@ -101,6 +101,7 @@ def worker_env(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> Settings:
     monkeypatch.setenv("PHOTO_DIR", str(settings.photo_dir))
     monkeypatch.setenv("TRASH_DIR", str(settings.trash_dir))
     monkeypatch.setenv("DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("MODELS_DIR", str(settings.models_dir))
     return settings
 
 
@@ -496,6 +497,23 @@ def test_main_applies_worker_threads(
     assert main(["--once"], runners={}) == 0
 
     assert {os.environ[name] for name in THREAD_ENV_VARS} == {"3"}
+
+
+def test_the_worker_loads_no_ml_library_before_applying_worker_threads() -> None:
+    # They read the thread variables when they load, so must load after `main` sets them.
+    loaded = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, photo_triage.worker.__main__\n"
+            "print(*sorted({'numpy', 'onnxruntime'} & set(sys.modules)))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert loaded.stdout.strip() == ""
 
 
 def test_exits_without_claiming_a_job_when_the_database_is_not_at_head(

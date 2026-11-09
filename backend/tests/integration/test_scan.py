@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from photo_triage.db.models import Item, ItemStatus, Job, JobStatus, MediaType
 from photo_triage.files import ExifTool
+from photo_triage.ml import FakeClip
 from photo_triage.pipeline import scan
 from photo_triage.pipeline.identity import HashError
 from photo_triage.settings import TRASH_FOLDER, Settings
@@ -47,7 +48,7 @@ class Scanner:
         self.settings = settings
         self.worker = Worker(
             engine,
-            build_runners(settings, engine, self.queue, self.clock, exiftool),
+            build_runners(settings, engine, self.queue, self.clock, exiftool, clip=FakeClip()),
             queue=self.queue,
             clock=self.clock,
             item_stages=item_stages(settings),
@@ -215,7 +216,7 @@ def test_a_move_keeps_the_items_jobs_and_records_the_scan_against_it(
     scanner.run()
     item_id = scanner.items()["scenes/scene-02.jpg"].id
     with scanner.sessions.begin() as session:
-        scanner.queue.enqueue(session, Stage.CLIP, item_id)  # no runner yet, so it waits
+        scanner.queue.enqueue(session, Stage.QUALITY, item_id)  # no runner yet, so it waits
 
     _move(library, "scenes/scene-02.jpg", "elsewhere.jpg")
     scanner.run()
@@ -225,8 +226,9 @@ def test_a_move_keeps_the_items_jobs_and_records_the_scan_against_it(
             sa.select(Job.stage, Job.status).where(Job.item_id == item_id).order_by(Job.stage)
         ).all()
     assert jobs == [
-        (Stage.CLIP, JobStatus.PENDING),
+        (Stage.CLIP, JobStatus.DONE),  # embedded before the move, and not again
         (Stage.METADATA_READ, JobStatus.DONE),  # read again at its new path
+        (Stage.QUALITY, JobStatus.PENDING),
         (Stage.SCAN, JobStatus.DONE),
         (Stage.THUMBNAIL, JobStatus.DONE),  # drawn before the move, and not again
     ]
@@ -466,6 +468,7 @@ def worker_env(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> Settings:
     monkeypatch.setenv("PHOTO_DIR", str(settings.photo_dir))
     monkeypatch.setenv("TRASH_DIR", str(settings.trash_dir))
     monkeypatch.setenv("DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("MODELS_DIR", str(settings.models_dir))
     return settings
 
 

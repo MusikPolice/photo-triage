@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from photo_triage.db.models import Item, Job, JobStatus, Tag, TagSource
 from photo_triage.files import ExifTool
+from photo_triage.ml import FakeClip
 from photo_triage.settings import Settings
 from photo_triage.worker.__main__ import main
 from photo_triage.worker.loop import Worker
@@ -74,7 +75,7 @@ class Pipeline:
         self.stages = item_stages(settings)
         self.worker = Worker(
             engine,
-            build_runners(settings, engine, self.queue, self.clock, exiftool),
+            build_runners(settings, engine, self.queue, self.clock, exiftool, clip=FakeClip()),
             queue=self.queue,
             clock=self.clock,
             item_stages=self.stages,
@@ -233,7 +234,14 @@ def test_bumping_its_version_reads_every_file_again_without_hashing_them(
     queued = reconcile(pipeline.engine, stages, pipeline.now)
     worker = Worker(
         pipeline.engine,
-        build_runners(pipeline.settings, pipeline.engine, pipeline.queue, pipeline.clock, exiftool),
+        build_runners(
+            pipeline.settings,
+            pipeline.engine,
+            pipeline.queue,
+            pipeline.clock,
+            exiftool,
+            clip=FakeClip(),
+        ),
         queue=pipeline.queue,
         clock=pipeline.clock,
         item_stages=stages,
@@ -245,6 +253,7 @@ def test_bumping_its_version_reads_every_file_again_without_hashing_them(
         Stage.METADATA_READ: len(EXPECTED),
         Stage.FRAMES: 0,
         Stage.THUMBNAIL: 0,
+        Stage.CLIP: 0,
     }
     assert pipeline.done(Stage.SCAN) == scanned  # no file hashed again
     reread = pipeline.done(Stage.METADATA_READ)
@@ -285,6 +294,7 @@ def test_the_worker_starts_one_exiftool_and_stops_it_when_it_stops(
     monkeypatch.setenv("PHOTO_DIR", str(settings.photo_dir))
     monkeypatch.setenv("TRASH_DIR", str(settings.trash_dir))
     monkeypatch.setenv("DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("MODELS_DIR", str(settings.models_dir))
     started: list[ExifTool] = []
     pids: set[int] = set()
 
