@@ -31,8 +31,15 @@ if [[ $missing -eq 1 ]]; then
 fi
 for pin in "${PINS[@]}"; do [[ -n "${!pin:-}" ]] || die "$pin isn't set"; done
 
-# exiftool.org only serves the newest release; SourceForge keeps every version.
+# This repo's GitHub Release, filled by scripts/mirror_media_tools.sh, comes
+# first: GitHub is far steadier than the upstream hosts. Then upstream:
+# exiftool.org only serves the newest release, but SourceForge keeps every
+# version. ffmpeg isn't mirrored, since its builder doesn't publish the full
+# source a GPL binary must be distributed with (#76).
+# MEDIA_TOOLS_MIRROR overrides the mirror, for testing the fallback.
+MIRROR="${MEDIA_TOOLS_MIRROR:-https://github.com/MusikPolice/photo-triage/releases/download/media-tools}"
 EXIFTOOL_URLS=(
+  "$MIRROR/Image-ExifTool-${EXIFTOOL_VERSION}.tar.gz"
   "https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${EXIFTOOL_VERSION}.tar.gz/download"
 )
 # The static amd64 build. The release URL is rolling, so old-releases comes
@@ -42,6 +49,8 @@ FFMPEG_URLS=(
   "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
 )
 
+RETRY_MAX_S=180
+
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
@@ -50,7 +59,12 @@ fetch() {
   local tool="$1" sha="$2" out="$3" url got
   shift 3
   for url in "$@"; do
-    if ! curl --fail --silent --show-error --location --retry 3 --output "$out" "$url"; then
+    # Retry every error (TLS ones too, which --retry alone doesn't), and give up
+    # on a URL within RETRY_MAX_S, so a host that hangs fails rather than stalls.
+    if ! curl --fail --silent --show-error --location --output "$out" \
+      --connect-timeout 20 --max-time 120 \
+      --retry 4 --retry-all-errors --retry-delay 3 --retry-max-time "$RETRY_MAX_S" \
+      "$url"; then
       echo "install_media_tools: $tool: download failed from $url" >&2
       continue
     fi
