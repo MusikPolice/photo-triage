@@ -81,7 +81,7 @@ A complete database loss should cost only compute time, never human decisions.
 | Language | Python | Best ecosystem for image processing and local ML; consistent with elodie. |
 | Web framework | FastAPI | Async, dependency injection, OpenAPI docs, SSE support for live progress. |
 | Database | SQLite via SQLAlchemy (WAL mode) | Zero-config, file-based, sufficient for a household tool. |
-| Vector storage | Embeddings in SQLite blobs + in-memory numpy matrix (or `sqlite-vec`) | 100k × 512 float32 ≈ 200 MB; brute-force cosine via matrix multiply is milliseconds–seconds. No ANN index needed at this scale. |
+| Vector storage | Embeddings in SQLite blobs + in-memory numpy matrix (§12: measured against `sqlite-vec`) | 100k × 512 float32 ≈ 200 MB; brute-force cosine via matrix multiply is milliseconds–seconds. No ANN index needed at this scale. |
 | Metadata I/O | `exiftool` (persistent `-stay_open` process) | Gold standard; handles JPEG, HEIC, and QuickTime/MP4 metadata. |
 | Image loading | Pillow + `pillow-heif`, OpenCV | Pillow for I/O and thumbnails (HEIC via plugin); OpenCV for blur/exposure scoring. |
 | Video | `ffmpeg` / `ffprobe` | Frame sampling, poster frames, metadata. |
@@ -459,5 +459,5 @@ Ollama service, model evaluation (moondream vs. alternatives) on real photos for
 - **Video aggregation details:** whether 5 frames is enough, how long videos should be sampled, and whether per-frame quality should flag only the worst segment.
 - **Layout churn:** "always re-fit" is the chosen behavior; if reshuffling after each scan proves disorienting, fall back to fitting once and placing new items with `umap.transform()`.
 - ~~**exiftool coverage:** confirm MWG regions and custom XMP namespaces write cleanly to HEIC and MP4/MOV.~~ Answered in Phase 2: they do. HEIC takes no IPTC and QuickTime keywords are one string, so the mapping in §6.10 differs by container.
-- **Vector storage:** plain SQLite blobs + numpy vs. `sqlite-vec` — decide during Phase 2 based on memory footprint and query latency.
+- ~~**Vector storage:** plain SQLite blobs + numpy vs. `sqlite-vec` — decide during Phase 2 based on memory footprint and query latency.~~ Answered in Phase 2 (#55): blobs + numpy. On 100k vectors it holds 211 MB in the API against sqlite-vec's 6 MB, but answers a top-100 query in 7 ms (sqlite-vec: 98 ms) and finds every pair at ≥ 0.95 in 45 s (sqlite-vec, one k-nearest query per vector: about 2.4 h). No native extension to ship. `tests/bench/test_vector_storage_bench.py` reproduces it.
 - **Mobile map performance:** whether 100k points + atlases are smooth on the household's actual phones; fallback is dots-only on mobile.
