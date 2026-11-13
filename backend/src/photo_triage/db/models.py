@@ -220,6 +220,9 @@ class Job(Base):
     )
     attempts: Mapped[int] = mapped_column(default=0)
     """Failed runs so far."""
+    actor: Mapped[str | None] = mapped_column(sa.String(255))
+    """Who queued it by hand, such as "Scan now" (plan §10). None when the schedule,
+    the pipeline or reconciling queued it."""
     last_error: Mapped[str | None] = mapped_column(sa.Text)
     enqueued_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
     retry_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)

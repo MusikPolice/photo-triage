@@ -1,11 +1,13 @@
-"""`GET /api/activity` and the pause and resume endpoints (plan §7, §6.11)."""
+"""`GET /api/activity`, "Scan now", and the pause and resume endpoints (plan §7, §6.11)."""
 
 import asyncio
 import datetime as dt
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
+import sqlalchemy as sa
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
@@ -123,6 +125,9 @@ async def test_every_stage_is_listed_in_priority_order_with_its_counts(
         "running": 1,
         "errored": 4,
         "parked": 5,
+        "last_finished_at": None,
+        "last_actor": None,
+        "next_scheduled_at": None,
     }
     assert stages["layout"]["kind"] == "batch"
     assert (stages["layout"]["done"], stages["layout"]["total"]) == (1, 1)
@@ -137,6 +142,9 @@ async def test_every_stage_is_listed_in_priority_order_with_its_counts(
         "running": 0,
         "errored": 0,
         "parked": 0,
+        "last_finished_at": None,
+        "last_actor": None,
+        "next_scheduled_at": None,
     }
 
 
@@ -399,3 +407,83 @@ def test_the_reader_reconnects_after_closing(
     finally:
         reader.close()
     assert scan.done == 2
+
+
+async def test_the_walk_shows_its_next_scheduled_run_in_tz(
+    settings: Settings, migrated: Engine, clock: FakeClock, real_clock: FakeClock
+) -> None:
+    # START is Monday 12:00 UTC, 08:00 EDT; 02:00 EDT on Tuesday is 06:00 UTC.
+    settings = settings.model_copy(update={"tz": ZoneInfo("America/Toronto")})
+    app = create_app(settings, clock=clock, real_clock=real_clock)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        walk = _stages((await client.get("/api/activity")).json())["walk"]
+    app.state.engine.dispose()
+
+    assert walk["next_scheduled_at"] == "2026-10-06T06:00:00Z"
+    assert (walk["last_finished_at"], walk["last_actor"]) == (None, None)
+
+
+async def test_the_walk_shows_its_last_finished_run_and_who_asked(
+    client: AsyncClient, migrated: Engine
+) -> None:
+    finished_at = START - dt.timedelta(hours=3)
+    with Session(migrated) as session, session.begin():
+        session.add(
+            Job(
+                stage=Stage.WALK,
+                priority=PRIORITY[Stage.WALK],
+                status=JobStatus.DONE,
+                attempts=0,
+                actor="alice@example.com",
+                enqueued_at=finished_at - dt.timedelta(minutes=5),
+                finished_at=finished_at,
+            )
+        )
+
+    walk = _stages((await client.get("/api/activity")).json())["walk"]
+
+    assert walk["last_finished_at"] == "2026-10-05T09:00:00Z"
+    assert walk["last_actor"] == "alice@example.com"
+
+
+async def test_scan_now_queues_one_walk_and_records_who_asked(
+    app: FastAPI, client: AsyncClient, migrated: Engine
+) -> None:
+    app.dependency_overrides[current_actor] = lambda: "alice@example.com"
+
+    first = await client.post("/api/scan")
+    second = await client.post("/api/scan")
+
+    assert first.status_code == second.status_code == 200
+    assert _stages(first.json())["walk"]["pending"] == 1
+    assert _stages(second.json())["walk"]["pending"] == 1
+    with Session(migrated) as session:
+        walks = session.execute(
+            sa.select(Job.status, Job.actor, Job.enqueued_at).where(Job.stage == Stage.WALK)
+        ).all()
+    assert [tuple(w) for w in walks] == [(JobStatus.PENDING, "alice@example.com", START)]
+
+
+async def test_scan_now_adds_nothing_while_a_walk_runs(
+    client: AsyncClient, migrated: Engine
+) -> None:
+    _add_jobs(migrated, Stage.WALK, running=1)
+
+    walk = _stages((await client.post("/api/scan")).json())["walk"]
+
+    assert (walk["running"], walk["pending"]) == (1, 0)
+
+
+def test_the_reader_reads_the_last_walk_again_only_after_a_commit(
+    settings: Settings, migrated: Engine, clock: FakeClock, real_clock: FakeClock
+) -> None:
+    reader = ActivityReader(migrated, settings, clock, real_clock)
+    try:
+        assert _stage(reader(), Stage.WALK).last_finished_at is None
+        _add_jobs(migrated, Stage.WALK, done=1)
+        with Session(migrated) as session, session.begin():
+            session.execute(sa.update(Job).values(finished_at=START))
+
+        assert _stage(reader(), Stage.WALK).last_finished_at == START
+    finally:
+        reader.close()

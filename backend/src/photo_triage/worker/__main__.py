@@ -2,7 +2,8 @@
 one runs per `DATA_DIR`: a second exits 1 at startup.
 
 `python -m photo_triage.worker scan` queues a walk of the library, which queues a
-scan job for each new or changed file.
+scan job for each new or changed file, unless one is waiting or running. The
+worker also queues one on `SCAN_SCHEDULE`.
 
 `python -m photo_triage.worker reconcile` queues every item stage that's due
 (`photo_triage.worker.reconcile`), as the worker does at startup and after a walk.
@@ -44,6 +45,7 @@ from photo_triage.worker.heartbeat import Heartbeat
 from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import JobQueue, Stage
 from photo_triage.worker.reconcile import reconcile
+from photo_triage.worker.scan_schedule import queue_walk
 from photo_triage.worker.stages import ItemStage, Runner, build_runners, item_stages
 from photo_triage.worker.state import observed_state
 
@@ -81,7 +83,10 @@ def main(
     parser = argparse.ArgumentParser(prog="python -m photo_triage.worker")
     parser.add_argument("--once", action="store_true", help="run every ready job, then exit")
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
-    commands.add_parser("scan", help="queue a scan of the library and exit")
+    scan = commands.add_parser("scan", help="queue a scan of the library and exit")
+    scan.add_argument(
+        "--actor", default=getpass.getuser(), help="who to record (default: your user name)"
+    )
     commands.add_parser("reconcile", help="queue every item stage that's due and exit")
     noop = commands.add_parser(
         "noop", help="queue N noop jobs and exit (needs WORKER_NOOP_STAGE=true)"
@@ -120,7 +125,7 @@ def main(
     try:
         if args.command == "scan":
             logs.configure(settings, "worker", to_file=False)  # as for noop
-            return enqueue_scan(engine, queue)
+            return enqueue_scan(engine, queue, args.actor)
         if args.command == "reconcile":
             logs.configure(settings, "worker", to_file=False)  # as for noop
             reconcile(engine, stages, clock())
@@ -180,6 +185,7 @@ def run(
         quiet_hours=settings.worker_quiet_hours,
         zone=settings.tz,
         item_stages=stages,
+        scan_schedule=settings.scan_schedule,
     )
     # Real time, not `clock`: see `photo_triage.worker.heartbeat`.
     with exiftool, Heartbeat(engine, utc_now):
@@ -199,10 +205,13 @@ def limit_threads(count: int) -> None:
         os.environ[name] = str(count)
 
 
-def enqueue_scan(engine: Engine, queue: JobQueue) -> int:
+def enqueue_scan(engine: Engine, queue: JobQueue, actor: str) -> int:
     with Session(engine) as session, session.begin():
-        queue.enqueue(session, Stage.WALK)
-    logger.info("Queued a scan of the library")
+        queued = queue_walk(session, queue, actor)
+    if queued is None:
+        logger.info("A scan of the library is already waiting or running")
+    else:
+        logger.info("Queued a scan of the library for %s", actor)
     return 0
 
 

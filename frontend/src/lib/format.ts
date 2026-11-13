@@ -81,6 +81,47 @@ export function formatTime(at: Date, now: Date, { locale, timeZone }: Locale = {
   }).format(at);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A time on the Activity page: "today 02:00", "Sat 02:00" within six days of
+ * `now`, else "Nov 3 02:00" (in the browser's locale). */
+export function formatWhen(at: Date, now: Date, { locale, timeZone }: Locale = {}): string {
+  const time = new Intl.DateTimeFormat(locale, {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(at);
+  if (dayKey(at, timeZone) === dayKey(now, timeZone)) return `today ${time}`;
+  const near = Math.abs(at.getTime() - now.getTime()) < 6 * DAY_MS;
+  const day = new Intl.DateTimeFormat(
+    locale,
+    near ? { timeZone, weekday: "short" } : { timeZone, day: "numeric", month: "short" },
+  ).format(at);
+  return `${day} ${time}`;
+}
+
+/** The walk's last and next runs, e.g. "Last run today 02:04 · Next Tue 02:00".
+ * A run someone asked for says who. Null for stages with neither. */
+export function stageRuns(stage: StageActivity, now: Date, locale: Locale = {}): string | null {
+  const parts = [];
+  if (stage.last_finished_at != null) {
+    const by = stage.last_actor == null ? "" : `, by ${stage.last_actor}`;
+    parts.push(`Last run ${formatWhen(new Date(stage.last_finished_at), now, locale)}${by}`);
+  } else if (stage.next_scheduled_at != null) {
+    parts.push("Never run");
+  }
+  if (stage.next_scheduled_at != null) {
+    parts.push(`Next ${formatWhen(new Date(stage.next_scheduled_at), now, locale)}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** Whether "Scan now" would add nothing: a walk is already waiting or running. */
+export function walkQueued(stage: StageActivity): boolean {
+  return stage.pending + stage.running + stage.errored > 0;
+}
+
 export type Tone = "ok" | "idle" | "alert";
 
 export interface WorkerLabel {

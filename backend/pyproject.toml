@@ -26,6 +26,8 @@ dependencies = [
     "regex>=2024.11",
     "ftfy>=6.3",
     "tzdata>=2026.5",
+    # SCAN_SCHEDULE's cron expressions, in TZ (photo_triage.schedule)
+    "cronsim>=2.8",
 ]
 
 [dependency-groups]

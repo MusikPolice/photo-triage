@@ -36,7 +36,7 @@ from photo_triage.worker import controls, heartbeat, stages
 from photo_triage.worker.__main__ import LOCK_FILENAME, THREAD_ENV_VARS, main
 from photo_triage.worker.heartbeat import Heartbeat
 from photo_triage.worker.loop import Worker
-from photo_triage.worker.queue import JobQueue, RetryPolicy, Stage
+from photo_triage.worker.queue import PRIORITY, JobQueue, RetryPolicy, Stage
 from photo_triage.worker.state import WorkerState, WorkerStatus
 
 START = dt.datetime(2026, 10, 3, 12, tzinfo=dt.UTC)
@@ -106,6 +106,25 @@ def worker_env(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> Settings:
 
 
 @pytest.fixture
+def recently_walked(migrated: Engine) -> None:
+    """A walk that finished just now, so the worker's `SCAN_SCHEDULE` has nothing due
+    when `main` starts it. Without one, a new database gets a walk at startup
+    (`test_scan_schedule.py`)."""
+    now = dt.datetime.now(dt.UTC)
+    with Session(migrated) as session, session.begin():
+        session.add(
+            Job(
+                stage=Stage.WALK,
+                priority=PRIORITY[Stage.WALK],
+                status=JobStatus.DONE,
+                attempts=0,
+                enqueued_at=now,
+                finished_at=now,
+            )
+        )
+
+
+@pytest.fixture
 def clock() -> FakeClock:
     return FakeClock()
 
@@ -147,8 +166,10 @@ def _enqueue(engine: Engine, *jobs: tuple[Stage, int | None]) -> list[int]:
 
 
 def _statuses(engine: Engine) -> dict[int, JobStatus]:
+    """Every job's status, leaving out walks: `recently_walked`'s isn't the test's."""
     with Session(engine) as session:
-        return {job_id: status for job_id, status in session.execute(sa.select(Job.id, Job.status))}
+        rows = session.execute(sa.select(Job.id, Job.status).where(Job.stage != Stage.WALK))
+        return {job_id: status for job_id, status in rows}
 
 
 def _stats(engine: Engine) -> list[tuple[dt.datetime, str, int, int, float]]:
@@ -167,7 +188,7 @@ def _stats(engine: Engine) -> list[tuple[dt.datetime, str, int, int, float]]:
 
 
 def test_once_runs_every_ready_job_in_priority_order_then_exits_0(
-    migrated: Engine, worker_env: Settings
+    migrated: Engine, worker_env: Settings, recently_walked: None
 ) -> None:
     a, b = _items(migrated, 2)
     _enqueue(
@@ -437,7 +458,7 @@ def test_run_keeps_going_until_stopped(migrated: Engine, queue: JobQueue) -> Non
 
 
 def test_sigterm_stops_the_worker_after_the_current_job(
-    migrated: Engine, worker_env: Settings, monkeypatch: pytest.MonkeyPatch
+    migrated: Engine, worker_env: Settings, monkeypatch: pytest.MonkeyPatch, recently_walked: None
 ) -> None:
     (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
 
@@ -458,7 +479,7 @@ def test_sigterm_stops_the_worker_after_the_current_job(
 
 
 def test_main_recovers_interrupted_jobs_and_logs_to_worker_log(
-    migrated: Engine, worker_env: Settings
+    migrated: Engine, worker_env: Settings, recently_walked: None
 ) -> None:
     (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
     with Session(migrated) as session:
@@ -579,7 +600,11 @@ def fast_noop(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_noop_jobs_can_be_queued_and_run_when_enabled(
-    migrated: Engine, worker_env: Settings, monkeypatch: pytest.MonkeyPatch, fast_noop: None
+    migrated: Engine,
+    worker_env: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    fast_noop: None,
+    recently_walked: None,
 ) -> None:
     monkeypatch.setenv("WORKER_NOOP_STAGE", "true")
 
@@ -599,6 +624,7 @@ def test_the_noop_stage_is_off_unless_enabled(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     fast_noop: None,
+    recently_walked: None,
 ) -> None:
     assert main(["noop", "3"]) == 2
     assert "WORKER_NOOP_STAGE=true" in capsys.readouterr().err
@@ -716,7 +742,9 @@ def test_a_global_pause_stops_all_claiming_and_the_running_job_finishes(
     assert "Worker paused" in caplog.messages
 
 
-def test_a_pause_survives_a_worker_restart(migrated: Engine, worker_env: Settings) -> None:
+def test_a_pause_survives_a_worker_restart(
+    migrated: Engine, worker_env: Settings, recently_walked: None
+) -> None:
     clip, layout = _enqueue(migrated, (Stage.CLIP, None), (Stage.LAYOUT, None))
     _pause(migrated, controls.GLOBAL)
     _pause(migrated, Stage.CLIP)

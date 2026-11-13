@@ -133,12 +133,21 @@ class JobQueue:
         self._clock = clock
         self._policy = retry_policy or RetryPolicy()
 
-    def enqueue(self, session: Session, stage: Stage, item_id: int | None = None) -> int:
+    def enqueue(
+        self,
+        session: Session,
+        stage: Stage,
+        item_id: int | None = None,
+        *,
+        actor: str | None = None,
+    ) -> int:
         """Queue `stage` for an item, or as a batch job when `item_id` is None.
+        `actor` is who asked for it, when a person did.
 
         If the same stage is already open (pending, or waiting to retry) for that
-        item, nothing is added. Returns the id of the open job either way. `noop` jobs
-        are never merged, so queueing N of them for a test load gives N jobs.
+        item, nothing is added, and its actor stays as it was. Returns the id of the
+        open job either way. `noop` jobs are never merged, so queueing N of them for a
+        test load gives N jobs.
         """
         if stage != Stage.NOOP:
             existing = self._open_job_id(session, stage, item_id)
@@ -152,6 +161,7 @@ class JobQueue:
                 priority=PRIORITY[stage],
                 status=JobStatus.PENDING,
                 attempts=0,
+                actor=actor,
                 enqueued_at=self._clock(),
             )
             .on_conflict_do_nothing()

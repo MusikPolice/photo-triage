@@ -1,7 +1,8 @@
 """The Activity page's data, and pausing and resuming the worker (plan §7, §6.11).
 
 `GET /api/activity` gives the worker's state and one row per stage, counted from
-`jobs`. The pause and resume endpoints answer with the new activity, and the event
+`jobs`. `POST /api/scan` queues a walk of the library ("Scan now"). It and the
+pause and resume endpoints answer with the new activity, and the event
 stream (`photo_triage.api.events`) pushes it to every open tab, read by an
 `ActivityReader`.
 """
@@ -28,7 +29,8 @@ from photo_triage.db.models import Job, JobStatus
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
 from photo_triage.worker.clock import Clock
-from photo_triage.worker.queue import BATCH_STAGES, Stage
+from photo_triage.worker.queue import BATCH_STAGES, JobQueue, Stage
+from photo_triage.worker.scan_schedule import last_walk, queue_walk
 from photo_triage.worker.state import WorkerStatus, observed_state
 
 router = APIRouter()
@@ -61,6 +63,13 @@ class StageActivity(BaseModel):
     """Failed, and waiting to be retried."""
     parked: int
     """Failed too many times, and waiting for someone to look."""
+    last_finished_at: AwareDatetime | None = None
+    """Batch stages: when the latest run finished, if any has."""
+    last_actor: str | None = None
+    """Batch stages: who asked for the latest finished run. None when the schedule
+    or the pipeline queued it."""
+    next_scheduled_at: AwareDatetime | None = None
+    """When the schedule queues the stage next: the walk, on `SCAN_SCHEDULE`."""
 
 
 class Activity(BaseModel):
@@ -70,6 +79,16 @@ class Activity(BaseModel):
 
 
 type JobCounts = dict[tuple[Stage, JobStatus], int]
+
+
+class LastRun(BaseModel):
+    finished_at: AwareDatetime | None = None
+    actor: str | None = None
+
+
+def read_last_walk(session: Session) -> LastRun:
+    job = last_walk(session)
+    return LastRun() if job is None else LastRun(finished_at=job.finished_at, actor=job.actor)
 
 
 def shown_stages(settings: Settings) -> list[Stage]:
@@ -99,15 +118,19 @@ def read_activity(
     now: dt.datetime,
     real_now: dt.datetime,
     counts: JobCounts | None = None,
+    walked: LastRun | None = None,
 ) -> Activity:
     """The activity at `now` (the app's clock), judging the heartbeat at `real_now`.
-    Jobs are counted unless `counts` (from `count_jobs`) is given."""
+    Jobs are counted, and the last walk read, unless `counts` (from `count_jobs`)
+    and `walked` (from `read_last_walk`) are given."""
     state = observed_state(session, settings.worker_quiet_hours, settings.tz, now, real_now)
     paused = controls.paused_scopes(session)
     last = heartbeat.last(session)
     stages = shown_stages(settings)
     if counts is None:
         counts = count_jobs(session, stages)
+    if walked is None:
+        walked = read_last_walk(session)
     return Activity(
         worker=WorkerActivity(
             status=state.status,
@@ -115,7 +138,26 @@ def read_activity(
             quiet_until_at=state.quiet_until_at,
             last_seen_at=None if last is None else last.seen_at,
         ),
-        stages=[_stage_activity(stage, counts, stage in paused) for stage in stages],
+        stages=[
+            _with_runs(settings, now, walked, _stage_activity(stage, counts, stage in paused))
+            for stage in stages
+        ],
+    )
+
+
+def _with_runs(
+    settings: Settings, now: dt.datetime, walked: LastRun, row: StageActivity
+) -> StageActivity:
+    """Add the last and next runs to the walk's row. Layout, duplicates and atlases
+    get theirs with those jobs (Phases 3 and 4)."""
+    if row.stage != Stage.WALK:
+        return row
+    return row.model_copy(
+        update={
+            "last_finished_at": walked.finished_at,
+            "last_actor": walked.actor,
+            "next_scheduled_at": settings.scan_schedule.next_at(now, settings.tz),
+        }
     )
 
 
@@ -139,8 +181,9 @@ class ActivityReader:
 
     `PRAGMA data_version` changes on a connection only when another connection
     commits, so the reader keeps a connection of its own, on which it only reads.
-    The worker's state and heartbeat are read every time, since quiet hours and a
-    stale heartbeat change with the clock and not with the data. Not thread-safe:
+    So is the last walk. The worker's state and heartbeat are read every time, and
+    the next scheduled walk worked out, since quiet hours, a stale heartbeat and the
+    schedule change with the clock and not with the data. Not thread-safe:
     the feed never runs two reads at once.
     """
 
@@ -152,6 +195,7 @@ class ActivityReader:
         self._connection: Connection | None = None
         self._data_version: int | None = None
         self._counts: JobCounts | None = None
+        self._walked: LastRun | None = None
 
     def __call__(self) -> Activity:
         if self._connection is None:
@@ -163,9 +207,15 @@ class ActivityReader:
                 version = session.execute(sa.text("PRAGMA data_version")).scalar_one()
                 if version != self._data_version or self._counts is None:
                     self._counts = count_jobs(session, shown_stages(self._settings))
+                    self._walked = read_last_walk(session)
                     self._data_version = version
                 return read_activity(
-                    session, self._settings, self._clock(), self._real_clock(), self._counts
+                    session,
+                    self._settings,
+                    self._clock(),
+                    self._real_clock(),
+                    self._counts,
+                    self._walked,
                 )
         except Exception:
             self.close()  # start again on a fresh connection
@@ -188,6 +238,15 @@ def get_feed(request: Request) -> Feed[Activity]:
 
 @router.get("/activity")
 def get_activity(request: Request, session: DbSession) -> Activity:
+    return current_activity(request, session)
+
+
+@router.post("/scan")
+def scan_now(request: Request, session: DbSession, actor: Actor, clock: AppClock) -> Activity:
+    """Queue a walk of the library, unless one is waiting or running."""
+    with session.begin():
+        queue_walk(session, JobQueue(clock), actor)
+    get_feed(request).poke()
     return current_activity(request, session)
 
 
