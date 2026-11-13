@@ -54,14 +54,9 @@ if ((QUIET)); then exec >/dev/null 2>&1; fi
 # shellcheck source=../versions.env
 source "$(dirname "${BASH_SOURCE[0]}")/../versions.env"
 
-EXIFTOOL_URL="https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${EXIFTOOL_VERSION}.tar.gz/download"
-
-# Static build (Ubuntu 24.04's apt ffmpeg is 6.1). The release URL is rolling,
-# so the old-releases path is tried first and the checksum guards against drift.
-FFMPEG_URLS=(
-  "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION}-amd64-static.tar.xz"
-  "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-)
+# exiftool and ffmpeg are fetched by scripts/install_media_tools.sh, which CI
+# and the Dockerfile run too.
+MEDIA_TOOLS="$(dirname "${BASH_SOURCE[0]}")/install_media_tools.sh"
 
 # InsightFace SCRFD + ArcFace pack (non-commercial licence; personal use only).
 BUFFALO_L_URL="https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
@@ -257,43 +252,22 @@ fi
 # 4. exiftool and ffmpeg
 # ---------------------------------------------------------------------------
 
-step "exiftool $EXIFTOOL_VERSION"
+step "exiftool $EXIFTOOL_VERSION and ffmpeg $FFMPEG_VERSION"
 
-have="$("$LOCAL_BIN/exiftool" -ver 2>/dev/null || true)"
-if [[ "$have" == "$EXIFTOOL_VERSION" ]]; then
+have_exiftool="$("$LOCAL_BIN/exiftool" -ver 2>/dev/null || true)"
+have_ffmpeg="$("$LOCAL_BIN/ffmpeg" -version 2>/dev/null | head -1 | awk '{print $3}' || true)"
+have_ffmpeg="${have_ffmpeg%-static}"
+if [[ "$have_exiftool" == "$EXIFTOOL_VERSION" && "$have_ffmpeg" == "$FFMPEG_VERSION" ]] \
+  && "$LOCAL_BIN/ffprobe" -version >/dev/null 2>&1; then
   ok "Installed"
-elif needs_fix "exiftool ${have:-not installed}, want $EXIFTOOL_VERSION ($FIX_HINT)"; then
-  dest="$TOOLS_DIR/exiftool-$EXIFTOOL_VERSION"
-  download "$EXIFTOOL_URL" "$SCRATCH/exiftool.tar.gz" "$EXIFTOOL_SHA256" \
-    || die "Could not download exiftool $EXIFTOOL_VERSION"
-  rm -rf "$dest" && mkdir -p "$dest"
-  tar -xzf "$SCRATCH/exiftool.tar.gz" -C "$dest" --strip-components=1
-  # The script finds its lib/ relative to its real path, so a symlink works.
+elif needs_fix "exiftool ${have_exiftool:-not installed}, ffmpeg ${have_ffmpeg:-not installed}; want $EXIFTOOL_VERSION and $FFMPEG_VERSION ($FIX_HINT)"; then
+  dest="$TOOLS_DIR/media-tools"
+  "$MEDIA_TOOLS" "$dest" || die "Could not install exiftool and ffmpeg (see above)"
+  # exiftool finds its lib/ relative to its real path, so a symlink works.
   mkdir -p "$LOCAL_BIN"
-  ln -sfn "$dest/exiftool" "$LOCAL_BIN/exiftool"
-  [[ "$("$LOCAL_BIN/exiftool" -ver)" == "$EXIFTOOL_VERSION" ]] || die "exiftool install did not verify"
-  ok "Installed to $dest"
-fi
-
-step "ffmpeg $FFMPEG_VERSION"
-
-have="$("$LOCAL_BIN/ffmpeg" -version 2>/dev/null | head -1 | awk '{print $3}' || true)"
-have="${have%-static}"
-if [[ "$have" == "$FFMPEG_VERSION" ]] && "$LOCAL_BIN/ffprobe" -version >/dev/null 2>&1; then
-  ok "Installed"
-elif needs_fix "ffmpeg ${have:-not installed}, want $FFMPEG_VERSION ($FIX_HINT)"; then
-  got=""
-  for url in "${FFMPEG_URLS[@]}"; do
-    if download "$url" "$SCRATCH/ffmpeg.tar.xz" "$FFMPEG_SHA256" 2>/dev/null; then got=1; break; fi
-  done
-  [[ -n "$got" ]] || die "Could not download ffmpeg $FFMPEG_VERSION with the pinned checksum. If upstream moved it, update FFMPEG_URLS."
-  dest="$TOOLS_DIR/ffmpeg-$FFMPEG_VERSION"
-  rm -rf "$dest" && mkdir -p "$dest"
-  tar -xJf "$SCRATCH/ffmpeg.tar.xz" -C "$dest" --strip-components=1
-  mkdir -p "$LOCAL_BIN"
-  ln -sfn "$dest/ffmpeg" "$LOCAL_BIN/ffmpeg"
-  ln -sfn "$dest/ffprobe" "$LOCAL_BIN/ffprobe"
-  "$LOCAL_BIN/ffmpeg" -version | head -1 | grep -q "version $FFMPEG_VERSION" || die "ffmpeg install did not verify"
+  ln -sfn "$dest/exiftool/exiftool" "$LOCAL_BIN/exiftool"
+  ln -sfn "$dest/ffmpeg/ffmpeg" "$LOCAL_BIN/ffmpeg"
+  ln -sfn "$dest/ffmpeg/ffprobe" "$LOCAL_BIN/ffprobe"
   ok "Installed to $dest"
 fi
 
