@@ -278,7 +278,8 @@ Work toward the spec is tracked on GitHub:
 - Each phase in plan §11 is a **milestone**.
 - Each deliverable is an **issue** small enough for one PR. An issue cites the spec sections it implements, lists checkable acceptance criteria, and says what's out of scope.
 - Each issue gets its own **branch** and **PR**, and the PR closes the issue when merged.
-- Every PR is reviewed and merged by a person. Claude Code opens PRs but never merges them.
+- Claude Code merges its own PRs once CI is green, with `tracker.py merge N`, **except PRs that touch a sensitive path**. The user reviews and merges those. The paths are listed in `SENSITIVE_PATHS` in `scripts/tracker.py`: `docs/plan.md`, `docs/dev-environment.md`, `CLAUDE.md`, `.claude/`, `.github/`, `scripts/tracker.py`, `scripts/check_file_mutation.py`, `backend/src/photo_triage/files/` and `backend/tests/safety/`. They're the spec and the recorded decisions, the workflow and its gate, and the code and tests behind the safety invariants (§7). The list includes itself, so changing it needs review. (Decided 2026-11-09: reviewing routine diffs wasn't finding problems, and the user's feedback is most useful on something running in the browser.)
+- Claude Code uses the user's GitHub account, so GitHub's required reviews can't tell its merges from the user's. The gate is therefore in the tracker, plus a Claude Code `PreToolUse` hook (`.claude/hooks/block_direct_merge.py`) that blocks `gh pr merge` (including `--auto`) and merge calls through `gh api` in the Bash tool. The tracker's own `gh` subprocess isn't seen by the hook. The hook matches `gh` only where it runs as a command (at the start of a line or after a shell separator, followed by its subcommand), and it ignores heredoc bodies, so a PR body or commit message that mentions these commands gets through. It guards against habit, not an adversary.
 
 `scripts/tracker.py` does the mechanical steps, so they happen the same way every time. Its docstring has the issue draft format.
 
@@ -290,6 +291,7 @@ Work toward the spec is tracked on GitHub:
 | `start N` | Creates branch `N-slug` from `origin/main`, assigns the issue and labels it `in-progress`. |
 | `finish SUMMARY` | Requires a clean tree that's up to date with `origin/main`. Runs `just check`, pushes, publishes any screenshots in the summary's `Screenshots` section (below), and opens or updates the PR, adding the issue's acceptance criteria and `Closes #N` to the body. |
 | `feedback [N]` | Prints everything reviewers have said on PR N, or on the current branch's PR: its state and review decision, each review, the conversation, and each inline thread with its file, line and whether it's resolved or outdated. |
+| `merge N` | Refuses unless PR N is open, not a draft and targets `main`. Lists every path the PR touches (both sides of a rename) from GitHub. If any is sensitive, it labels the PR `needs-human-review`, prints those paths and stops. Otherwise it requires every check on the PR to have passed or been skipped, then squash-merges with `--match-head-commit`, so a push after the check makes GitHub refuse the merge. |
 
 **Screenshots on PRs.** A PR that changes how a page looks attaches screenshots of it. Take them with `just shot` (scratch stack, not `--base`) and list them in the PR draft under `## Screenshots` as `![caption](.screenshots/scratch/NAME.png)`. `finish` checks each is a scratch-stack PNG, commits them to the `screenshots` branch under `pr-N/` (N is the issue number, as in `.drafts/pr-N.md`), replacing what was there, and embeds them in the PR body by commit URL (`raw.githubusercontent.com/<repo>/<commit>/pr-N/NAME.png`), so a re-run never shows a stale copy. The branch is an orphan that holds only screenshots, kept out of `main`'s history. It uses a scratch git index, so the working tree is untouched. The repo is public, which is why only scratch-stack screenshots, which never show real photos, can be published.
 
@@ -307,7 +309,7 @@ Changes that aren't part of a phase, such as docs or tooling, still go through a
 
 These are set in the GitHub repo settings, not in files:
 
-- **`main` is protected.** The `backend`, `migrations`, `frontend` and `audit` CI jobs must pass, and the branch must be up to date with `main` before merging. This applies to admins too, so nothing reaches `main` without a green PR.
+- **`main` is protected.** The `backend`, `migrations`, `frontend`, `audit`, `contract` and `docker` CI jobs must pass, and the branch must be up to date with `main` before merging. This applies to admins too, so nothing reaches `main` without a green PR.
   - A required job must run on every PR. GitHub waits indefinitely for a required check that never reports, so don't add `paths:` filters to these jobs; skip steps inside the job instead. Renaming a required job also needs this setting updated.
   - Because `audit` is required, a newly published vulnerability in a runtime dependency blocks merges until the dependency is upgraded or the advisory is dealt with.
   - This is deliberate. If it ever blocks urgent work, an admin can relax the rule temporarily.

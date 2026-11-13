@@ -11,6 +11,7 @@ mechanical steps so they happen the same way every time:
   start N               branch N-slug off origin/main, assign the issue, label it in-progress
   finish SUMMARY        run `just check`, push, and open or update the PR closing the issue
   feedback [N]          print the reviews and comments on PR N (default: this branch's PR)
+  merge N               squash-merge PR N once CI is green, unless it touches a sensitive path
 
 Issue draft format (docs/plan.md and docs/dev-environment.md sections are
 cited as "plan §6.11" or "dev-environment §7"):
@@ -72,6 +73,7 @@ DOCS = {
 }
 
 IN_PROGRESS = "in-progress"
+NEEDS_REVIEW = "needs-human-review"
 AREA_LABELS = {
     "backend": ("1d76db", "Python backend: API, worker, pipeline, files"),
     "frontend": ("5319e7", "Svelte and deck.gl frontend"),
@@ -83,7 +85,26 @@ LABELS = {
     **AREA_LABELS,
     **KIND_LABELS,
     IN_PROGRESS: ("fbca04", "Being worked on in an open branch"),
+    NEEDS_REVIEW: ("b60205", "Touches a sensitive path; the user reviews and merges it"),
 }
+
+# A PR that adds, changes, removes or renames anything under these paths is
+# merged by the user, not by `merge` (dev-environment §9). An entry ending in
+# "/" is a directory; anything else is one file. This file is on the list, so
+# changing the list itself needs review.
+SENSITIVE_PATHS = (
+    "docs/plan.md",
+    "docs/dev-environment.md",
+    "CLAUDE.md",
+    ".claude/",
+    ".github/",
+    "scripts/tracker.py",
+    "scripts/check_file_mutation.py",
+    "backend/src/photo_triage/files/",
+    "backend/tests/safety/",
+)
+# Check-run conclusions and status-context states that count as passing.
+PASSING = {"SUCCESS", "SKIPPED", "NEUTRAL"}
 
 REQUIRED_SECTIONS = ("Spec", "Deliverable", "Acceptance criteria", "Out of scope")
 OPTIONAL_SECTIONS = ("Background", "Approach", "Depends on")
@@ -440,6 +461,45 @@ def publish_screenshots(number: int, paths: list[str]) -> dict[str, str]:
     return {path: f"{base}/{Path(path).name}" for path in paths}
 
 
+def sensitive(paths: list[str]) -> list[str]:
+    """The paths that need the user's review, in the order given."""
+    return [
+        p
+        for p in paths
+        if any(p.startswith(s) if s.endswith("/") else p == s for s in SENSITIVE_PATHS)
+    ]
+
+
+def changed_paths(files: list[dict[str, Any]]) -> list[str]:
+    """Every path a PR touches, from the REST pulls/N/files listing: a rename counts twice."""
+    paths: list[str] = []
+    for f in files:
+        paths.append(f["filename"])
+        if f.get("previous_filename"):
+            paths.append(f["previous_filename"])
+    return paths
+
+
+def ci_problems(rollup: list[dict[str, Any]]) -> list[str]:
+    """Why the PR's checks don't allow a merge yet: pending or failing checks, or none at all."""
+    if not rollup:
+        return ["no checks have reported yet"]
+    problems: list[str] = []
+    for check in rollup:
+        if check.get("__typename") == "StatusContext":
+            name, state = check.get("context", "?"), check.get("state") or "PENDING"
+            done = state not in {"PENDING", "EXPECTED"}
+        else:
+            name = check.get("name", "?")
+            done = check.get("status") == "COMPLETED"
+            state = (check.get("conclusion") or "") if done else (check.get("status") or "PENDING")
+        if not done:
+            problems.append(f"{name} is still {state.lower()}")
+        elif state not in PASSING:
+            problems.append(f"{name}: {state.lower()}")
+    return problems
+
+
 def require_clean_tree() -> None:
     if git("status", "--porcelain"):
         fail("working tree has uncommitted changes; commit or stash them first")
@@ -759,6 +819,49 @@ def cmd_feedback(args: argparse.Namespace) -> None:
     print(format_feedback(pr))
 
 
+def cmd_merge(args: argparse.Namespace) -> None:
+    number = args.number
+    pr = gh_json(
+        "pr",
+        "view",
+        str(number),
+        "--json",
+        "state,isDraft,baseRefName,headRefOid,url,statusCheckRollup",
+    )
+    if pr["state"] != "OPEN":
+        fail(f"PR #{number} is {pr['state'].lower()}")
+    if pr["isDraft"]:
+        fail(f"PR #{number} is a draft")
+    if pr["baseRefName"] != "main":
+        fail(f"PR #{number} targets {pr['baseRefName']!r}, not main")
+    head = pr["headRefOid"]
+
+    files = gh_json(
+        "api", "--paginate", "--slurp", f"repos/{{owner}}/{{repo}}/pulls/{number}/files"
+    )
+    flagged = sensitive(changed_paths([f for page in files for f in page]))
+    if flagged:
+        gh("pr", "edit", str(number), "--add-label", NEEDS_REVIEW)
+        listing = "\n".join(f"  {p}" for p in dict.fromkeys(flagged))
+        fail(
+            f"PR #{number} touches sensitive paths, so the user reviews and merges it:\n"
+            f"{listing}\nLabelled it {NEEDS_REVIEW}. Give the user {pr['url']}."
+        )
+
+    problems = ci_problems(pr["statusCheckRollup"] or [])
+    if problems:
+        fail(
+            f"CI on PR #{number} isn't green yet:\n"
+            + "\n".join(f"  - {p}" for p in problems)
+            + f"\nWait with `gh pr checks {number} --watch`, then run merge again."
+        )
+
+    # --match-head-commit makes GitHub refuse if anything was pushed after the
+    # files and checks above were read.
+    gh("pr", "merge", str(number), "--squash", "--match-head-commit", head)
+    print(f"Merged {pr['url']}")
+
+
 def main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     sub = parser.add_subparsers(required=True)
@@ -782,6 +885,9 @@ def main(argv: list[str]) -> None:
     p = sub.add_parser("feedback", help="print the reviews and comments on a PR")
     p.add_argument("number", type=int, nargs="?", help="PR number (default: this branch's PR)")
     p.set_defaults(func=cmd_feedback)
+    p = sub.add_parser("merge", help="squash-merge a PR on green CI unless it's sensitive")
+    p.add_argument("number", type=int)
+    p.set_defaults(func=cmd_merge)
     args = parser.parse_args(argv)
     args.func(args)
 
