@@ -18,7 +18,7 @@ from photo_triage.api.activity import Activity, ActivityReader, StageActivity
 from photo_triage.api.app import create_app
 from photo_triage.api.deps import current_actor
 from photo_triage.api.feed import Feed
-from photo_triage.db.models import Job, JobStatus, WorkerControl
+from photo_triage.db.models import Job, JobStats, JobStatus, WorkerControl
 from photo_triage.quiet_hours import parse
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
@@ -128,6 +128,9 @@ async def test_every_stage_is_listed_in_priority_order_with_its_counts(
         "last_finished_at": None,
         "last_actor": None,
         "next_scheduled_at": None,
+        "throughput_per_min": None,
+        "eta_at": None,
+        "eta_windows": None,
     }
     assert stages["layout"]["kind"] == "batch"
     assert (stages["layout"]["done"], stages["layout"]["total"]) == (1, 1)
@@ -145,6 +148,9 @@ async def test_every_stage_is_listed_in_priority_order_with_its_counts(
         "last_finished_at": None,
         "last_actor": None,
         "next_scheduled_at": None,
+        "throughput_per_min": None,
+        "eta_at": None,
+        "eta_windows": None,
     }
 
 
@@ -487,3 +493,91 @@ def test_the_reader_reads_the_last_walk_again_only_after_a_commit(
         assert _stage(reader(), Stage.WALK).last_finished_at == START
     finally:
         reader.close()
+
+
+def _stats(
+    engine: Engine, stage: Stage, hour_start_at: dt.datetime, processed: int, busy_s: float
+) -> None:
+    with Session(engine) as session, session.begin():
+        session.add(
+            JobStats(
+                hour_start_at=hour_start_at,
+                stage=stage,
+                processed=processed,
+                errors=0,
+                busy_seconds=busy_s,
+            )
+        )
+
+
+async def test_throughput_is_items_per_busy_minute_over_the_last_day(
+    client: AsyncClient, migrated: Engine
+) -> None:
+    _beat(migrated, START)
+    # 600 in 5 busy minutes, plus 600 in 15: 1,200 in 20 minutes is 60/min.
+    _stats(migrated, Stage.CLIP, START.replace(hour=11), 600, 300)
+    _stats(migrated, Stage.CLIP, START - dt.timedelta(hours=20), 600, 900)
+    # Older than a day: left out.
+    _stats(migrated, Stage.CLIP, START - dt.timedelta(hours=30), 10_000, 60)
+
+    clip = _stages((await client.get("/api/activity")).json())["clip"]
+
+    assert clip["throughput_per_min"] == pytest.approx(60.0)
+
+
+async def test_eta_is_the_work_left_at_that_rate(client: AsyncClient, migrated: Engine) -> None:
+    _beat(migrated, START)
+    _stats(migrated, Stage.CLIP, START.replace(hour=11), 600, 600)  # 60/min
+    _add_jobs(migrated, Stage.CLIP, pending=170, running=1, error=9, parked=5)
+
+    clip = _stages((await client.get("/api/activity")).json())["clip"]
+
+    # 180 left (parked jobs won't run) at 60/min: 3 minutes.
+    assert clip["eta_at"] == "2026-10-05T12:03:00Z"
+    assert clip["eta_windows"] is None
+
+
+async def test_eta_counts_only_the_time_outside_quiet_hours(
+    settings: Settings, migrated: Engine, clock: FakeClock, real_clock: FakeClock
+) -> None:
+    # START is Monday 12:00 UTC. Quiet from 13:00 to 01:00 UTC each day.
+    settings = settings.model_copy(update={"worker_quiet_hours": parse("Mon-Sun 13:00-01:00")})
+    _beat(migrated, START)
+    _stats(migrated, Stage.CLIP, START.replace(hour=11), 60, 3600)  # 1/min
+    _add_jobs(migrated, Stage.CLIP, pending=120)  # 2 h: 1 h today, 1 h from 01:00
+    app = create_app(settings, clock=clock, real_clock=real_clock)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        clip = _stages((await client.get("/api/activity")).json())["clip"]
+    app.state.engine.dispose()
+
+    assert (clip["eta_at"], clip["eta_windows"]) == ("2026-10-06T02:00:00Z", 2)
+
+
+@pytest.mark.parametrize("hold", ["stage paused", "worker paused", "worker stopped"])
+async def test_a_held_stage_shows_throughput_but_no_eta(
+    client: AsyncClient, migrated: Engine, hold: str
+) -> None:
+    if hold != "worker stopped":
+        _beat(migrated, START)
+    with Session(migrated) as session, session.begin():
+        if hold == "stage paused":
+            controls.pause(session, Stage.CLIP, "alice", START)
+        elif hold == "worker paused":
+            controls.pause(session, controls.GLOBAL, "alice", START)
+    _stats(migrated, Stage.CLIP, START.replace(hour=11), 60, 60)
+    _add_jobs(migrated, Stage.CLIP, pending=10)
+
+    clip = _stages((await client.get("/api/activity")).json())["clip"]
+
+    assert clip["throughput_per_min"] == pytest.approx(60.0)
+    assert (clip["eta_at"], clip["eta_windows"]) == (None, None)
+
+
+async def test_batch_stages_get_no_throughput_or_eta(client: AsyncClient, migrated: Engine) -> None:
+    _beat(migrated, START)
+    _stats(migrated, Stage.LAYOUT, START.replace(hour=11), 1, 60)
+    _add_jobs(migrated, Stage.LAYOUT, pending=1)
+
+    layout = _stages((await client.get("/api/activity")).json())["layout"]
+
+    assert (layout["throughput_per_min"], layout["eta_at"]) == (None, None)
