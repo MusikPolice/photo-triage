@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, getHealth, getJson, setPaused } from "../src/lib/api";
+import { ApiError, getHealth, getJson, setPaused, thumbnailUrl } from "../src/lib/api";
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn<typeof fetch>(() => Promise.resolve(Response.json(body, { status })));
@@ -33,5 +33,11 @@ describe("setPaused", () => {
 
     await setPaused(paused, stage, fetchFn);
     expect(fetchFn).toHaveBeenCalledWith(url, expect.objectContaining({ method: "POST" }));
+  });
+});
+
+describe("thumbnailUrl", () => {
+  it("names the item and the size", () => {
+    expect(thumbnailUrl(42, 64)).toBe("/api/items/42/thumbnail?size=64");
   });
 });

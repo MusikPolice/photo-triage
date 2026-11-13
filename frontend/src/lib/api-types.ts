@@ -183,6 +183,18 @@ export interface components {
       stages: components["schemas"]["StageActivity"][];
       worker: components["schemas"]["WorkerActivity"];
     };
+    /**
+     * CurrentItem
+     * @description The item a stage's running job is working on.
+     */
+    CurrentItem: {
+      /** Has Thumbnail */
+      has_thumbnail: boolean;
+      /** Id */
+      id: number;
+      /** Path */
+      path: string;
+    };
     /** HTTPValidationError */
     HTTPValidationError: {
       /** Detail */
@@ -219,6 +231,7 @@ export interface components {
       | "noop";
     /** StageActivity */
     StageActivity: {
+      current?: components["schemas"]["CurrentItem"] | null;
       /** Done */
       done: number;
       /** Errored */
