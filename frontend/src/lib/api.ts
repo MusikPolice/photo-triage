@@ -61,3 +61,9 @@ export function setPaused(
   const scope = stage === null ? "/worker" : `/worker/stages/${encodeURIComponent(stage)}`;
   return postJson<Activity>(`${scope}/${paused ? "pause" : "resume"}`, fetchFn);
 }
+
+/** Queue a walk of the library ("Scan now"), unless one is waiting or running.
+ * Answers with the activity after it. */
+export function scanNow(fetchFn: typeof fetch = fetch): Promise<Activity> {
+  return postJson<Activity>("/scan", fetchFn);
+}

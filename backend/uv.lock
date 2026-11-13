@@ -188,6 +188,14 @@ wheels = [
 ]
 
 [[package]]
+name = "cronsim"
+version = "2.8"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/21/44/8f64773169b6621b435f6045457250d51f775e495fa81766f7657a12539e/cronsim-2.8-py3-none-any.whl", hash = "sha256:62115cabaa121953ac4bbf2e66808b5229ca6e47372a74e752b42fcdf28324a5", size = 14526, upload-time = "2026-11-05T05:29:29.493Z" },
+]
+
+[[package]]
 name = "cyclonedx-python-lib"
 version = "11.12.0"
 source = { registry = "https://pypi.org/simple" }
@@ -925,6 +933,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
+    { name = "cronsim" },
     { name = "fastapi" },
     { name = "ftfy" },
     { name = "insightface" },
@@ -968,6 +977,7 @@ export = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
+    { name = "cronsim", specifier = ">=2.8" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "ftfy", specifier = ">=6.3" },
     { name = "insightface", specifier = ">=0.7.3" },

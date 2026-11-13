@@ -30,6 +30,7 @@ PUBLIC_SETTINGS = {
     "worker_threads",
     "models_dir",
     "clip_model",
+    "scan_schedule",
     "worker_quiet_hours",
     "tz",
     "thumbnail_size",
@@ -349,6 +350,44 @@ def test_malformed_quiet_hours_are_rejected_with_the_reason(
     monkeypatch.setenv("WORKER_QUIET_HOURS", "Mon-Fri 5pm-11pm")
 
     with pytest.raises(SettingsError, match=r'WORKER_QUIET_HOURS: .*"Mon-Fri 5pm-11pm" isn\'t'):
+        load_settings()
+
+
+def test_scan_schedule_defaults_to_two_every_night(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+
+    settings = load_settings()
+
+    assert str(settings.scan_schedule) == "0 2 * * *"
+    assert "SCAN_SCHEDULE=0 2 * * * " in settings.summary()
+
+
+def test_scan_schedule_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("SCAN_SCHEDULE", " 30  3 * * 1-5 ")
+
+    assert str(load_settings().scan_schedule) == "30 3 * * 1-5"
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [
+        ("0 2 * *", "needs five fields"),
+        ("61 2 * * *", "Bad minute"),
+        ("@daily", "needs five fields"),
+        ("", "needs five fields"),
+    ],
+)
+def test_malformed_scan_schedule_is_rejected_with_the_reason(
+    monkeypatch: pytest.MonkeyPatch, value: str, reason: str
+) -> None:
+    monkeypatch.setenv("PHOTO_DIR", "/photos")
+    monkeypatch.setenv("TRASH_DIR", "/trash")
+    monkeypatch.setenv("SCAN_SCHEDULE", value)
+
+    with pytest.raises(SettingsError, match=rf"SCAN_SCHEDULE: .*{reason}"):
         load_settings()
 
 

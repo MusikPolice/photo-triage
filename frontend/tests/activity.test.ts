@@ -128,6 +128,19 @@ describe("ActivityFeed", () => {
     ]);
   });
 
+  it("queues a scan and shows the activity it answers with", async () => {
+    const { feed, fetchFn } = setUp({
+      "POST /api/scan": () => Response.json(activity("running")),
+    });
+
+    await feed.scanNow();
+
+    expect(feed.activity?.worker.status).toBe("running");
+    expect(fetchFn.mock.calls.map(([url, init]) => `${init?.method ?? ""} ${urlOf(url)}`)).toEqual([
+      "POST /api/scan",
+    ]);
+  });
+
   it("lets a failed pause throw, leaving the activity as it was", async () => {
     const { feed } = setUp({});
     await expect(feed.setPaused(true, null)).rejects.toMatchObject({ status: 404 });

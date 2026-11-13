@@ -1,4 +1,5 @@
 <script lang="ts">
+  import StageButtons from "./StageButtons.svelte";
   import type { ActivityFeed } from "./lib/activity.svelte";
   import type { Stage, StageActivity } from "./lib/api";
   import {
@@ -10,6 +11,7 @@
     groupStages,
     stageCounts,
     stageName,
+    stageRuns,
     workerHold,
   } from "./lib/format";
 
@@ -17,7 +19,15 @@
 
   const activity = $derived(feed.activity);
   const groups = $derived(groupStages(activity?.stages ?? []));
-  const hold = $derived(activity === null ? null : workerHold(activity.worker, new Date()));
+  /** For "today" and weekdays in the times shown; a minute out is close enough. */
+  let now = $state(new Date());
+  $effect(() => {
+    const timer = setInterval(() => (now = new Date()), 60_000);
+    return () => {
+      clearInterval(timer);
+    };
+  });
+  const hold = $derived(activity === null ? null : workerHold(activity.worker, now));
 
   /** What an idle stage has to show: its done and parked counts. */
   function idleSummary(stage: StageActivity): string {
@@ -27,8 +37,8 @@
     return parts.length > 0 ? parts.join(" · ") : "Nothing yet";
   }
 
-  /** The pause or resume in flight: "all", a stage, or null. */
-  let busy = $state<Stage | "all" | null>(null);
+  /** The pause, resume or scan in flight: "all", a stage, "scan", or null. */
+  let busy = $state<Stage | "all" | "scan" | null>(null);
   let failure = $state<string | null>(null);
 
   async function toggle(paused: boolean, stage: Stage | null): Promise<void> {
@@ -36,6 +46,18 @@
     failure = null;
     try {
       await feed.setPaused(paused, stage);
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    } finally {
+      busy = null;
+    }
+  }
+
+  async function scan(): Promise<void> {
+    busy = "scan";
+    failure = null;
+    try {
+      await feed.scanNow();
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
     } finally {
@@ -78,6 +100,7 @@
     <ul class="stages">
       {#each groups.working as stage (stage.stage)}
         {@const counts = stageCounts(stage)}
+        {@const runs = stageRuns(stage, now)}
         <li>
           <div class="head">
             <div class="label">
@@ -85,13 +108,12 @@
               {#if stage.kind === "batch"}<span class="tag">batch</span>{/if}
               {#if stage.paused}<span class="tag">paused</span>{/if}
             </div>
-            <button
-              type="button"
+            <StageButtons
+              {stage}
               disabled={busy !== null}
-              onclick={() => toggle(!stage.paused, stage.stage)}
-            >
-              {stage.paused ? "Resume" : "Pause"}
-            </button>
+              onToggle={() => toggle(!stage.paused, stage.stage)}
+              onScan={scan}
+            />
           </div>
           <div
             class="bar tone-{barTone(stage, hold)}"
@@ -107,6 +129,7 @@
             <span>{doneOfTotal(stage)} · {formatPercent(stage.done, stage.total)}</span>
             <span class="muted">{counts}</span>
           </div>
+          {#if runs !== null}<p class="runs muted">{runs}</p>{/if}
         </li>
       {/each}
     </ul>
@@ -116,6 +139,7 @@
     <h2>Idle</h2>
     <ul class="stages idle">
       {#each groups.idle as stage (stage.stage)}
+        {@const runs = stageRuns(stage, now)}
         <li>
           <div class="head">
             <div class="label">
@@ -124,14 +148,14 @@
               {#if stage.paused}<span class="tag">paused</span>{/if}
               <span class="muted summary">{idleSummary(stage)}</span>
             </div>
-            <button
-              type="button"
+            <StageButtons
+              {stage}
               disabled={busy !== null}
-              onclick={() => toggle(!stage.paused, stage.stage)}
-            >
-              {stage.paused ? "Resume" : "Pause"}
-            </button>
+              onToggle={() => toggle(!stage.paused, stage.stage)}
+              onScan={scan}
+            />
           </div>
+          {#if runs !== null}<p class="runs muted">{runs}</p>{/if}
         </li>
       {/each}
     </ul>
@@ -230,8 +254,9 @@
     font-size: 0.75rem;
   }
 
-  .head button {
-    flex-shrink: 0;
+  .runs {
+    margin: 0.25rem 0 0;
+    font-size: 0.875rem;
   }
 
   .bar {
