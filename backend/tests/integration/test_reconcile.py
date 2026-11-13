@@ -295,7 +295,7 @@ def test_the_registered_item_stages(settings: Settings) -> None:
         Stage.SCAN: ItemStage(code_version=1),
         Stage.METADATA_READ: ItemStage(code_version=2, upstream=(Stage.SCAN,)),
         Stage.FRAMES: ItemStage(
-            code_version=1,
+            code_version=2,
             upstream=(Stage.SCAN,),
             settings_fingerprint="5-frames",
             media_types=frozenset({MediaType.VIDEO}),
@@ -321,8 +321,8 @@ def test_the_clip_model_is_part_of_the_clip_version(settings: Settings) -> None:
 
 def test_the_number_of_frames_is_part_of_the_frames_version(settings: Settings) -> None:
     more = settings.model_copy(update={"video_sample_frames": 8})
-    assert item_stages(settings)[Stage.FRAMES].version == "1+5-frames"
-    assert item_stages(more)[Stage.FRAMES].version == "1+8-frames"
+    assert item_stages(settings)[Stage.FRAMES].version == "2+5-frames"
+    assert item_stages(more)[Stage.FRAMES].version == "2+8-frames"
 
 
 # --- Stages for some kinds of item -----------------------------------------------------

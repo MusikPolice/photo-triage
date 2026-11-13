@@ -3,7 +3,9 @@ they're written, and how they're replaced."""
 
 import datetime as dt
 import logging
+import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -103,8 +105,9 @@ def test_every_video_gets_its_frames_and_nothing_else_does(
         item = items[path]
         recorded = pipeline.frames(item.id)
         assert [index for index, _ in recorded] == list(range(FRAMES)), path
+        # Spread up to where the last frame starts, a frame (0.1 s) before the end.
         assert [t for _, t in recorded] == pytest.approx(
-            timestamps(duration_s, FRAMES, min_gap_s=0.1)
+            timestamps(duration_s - 0.1, FRAMES, min_gap_s=0.1)
         )
         for index in range(FRAMES):
             with Image.open(frame_path(derived, item.id, index)) as frame:
@@ -130,7 +133,7 @@ def test_a_changed_video_is_sampled_again_leaving_nothing_behind(
 
     assert pipeline.items()["video/clip.mov"].id == clip.id
     again = pipeline.frames(clip.id)
-    assert [t for _, t in again] == pytest.approx(timestamps(2.0, FRAMES, min_gap_s=0.1))
+    assert [t for _, t in again] == pytest.approx(timestamps(2.0 - 0.1, FRAMES, min_gap_s=0.1))
     assert again != first
     assert [f for f in _files(pipeline.settings.derived_dir) if f.startswith(f"{clip.id}/")] == [
         f"{clip.id}/{n}.jpg" for n in range(FRAMES)
@@ -154,7 +157,7 @@ def test_changing_the_number_of_frames_samples_every_video_again(
     assert _files(pipeline.settings.derived_dir) == sorted(
         f"{items[p].id}/{n}.jpg" for p in VIDEOS for n in range(2)
     )
-    assert {job.stage_version for job in pipeline.jobs(Stage.FRAMES)} == {"1+2-frames"}
+    assert {job.stage_version for job in pipeline.jobs(Stage.FRAMES)} == {"2+2-frames"}
 
 
 def test_a_video_that_cannot_be_read_fails_its_job_and_keeps_its_frames(
@@ -241,3 +244,26 @@ def test_an_item_deleted_while_its_frames_were_sampled_keeps_none(
 
     root = pipeline.settings.derived_dir / FRAMES_FOLDER
     assert not list(root.glob(f"{clip.id}.*"))  # its staging is cleared
+
+
+def test_a_clip_under_a_second_gets_frames(pipeline: Pipeline) -> None:
+    # Shaped like the phone clips the full-library dry run parked (#96): half a
+    # second at 30 fps, whose last frame starts at 0.467 s, before the 95% mark.
+    clip = pipeline.settings.photo_dir / "short.mov"
+    subprocess.run(
+        [
+            "ffmpeg", "-nostdin", "-v", "error",
+            "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30",
+            "-t", "0.5", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            os.fspath(clip),
+        ],
+        check=True,
+    )  # fmt: skip
+
+    pipeline.run()
+
+    item = pipeline.items()["short.mov"]
+    recorded = pipeline.frames(item.id)
+    assert len(recorded) == FRAMES
+    assert max(t for _, t in recorded) <= 0.467
+    assert pipeline.jobs(Stage.FRAMES, JobStatus.PARKED) == []

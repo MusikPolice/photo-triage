@@ -72,8 +72,9 @@ def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
         # hashing it again.
         # 2: records the orientation.
         Stage.METADATA_READ: ItemStage(code_version=2, upstream=(Stage.SCAN,)),
+        # 2: times end where the last frame starts, for clips under a second (#96).
         Stage.FRAMES: ItemStage(
-            code_version=1,
+            code_version=2,
             upstream=(Stage.SCAN,),
             settings_fingerprint=f"{settings.video_sample_frames}-frames",
             media_types=frozenset({MediaType.VIDEO}),
