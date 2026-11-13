@@ -17,9 +17,17 @@ import json
 import re
 import sys
 
+# `gh` where it runs as a command: at the start of a line, or after a shell
+# separator, followed by its global flags (`-R owner/repo`) and the subcommand.
+# Text that only mentions it, in a quoted argument or a heredoc writing a PR
+# body, isn't blocked. This guards against a habit, not an adversary.
+_GH = r"(?:^|[;&|(`]|\$\()\s*(?:\S+/)?gh(?:\s+-{1,2}[\w-]+(?:[=\s]+[^-\s]\S*)?)*?\s+"
 BLOCKED = (
-    re.compile(r"\bgh\b.*\bpr\s+merge\b"),
-    re.compile(r"\bgh\b.*\bapi\b.*(/merge\b|mergePullRequest|enablePullRequestAutoMerge)"),
+    re.compile(_GH + r"pr\s+merge\b", re.MULTILINE),
+    re.compile(
+        _GH + r"api\b[^\n;&|]*?(/merge\b|mergePullRequest|enablePullRequestAutoMerge)",
+        re.MULTILINE,
+    ),
 )
 MESSAGE = (
     "Blocked: merge PRs with `scripts/tracker.py merge N`, which checks CI and the "
@@ -27,7 +35,12 @@ MESSAGE = (
 )
 
 
+# A heredoc's body is data for the command before it, never run by the shell.
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?^\s*\2\s*$", re.MULTILINE | re.DOTALL)
+
+
 def blocked(command: str) -> bool:
+    command = _HEREDOC.sub("<<heredoc", command)
     return any(pattern.search(command) for pattern in BLOCKED)
 
 
