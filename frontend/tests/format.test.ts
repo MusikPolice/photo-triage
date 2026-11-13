@@ -35,6 +35,7 @@ function stage(fields: Partial<StageActivity> = {}): StageActivity {
     running: 0,
     errored: 0,
     parked: 0,
+    eta_is_minimum: false,
     ...fields,
   };
 }
@@ -191,6 +192,26 @@ describe("formatEta", () => {
 
   it("is null without an estimate", () => {
     expect(formatEta(clip({}), NOW, TORONTO)).toBeNull();
+  });
+
+  it("says when it's only a minimum", () => {
+    const minimum = { eta_is_minimum: true };
+    expect(formatEta(clip({ ...minimum, eta_at: "2026-10-07T21:00:00Z" }), NOW, TORONTO)).toBe(
+      "3 h+ left",
+    );
+    expect(formatEta(clip({ ...minimum, eta_at: "2026-10-07T18:00:30Z" }), NOW, TORONTO)).toBe(
+      "1 min+ left",
+    );
+    expect(
+      formatEta(clip({ ...minimum, eta_at: "2026-10-07T21:30:00Z", eta_windows: 1 }), NOW, TORONTO),
+    ).toBe("done after today 17:30");
+    expect(
+      formatEta(
+        clip({ ...minimum, eta_at: "2026-10-30T08:00:00Z", eta_windows: 23 }),
+        NOW,
+        TORONTO,
+      ),
+    ).toBe("~23+ working windows, done after Oct 30 04:00");
   });
 });
 

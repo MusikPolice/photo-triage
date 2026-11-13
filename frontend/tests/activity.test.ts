@@ -17,6 +17,7 @@ function activity(status: "running" | "paused", done = 0): Activity {
         running: 0,
         errored: 0,
         parked: 0,
+        eta_is_minimum: false,
       },
     ],
   };

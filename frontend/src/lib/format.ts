@@ -138,21 +138,25 @@ export function formatSpan(ms: number, { locale }: Locale = {}): string {
   return `${days} days`;
 }
 
-/** When a stage will be done: "~3 h left" without quiet hours; with them,
- * "done ~today 23:40" in this working window, or "~23 working windows, done ~Dec 5
- * 04:00" across several. Null without an estimate (no throughput yet, nothing left,
- * or paused or stopped). */
+/** When a stage will be done, after the work queued ahead of it: "~3 h left"
+ * without quiet hours; with them, "done ~today 23:40" in this working window, or
+ * "~23 working windows, done ~Dec 5 04:00" across several. When a stage ahead has
+ * no pace yet, the estimate is a minimum: "3 h+ left", "done after …". Null
+ * without an estimate (no throughput yet, nothing left, or paused or stopped). */
 export function formatEta(stage: StageActivity, now: Date, locale: Locale = {}): string | null {
   if (stage.eta_at == null) return null;
   const at = new Date(stage.eta_at);
+  const minimum = stage.eta_is_minimum;
   if (stage.eta_windows == null) {
     const span = formatSpan(at.getTime() - now.getTime(), locale);
+    if (minimum) return span.startsWith("<") ? "1 min+ left" : `${span}+ left`;
     return span.startsWith("<") ? `${span} left` : `~${span} left`;
   }
-  const done = `done ~${formatWhen(at, now, locale)}`;
-  return stage.eta_windows <= 1
-    ? done
-    : `~${formatCount(stage.eta_windows, locale)} working windows, ${done}`;
+  const when = formatWhen(at, now, locale);
+  const done = minimum ? `done after ${when}` : `done ~${when}`;
+  if (stage.eta_windows <= 1) return done;
+  const windows = `${formatCount(stage.eta_windows, locale)}${minimum ? "+" : ""}`;
+  return `~${windows} working windows, ${done}`;
 }
 
 /** A working stage's pace and estimate, e.g. "350/min · ~3 h left". Null for a

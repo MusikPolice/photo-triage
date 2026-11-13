@@ -238,6 +238,11 @@ export interface components {
       errored: number;
       /** Eta At */
       eta_at?: string | null;
+      /**
+       * Eta Is Minimum
+       * @default false
+       */
+      eta_is_minimum: boolean;
       /** Eta Windows */
       eta_windows?: number | null;
       /**
