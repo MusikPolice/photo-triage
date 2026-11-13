@@ -12,6 +12,7 @@
     stageCounts,
     stageName,
     stageRuns,
+    stageSpeed,
     workerHold,
   } from "./lib/format";
 
@@ -101,6 +102,7 @@
       {#each groups.working as stage (stage.stage)}
         {@const counts = stageCounts(stage)}
         {@const runs = stageRuns(stage, now)}
+        {@const speed = stageSpeed(stage, now)}
         <li>
           <div class="head">
             <div class="label">
@@ -129,6 +131,7 @@
             <span>{doneOfTotal(stage)} · {formatPercent(stage.done, stage.total)}</span>
             <span class="muted">{counts}</span>
           </div>
+          {#if speed !== null}<p class="runs muted">{speed}</p>{/if}
           {#if runs !== null}<p class="runs muted">{runs}</p>{/if}
         </li>
       {/each}

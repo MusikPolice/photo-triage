@@ -25,7 +25,8 @@ from photo_triage.api.deps import (
     get_settings,
 )
 from photo_triage.api.feed import Feed
-from photo_triage.db.models import Job, JobStatus
+from photo_triage.db.models import Job, JobStats, JobStatus
+from photo_triage.eta import finish_at
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
 from photo_triage.worker.clock import Clock
@@ -70,6 +71,16 @@ class StageActivity(BaseModel):
     or the pipeline queued it."""
     next_scheduled_at: AwareDatetime | None = None
     """When the schedule queues the stage next: the walk, on `SCAN_SCHEDULE`."""
+    throughput_per_min: float | None = None
+    """Item stages (and noop): items done per minute of the worker's time on them, over the
+    last `THROUGHPUT_WINDOW`. None with no work in that time."""
+    eta_at: AwareDatetime | None = None
+    """Item stages with work left and a throughput: when it will be done, counting
+    only the time outside quiet hours. None while the stage or the worker is paused,
+    or the worker is stopped."""
+    eta_windows: int | None = None
+    """With quiet hours, how many working windows the work left spans (1: this one,
+    or the next during quiet hours). None without quiet hours."""
 
 
 class Activity(BaseModel):
@@ -79,6 +90,31 @@ class Activity(BaseModel):
 
 
 type JobCounts = dict[tuple[Stage, JobStatus], int]
+type Throughputs = dict[str, float]
+"""Items per busy minute, by stage."""
+
+THROUGHPUT_WINDOW = dt.timedelta(hours=24)
+"""How far back throughput looks: long enough to span a night's run during the
+day, short enough to follow a change of pace."""
+
+
+def read_throughputs(session: Session, now: dt.datetime) -> Throughputs:
+    """Each stage's items per busy minute over `THROUGHPUT_WINDOW`, from the hourly
+    `job_stats` rows (a range over its primary key). Busy time, not wall-clock time,
+    so pauses and quiet hours don't drag it down."""
+    since = (now - THROUGHPUT_WINDOW).replace(minute=0, second=0, microsecond=0)
+    rows = session.execute(
+        sa.select(
+            JobStats.stage, sa.func.sum(JobStats.processed), sa.func.sum(JobStats.busy_seconds)
+        )
+        .where(JobStats.hour_start_at >= since)
+        .group_by(JobStats.stage)
+    )
+    return {
+        stage: processed / (busy_s / 60)
+        for stage, processed, busy_s in rows
+        if processed and busy_s
+    }
 
 
 class LastRun(BaseModel):
@@ -119,10 +155,12 @@ def read_activity(
     real_now: dt.datetime,
     counts: JobCounts | None = None,
     walked: LastRun | None = None,
+    throughputs: Throughputs | None = None,
 ) -> Activity:
     """The activity at `now` (the app's clock), judging the heartbeat at `real_now`.
-    Jobs are counted, and the last walk read, unless `counts` (from `count_jobs`)
-    and `walked` (from `read_last_walk`) are given."""
+    Jobs are counted, the last walk read and the throughputs worked out, unless
+    `counts` (from `count_jobs`), `walked` (from `read_last_walk`) and `throughputs`
+    (from `read_throughputs`) are given."""
     state = observed_state(session, settings.worker_quiet_hours, settings.tz, now, real_now)
     paused = controls.paused_scopes(session)
     last = heartbeat.last(session)
@@ -131,6 +169,9 @@ def read_activity(
         counts = count_jobs(session, stages)
     if walked is None:
         walked = read_last_walk(session)
+    if throughputs is None:
+        throughputs = read_throughputs(session, now)
+    held = state.status != WorkerStatus.RUNNING and state.status != WorkerStatus.QUIET
     return Activity(
         worker=WorkerActivity(
             status=state.status,
@@ -139,9 +180,40 @@ def read_activity(
             last_seen_at=None if last is None else last.seen_at,
         ),
         stages=[
-            _with_runs(settings, now, walked, _stage_activity(stage, counts, stage in paused))
+            _with_eta(
+                settings,
+                now,
+                throughputs,
+                held,
+                _with_runs(settings, now, walked, _stage_activity(stage, counts, stage in paused)),
+            )
             for stage in stages
         ],
+    )
+
+
+def _with_eta(
+    settings: Settings, now: dt.datetime, throughputs: Throughputs, held: bool, row: StageActivity
+) -> StageActivity:
+    """Add an item stage's throughput, and its ETA unless it can't run now: it's
+    paused, or the worker is paused or stopped. Quiet hours are counted in. Batch
+    stages get neither: a run covers the whole library."""
+    # Noop jobs stand for one unit of work each, as items do (dev only).
+    if row.kind != "item" and row.stage != Stage.NOOP:
+        return row
+    rate = throughputs.get(row.stage)
+    left = row.pending + row.running + row.errored
+    if rate is None or left == 0 or held or row.paused:
+        return row.model_copy(update={"throughput_per_min": rate})
+    eta = finish_at(
+        now, dt.timedelta(minutes=left / rate), settings.worker_quiet_hours, settings.tz
+    )
+    return row.model_copy(
+        update={
+            "throughput_per_min": rate,
+            "eta_at": None if eta is None else eta.done_at,
+            "eta_windows": None if eta is None else eta.windows,
+        }
     )
 
 
@@ -196,6 +268,7 @@ class ActivityReader:
         self._data_version: int | None = None
         self._counts: JobCounts | None = None
         self._walked: LastRun | None = None
+        self._throughputs: Throughputs | None = None
 
     def __call__(self) -> Activity:
         if self._connection is None:
@@ -208,6 +281,7 @@ class ActivityReader:
                 if version != self._data_version or self._counts is None:
                     self._counts = count_jobs(session, shown_stages(self._settings))
                     self._walked = read_last_walk(session)
+                    self._throughputs = read_throughputs(session, self._clock())
                     self._data_version = version
                 return read_activity(
                     session,
@@ -216,6 +290,7 @@ class ActivityReader:
                     self._real_clock(),
                     self._counts,
                     self._walked,
+                    self._throughputs,
                 )
         except Exception:
             self.close()  # start again on a fresh connection

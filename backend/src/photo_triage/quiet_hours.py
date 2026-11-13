@@ -86,6 +86,19 @@ class QuietHours:
             at = until = max(ends)
         return until
 
+    def next_start(self, after: dt.datetime, zone: ZoneInfo) -> dt.datetime | None:
+        """When the next quiet stretch starts after `after` (aware UTC). None only if
+        no period starts within two weeks, which `parse` makes impossible."""
+        if after.tzinfo is None:
+            raise ValueError(f"naive datetime {after!r}; use an aware datetime")
+        after = after.astimezone(dt.UTC)
+        starts = [
+            start
+            for start, _ in self._intervals(after.astimezone(zone).date(), zone)
+            if start > after
+        ]
+        return min(starts, default=None)
+
     def is_quiet(self, now: dt.datetime, zone: ZoneInfo) -> bool:
         return self.quiet_until(now, zone) is not None
 

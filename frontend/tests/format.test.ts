@@ -6,12 +6,16 @@ import {
   doneOfTotal,
   formatPercent,
   formatTime,
+  formatEta,
+  formatRate,
+  formatSpan,
   formatWhen,
   groupStages,
   fraction,
   stageCounts,
   stageName,
   stageRuns,
+  stageSpeed,
   walkQueued,
   workerHold,
   workerLabel,
@@ -135,6 +139,79 @@ describe("stageRuns", () => {
 
   it("is null for stages with no runs to show", () => {
     expect(stageRuns(stage(), NOW, TORONTO)).toBeNull();
+  });
+});
+
+describe("formatRate", () => {
+  it.each([
+    [350.4, "350/min"],
+    [12.34, "12/min"],
+    [2.345, "2.3/min"],
+    [0.2, "12/h"],
+    [0.01, "0.6/h"],
+  ])("%f a minute is %s", (perMin, text) => {
+    expect(formatRate(perMin, TORONTO)).toBe(text);
+  });
+});
+
+describe("formatSpan", () => {
+  it.each([
+    [20_000, "<1 min"],
+    [45 * 60_000, "45 min"],
+    [89 * 60_000, "89 min"],
+    [3 * 3_600_000, "3 h"],
+    [35 * 3_600_000, "35 h"],
+    [60 * 3_600_000, "2.5 days"],
+  ])("%i ms is %s", (ms, text) => {
+    expect(formatSpan(ms, TORONTO)).toBe(text);
+  });
+});
+
+describe("formatEta", () => {
+  const clip = (fields: Partial<StageActivity>): StageActivity =>
+    stage({ stage: "clip", pending: 10, throughput_per_min: 60, ...fields });
+
+  it("gives the time left without quiet hours", () => {
+    expect(formatEta(clip({ eta_at: "2026-10-07T21:00:00Z" }), NOW, TORONTO)).toBe("~3 h left");
+  });
+
+  it("doesn't say about less than a minute", () => {
+    expect(formatEta(clip({ eta_at: "2026-10-07T18:00:30Z" }), NOW, TORONTO)).toBe("<1 min left");
+  });
+
+  it("gives when it's done within one working window", () => {
+    const eta = formatEta(clip({ eta_at: "2026-10-07T21:30:00Z", eta_windows: 1 }), NOW, TORONTO);
+    expect(eta).toBe("done ~today 17:30");
+  });
+
+  it("counts the working windows across quiet hours", () => {
+    const eta = formatEta(clip({ eta_at: "2026-10-30T08:00:00Z", eta_windows: 23 }), NOW, TORONTO);
+    expect(eta).toBe("~23 working windows, done ~Oct 30 04:00");
+  });
+
+  it("is null without an estimate", () => {
+    expect(formatEta(clip({}), NOW, TORONTO)).toBeNull();
+  });
+});
+
+describe("stageSpeed", () => {
+  it("joins the pace and the estimate", () => {
+    const speed = stageSpeed(
+      stage({ throughput_per_min: 350, eta_at: "2026-10-07T18:45:00Z" }),
+      NOW,
+      TORONTO,
+    );
+    expect(speed).toBe("350/min · ~45 min left");
+  });
+
+  it("shows the pace alone while held", () => {
+    expect(stageSpeed(stage({ throughput_per_min: 350, paused: true }), NOW, TORONTO)).toBe(
+      "350/min",
+    );
+  });
+
+  it("is null for a stage with neither", () => {
+    expect(stageSpeed(stage(), NOW, TORONTO)).toBeNull();
   });
 });
 
