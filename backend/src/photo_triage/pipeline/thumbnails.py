@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from photo_triage.db.models import Item, ItemFrame, Job, MediaType
 from photo_triage.files import remove_derived, replace_derived
+from photo_triage.pipeline import pictures
 from photo_triage.pipeline.frames import frame_path
 
 logger = logging.getLogger(__name__)
@@ -56,15 +57,19 @@ def thumbnail_path(derived_dir: Path, item_id: int, kind: Thumbnail) -> Path:
 
 def draw(source: Path, long_edge: int) -> Image.Image:
     """The picture at `source`, upright, at most `long_edge` pixels on its long edge."""
+
+    def upright(image: Image.Image) -> Image.Image:
+        # JPEG decodes at a fraction of full size if that's still big enough.
+        image.draft("RGB", (long_edge, long_edge))
+        return ImageOps.exif_transpose(image).convert("RGB")
+
     try:
-        with Image.open(source) as image:
-            # JPEG decodes at a fraction of full size if that's still big enough.
-            image.draft("RGB", (long_edge, long_edge))
-            upright = ImageOps.exif_transpose(image).convert("RGB")
+        # A damaged photo's missing part is grey; the scan records that it's damaged.
+        picture, _ = pictures.decode(source, upright)
     except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as e:
         raise ThumbnailError(f"can't draw {source.name}: {e}") from e
-    upright.thumbnail((long_edge, long_edge), Image.Resampling.LANCZOS)
-    return upright
+    picture.thumbnail((long_edge, long_edge), Image.Resampling.LANCZOS)
+    return picture
 
 
 def encode(image: Image.Image) -> bytes:

@@ -16,6 +16,8 @@ from typing import Any
 import pytest
 from PIL import Image
 
+from photo_triage.pipeline.pictures import decode
+
 _SCRIPT = Path(__file__).parents[3] / "scripts" / "make_synthetic_fixtures.py"
 _spec = importlib.util.spec_from_file_location("make_synthetic_fixtures", _SCRIPT)
 assert _spec and _spec.loader
@@ -223,5 +225,18 @@ def test_the_screenshot_has_no_camera(tags: dict[str, dict[str, Any]]) -> None:
 def test_the_truncated_jpeg_reads_its_header_but_not_its_pixels() -> None:
     with Image.open(SYNTHETIC / "broken/truncated.jpg") as image:
         assert image.size == (640, 480)
-        with pytest.raises(OSError, match="truncated"):
+        with pytest.raises(OSError):
             image.load()
+    # Not even partly: it stops before its picture data.
+    with pytest.raises(OSError):
+        decode(SYNTHETIC / "broken/truncated.jpg", lambda image: image.tobytes())
+
+
+def test_the_damaged_jpeg_reads_only_partly() -> None:
+    with (
+        Image.open(SYNTHETIC / "broken/damaged.jpg") as image,
+        pytest.raises(OSError, match="truncated"),
+    ):
+        image.load()
+    pixels, damaged = decode(SYNTHETIC / "broken/damaged.jpg", lambda image: image.tobytes())
+    assert (len(pixels), damaged) == (640 * 480 * 3, True)

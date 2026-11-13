@@ -24,8 +24,9 @@ from photo_triage.worker.queue import JobQueue, RetryPolicy, Stage
 from photo_triage.worker.stages import ItemStage, build_runners, item_stages
 
 START = dt.datetime(2026, 11, 8, 2, tzinfo=dt.UTC)
-SUPPORTED = 28
-"""Tier-1 files the scanner takes: every one but the truncated JPEG and the PNG."""
+SUPPORTED = 29
+"""Tier-1 files the scanner takes: every one but the truncated JPEG and the PNG. The
+damaged JPEG is among them."""
 
 
 class Pipeline:

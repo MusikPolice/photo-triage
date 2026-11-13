@@ -20,6 +20,7 @@ PHASE_1_COLUMNS = {
     "items": {
         "id",
         "content_hash",
+        "damaged",
         "path",
         "media_type",
         "file_size_bytes",

@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from photo_triage.db.models import Embedding, Item, ItemFrame, Job, MediaType
 from photo_triage.ml import ClipEmbedder
 from photo_triage.pipeline.frames import frame_path
+from photo_triage.pipeline.pictures import decode
 
 logger = logging.getLogger(__name__)
 
@@ -103,15 +104,19 @@ def _sources(session: Session, item: Item, photo_dir: Path, derived_dir: Path) -
     return sources
 
 
+def _upright(image: Image.Image, least: int) -> Image.Image:
+    image.draft("RGB", (least, least))  # JPEG only; others decode in full
+    return ImageOps.exif_transpose(image).convert("RGB")
+
+
 def _open(sources: Sequence[Path], clip: ClipEmbedder) -> list[Image.Image]:
     """Each picture, upright. A video's frames are upright already."""
     least = clip.image_size * _DECODE_FACTOR
     pictures: list[Image.Image] = []
     for source in sources:
         try:
-            with Image.open(source) as image:
-                image.draft("RGB", (least, least))  # JPEG only; others decode in full
-                pictures.append(ImageOps.exif_transpose(image).convert("RGB"))
+            picture, _ = decode(source, lambda image: _upright(image, least))
+            pictures.append(picture)
         except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as e:
             raise EmbedError(f"can't read {source.name}: {e}") from e
     return pictures

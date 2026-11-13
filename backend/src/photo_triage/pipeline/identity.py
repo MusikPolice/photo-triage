@@ -18,6 +18,7 @@ import pillow_heif
 from PIL import Image
 
 from photo_triage.db.models import MediaType
+from photo_triage.pipeline import pictures
 
 pillow_heif.register_heif_opener()  # pyright: ignore[reportUnknownMemberType]
 
@@ -42,19 +43,30 @@ def media_type(path: Path) -> MediaType | None:
 def content_hash(path: Path, kind: MediaType) -> str:
     """The SHA-256 of the file's content, in hex. Raises `HashError` if it can't be
     decoded."""
-    return _photo_hash(path) if kind == MediaType.PHOTO else _video_hash(path)
+    return hash_content(path, kind)[0]
 
 
-def _photo_hash(path: Path) -> str:
+def hash_content(path: Path, kind: MediaType) -> tuple[str, bool]:
+    """`content_hash`, and whether the file is a damaged photo: only partly readable
+    (`photo_triage.pipeline.pictures`). Its hash covers the part that decodes, with
+    the rest filled as Pillow fills it, so it's stable while the file is unchanged."""
+    if kind == MediaType.PHOTO:
+        return _photo_hash(path)
+    return _video_hash(path), False
+
+
+def _photo_hash(path: Path) -> tuple[str, bool]:
     """The decoded pixels, with the mode and size so equal bytes in another shape
     differ. EXIF orientation is metadata, so it isn't applied."""
+
+    def hashed(image: Image.Image) -> str:
+        header = f"{image.mode} {image.width}x{image.height}\n"
+        return hashlib.sha256(header.encode() + image.tobytes()).hexdigest()
+
     try:
-        with Image.open(path) as image:
-            pixels = image.tobytes()
-            header = f"{image.mode} {image.width}x{image.height}\n"
+        return pictures.decode(path, hashed)
     except (OSError, ValueError, Image.DecompressionBombError) as e:
         raise HashError(f"can't decode {path.name}: {e}") from e
-    return hashlib.sha256(header.encode() + pixels).hexdigest()
 
 
 def _video_hash(path: Path) -> str:

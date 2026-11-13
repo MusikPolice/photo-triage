@@ -123,6 +123,8 @@ Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MO
 
 **Per item, the scanner records:** path, type, dimensions, duration (video), `taken_at_local` (`DateTimeOriginal` → `CreateDate` → `DateTime` → file mtime), existing keywords/people/regions/review markers already in the file. Videos take `taken_at_local` from `Keys:CreationDate`, which phones write in local time, then from `QuickTime:CreateDate`, which QuickTime stores in UTC and is converted to `TZ`, then the mtime. A file's mtime is read in `TZ` too.
 
+**Damaged photos.** A photo whose file is cut short, so only the top of its picture decodes, is still scanned: its hash covers what decodes, its thumbnails and embedding come from that, with the missing part grey, and it's recorded as `damaged`. Phase 5's junk review and Phase 3's filters can list damaged photos for the user to replace from a backup. A file with no picture data at all can't be hashed, so its scan fails and is parked.
+
 A scan is a batch `walk` job, which lists the library and compares it with `items`, plus one `scan` job per new or changed file, which hashes it, and then a `metadata_read` job, which reads what's recorded above from inside the file. So scanning shows progress, throughput and ETA like every other stage (§7). The scanner itself is cheap; heavy per-item work (thumbnails, CLIP, quality, faces, tagging) is enqueued as separate pipeline stages (§6.11).
 
 **Discovery.** A scheduled nightly incremental scan (`SCAN_SCHEDULE`, cron syntax) plus a "Scan now" button. Files that have disappeared are marked missing (not deleted from the DB) until a later scan confirms they're gone or finds them at a new path.
@@ -309,6 +311,7 @@ items
                                                       -- since exact copies are items too
   file_size_bytes, file_mtime_ns, width, height, duration_s, orientation  -- orientation: EXIF 1-8, photos
   taken_at_local, first_seen_at, last_seen_at, missing_since
+  damaged                     -- a photo that decodes only partly (file cut short)
   status (active | trashed | purged | missing)
 
 item_frames                       -- videos only

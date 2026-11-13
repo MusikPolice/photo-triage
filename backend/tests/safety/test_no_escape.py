@@ -138,7 +138,7 @@ def test_a_full_worker_run_leaves_every_library_file_as_it_was(
 
     photos = _relative(run, run.settings.photo_dir)
     library = {p: e for p, e in run.before.items() if Path(p).is_relative_to(photos)}
-    assert sum(e.kind == "file" for e in library.values()) == 30  # every tier-1 file
+    assert sum(e.kind == "file" for e in library.values()) == 31  # every tier-1 file
     after = {p: e for p, e in run.after.items() if Path(p).is_relative_to(photos)}
     # Bytes, size and mtime of each file, and each folder's mtime, so a file added and
     # removed again shows too.

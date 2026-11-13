@@ -67,7 +67,8 @@ class ItemStage:
 def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
     """The item stages, with their versions. Each later stage's issue adds its own."""
     return {
-        Stage.SCAN: ItemStage(code_version=1),
+        # 2: scans damaged photos and records them (#95), so those parked at 1 run again.
+        Stage.SCAN: ItemStage(code_version=2),
         # Separate from scan, so a new field to import re-reads every file without
         # hashing it again.
         # 2: records the orientation.
