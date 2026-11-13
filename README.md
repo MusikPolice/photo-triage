@@ -205,7 +205,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 | `just check` | Everything CI runs: format, lint, pyright, import contracts, tests, coverage, frontend checks, API types contract |
 | `just db-migrate` | Create or upgrade the database, backing it up first. The API and worker refuse to start until it's at the newest revision |
 | `just api-types` | Regenerate the frontend's TypeScript API types after changing the API |
-| `just dry-run-full` | Scale test against `/mnt/pictures` with metadata writes disabled |
+| `just dry-run-full` | The stack against the whole library at `/mnt/pictures`, read-only, with writes off and its data in `~/.cache/photo-triage/dry-run`, to measure the pipeline at scale. `just dry-run-full report` prints the numbers so far; `just dry-run-full down` stops it |
 | `just doctor` | Verify the environment, then `.env` and the settings it gives |
 | `just fmt` | Format and auto-fix lint |
 | `just web` | Vite dev server for the frontend, proxying `/api` to `just api` |
