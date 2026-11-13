@@ -48,6 +48,15 @@ def _memory() -> str:
     limit = (CGROUP / "memory.max").read_text().strip()
     if limit != "max":
         text += f", of {int(limit) / 2**20:.0f} MiB"
+    # The cgroup counts the page cache of the files the worker reads, which the
+    # kernel reclaims at the limit. The worker's own memory is the anonymous part.
+    stat = dict(line.split() for line in (CGROUP / "memory.stat").read_text().splitlines())
+    text += (
+        f". Of that, {int(stat['anon']) / 2**20:.0f} MiB is the worker's own and "
+        f"{int(stat['file']) / 2**20:.0f} MiB page cache"
+    )
+    events = dict(line.split() for line in (CGROUP / "memory.events").read_text().splitlines())
+    text += f"; {events.get('oom_kill', '0')} OOM kills"
     return text
 
 
