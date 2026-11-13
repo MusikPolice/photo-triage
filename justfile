@@ -148,6 +148,12 @@ image tag="photo-triage:dev":
 stack *args:
     scripts/stack.sh "$@"
 
+# The stack against the whole library at /mnt/pictures, read-only, for measuring at
+# scale; `just dry-run-full report` prints the numbers so far, `… down` stops it
+[positional-arguments]  # so a quoted argument stays one
+dry-run-full *args:
+    scripts/dry_run_full.sh "$@"
+
 # Every pre-commit hook against every file
 pre-commit:
     pre-commit run --all-files

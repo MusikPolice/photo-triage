@@ -1,0 +1,30 @@
+# `just dry-run-full` (dev-environment §5): compose.yaml against the real library,
+# with nothing able to write to it. Layered on compose.yaml by
+# scripts/dry_run_full.sh, which refuses to start unless the host's library mount
+# is read-only too.
+#
+# - /photos is mounted read-only, on top of the host mount being read-only.
+# - The trash is a scratch folder outside the library, not /photos/.photo-triage-trash.
+# - EXIF_WRITES_ENABLED=false: metadata writes are dry runs (plan §6.10).
+
+x-dry-run: &dry-run
+  environment:
+    TRASH_DIR: /trash
+    EXIF_WRITES_ENABLED: "false"
+  volumes:
+    - type: bind
+      source: ${PHOTO_DIR:?}
+      target: /photos
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
+      source: ${TRASH_DIR:?Set TRASH_DIR, a scratch folder outside the library}
+      target: /trash
+      bind:
+        create_host_path: false
+
+services:
+  migrate: *dry-run
+  app: *dry-run
+  worker: *dry-run
