@@ -2,7 +2,7 @@
 
 import pytest
 
-from photo_triage.api.activity import StageActivity, work_ahead
+from photo_triage.api.activity import StageActivity, Throughputs, work_ahead
 from photo_triage.worker.queue import BATCH_STAGES, Stage
 
 
@@ -22,7 +22,7 @@ def _row(stage: Stage, pending: int = 0, *, paused: bool = False) -> StageActivi
 
 def test_a_later_stage_adds_the_work_of_the_stages_before_it() -> None:
     rows = [_row(Stage.SCAN, 120), _row(Stage.THUMBNAIL, 60), _row(Stage.CLIP, 30)]
-    rates = {Stage.SCAN: 60.0, Stage.THUMBNAIL: 30.0, Stage.CLIP: 10.0}
+    rates: Throughputs = {Stage.SCAN: 60.0, Stage.THUMBNAIL: 30.0, Stage.CLIP: 10.0}
 
     ahead = work_ahead(rows, rates)
 
@@ -36,7 +36,7 @@ def test_a_later_stage_adds_the_work_of_the_stages_before_it() -> None:
 def test_stages_in_one_tier_are_done_together() -> None:
     # Scan and metadata reads share a priority, so the worker interleaves them.
     rows = [_row(Stage.SCAN, 60), _row(Stage.METADATA_READ, 120)]
-    rates = {Stage.SCAN: 60.0, Stage.METADATA_READ: 120.0}
+    rates: Throughputs = {Stage.SCAN: 60.0, Stage.METADATA_READ: 120.0}
 
     ahead = work_ahead(rows, rates)
 
