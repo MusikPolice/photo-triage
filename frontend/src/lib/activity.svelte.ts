@@ -1,6 +1,6 @@
 /** The activity, kept current from `/api/activity` and the event stream (plan §7). */
 
-import { EVENTS_URL, getActivity, setPaused, type Activity, type Stage } from "./api";
+import { EVENTS_URL, getActivity, scanNow, setPaused, type Activity, type Stage } from "./api";
 
 /** `connecting` until the first update, `live` while the stream is open, `lost`
  * while it's down and being retried. */
@@ -77,6 +77,12 @@ export class ActivityFeed {
    * without waiting for the stream. */
   async setPaused(paused: boolean, stage: Stage | null): Promise<void> {
     this.activity = await setPaused(paused, stage, this.#fetchFn);
+  }
+
+  /** Queue a walk of the library, and show the result without waiting for the
+   * stream. */
+  async scanNow(): Promise<void> {
+    this.activity = await scanNow(this.#fetchFn);
   }
 
   #connect(): void {

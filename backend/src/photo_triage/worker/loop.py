@@ -6,13 +6,16 @@ scanner can write to the database while a job runs. If the process dies mid-run,
 job stays `running` until `recover` puts it back at the next start.
 
 Before each claim the worker checks whether it's paused (`controls`) or in quiet
-hours, so a job that's running when either starts is finished first.
+hours, so a job that's running when either starts is finished first. Before that,
+it queues a walk if `SCAN_SCHEDULE` says one is due, even when paused or quiet
+(`photo_triage.worker.scan_schedule`).
 
 When an item stage's job finishes, it queues the stages after it that are now due
 for the item (`reconcile.chain`), so new items flow straight through. After each
 walk it reconciles the item stages (`photo_triage.worker.reconcile`).
 """
 
+import datetime as dt
 import logging
 import threading
 import time
@@ -26,9 +29,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from photo_triage.db.models import JOB_IS_OPEN, Job, JobStatus
 from photo_triage.quiet_hours import UTC_ZONE, QuietHours
+from photo_triage.schedule import Schedule
 from photo_triage.worker.clock import Clock, Timer, utc_now
 from photo_triage.worker.queue import JobQueue, Stage
 from photo_triage.worker.reconcile import chain, reconcile
+from photo_triage.worker.scan_schedule import scheduled_walk_due
 from photo_triage.worker.stages import ItemStage, Runner
 from photo_triage.worker.state import WorkerState, WorkerStatus, read_state
 
@@ -54,9 +59,11 @@ class Worker:
         zone: ZoneInfo = UTC_ZONE,
         summary_interval_s: float = SUMMARY_INTERVAL_S,
         item_stages: Mapping[str, ItemStage] | None = None,
+        scan_schedule: Schedule | None = None,
     ) -> None:
-        """`clock` should be the queue's clock. `zone` is the one quiet hours are in.
-        `item_stages` are the stages to reconcile, whose versions jobs record."""
+        """`clock` should be the queue's clock. `zone` is the one quiet hours and
+        `scan_schedule` are in. `item_stages` are the stages to reconcile, whose
+        versions jobs record. Without `scan_schedule`, walks are queued only by hand."""
         self._engine = engine
         self._sessions = sessionmaker(engine, expire_on_commit=False)
         self._runners = dict(runners)
@@ -67,6 +74,9 @@ class Worker:
         self._timer = timer
         self._quiet_hours = quiet_hours
         self._zone = zone
+        self._scan_schedule = scan_schedule
+        self._schedule_checked_to: dt.datetime | None = None
+        """The schedule has nothing due before this, unless a walk is deleted."""
         self._state = WorkerState()
         self._progress = _Progress(timer, summary_interval_s)
 
@@ -106,6 +116,7 @@ class Worker:
         """Claim the next job for a stage this worker runs, run it, and record the
         result. Returns False if there was nothing to run, or the worker is paused or
         in quiet hours."""
+        self._queue_scheduled_walk()
         with self._sessions.begin() as session:
             state = read_state(session, self._quiet_hours, self._zone, self._clock())
             job = None
@@ -164,6 +175,25 @@ class Worker:
                 self._summarize_if_due()
                 stop.wait(idle_poll_s)
         self._summarize()
+
+    def _queue_scheduled_walk(self) -> None:
+        """Queue a walk if one is due on `SCAN_SCHEDULE`. Looks in the database only
+        once each scheduled time has passed, not before every claim."""
+        if self._scan_schedule is None:
+            return
+        now = self._clock()
+        if self._schedule_checked_to is not None and now < self._schedule_checked_to:
+            return
+        with self._sessions.begin() as session:
+            due_at = scheduled_walk_due(session, self._scan_schedule, self._zone, now)
+            if due_at is not None:
+                self._queue.enqueue(session, Stage.WALK)
+        if due_at is not None:
+            logger.info(
+                "Queued the walk scheduled for %s",
+                f"{due_at.astimezone(self._zone):%a %Y-%m-%d %H:%M %Z}",
+            )
+        self._schedule_checked_to = self._scan_schedule.next_at(now, self._zone)
 
     def _chain(self, session: Session, job: Job) -> list[str]:
         """Queue the item stages that `job`, just done, makes due for its item."""

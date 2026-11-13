@@ -352,8 +352,10 @@ captions
 jobs                               -- error: retries after retry_at; parked: gave up
   id, item_id (nullable), stage, priority, status (pending | running | done | error | parked),
   attempts, last_error, enqueued_at, retry_at, started_at, finished_at,
-  stage_version, output_changed_at  -- per-item stages: the version it ran at; when its
+  stage_version, output_changed_at, -- per-item stages: the version it ran at; when its
                                     -- output last changed (§6.11, reconciling)
+  actor                             -- who queued it by hand ("Scan now"); null when the
+                                    -- schedule or the pipeline did
 
 job_stats                          -- one row per stage per UTC hour; history, throughput, ETA
   hour_start_at, stage, processed, errors, busy_seconds

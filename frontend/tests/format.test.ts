@@ -6,10 +6,13 @@ import {
   doneOfTotal,
   formatPercent,
   formatTime,
+  formatWhen,
   groupStages,
   fraction,
   stageCounts,
   stageName,
+  stageRuns,
+  walkQueued,
   workerHold,
   workerLabel,
 } from "../src/lib/format";
@@ -81,6 +84,69 @@ describe("formatTime", () => {
   it("adds the weekday on another local day, though it's the same UTC day", () => {
     // 02:00 UTC on the 8th is Wednesday evening in Toronto; 06:00 is Thursday.
     expect(formatTime(new Date("2026-10-08T06:00:00Z"), NOW, TORONTO)).toBe("Thu 02:00");
+  });
+});
+
+describe("formatWhen", () => {
+  it("says today for the same local day", () => {
+    expect(formatWhen(new Date("2026-10-07T06:04:00Z"), NOW, TORONTO)).toBe("today 02:04");
+  });
+
+  it("gives the weekday within six days, before or after", () => {
+    expect(formatWhen(new Date("2026-10-08T06:00:00Z"), NOW, TORONTO)).toBe("Thu 02:00");
+    expect(formatWhen(new Date("2026-10-03T06:00:00Z"), NOW, TORONTO)).toBe("Sat 02:00");
+  });
+
+  it("gives the date further away, so a weekday isn't ambiguous", () => {
+    expect(formatWhen(new Date("2026-09-20T06:00:00Z"), NOW, TORONTO)).toBe("Sep 20 02:00");
+  });
+});
+
+describe("stageRuns", () => {
+  const walk = (fields: Partial<StageActivity> = {}): StageActivity =>
+    stage({ stage: "walk", kind: "batch", ...fields });
+
+  it("gives the last run and the next", () => {
+    const runs = stageRuns(
+      walk({
+        last_finished_at: "2026-10-07T06:04:00Z",
+        next_scheduled_at: "2026-10-08T06:00:00Z",
+      }),
+      NOW,
+      TORONTO,
+    );
+    expect(runs).toBe("Last run today 02:04 · Next Thu 02:00");
+  });
+
+  it("says who asked for a run by hand", () => {
+    const runs = stageRuns(
+      walk({ last_finished_at: "2026-10-07T15:00:00Z", last_actor: "anonymous" }),
+      NOW,
+      TORONTO,
+    );
+    expect(runs).toBe("Last run today 11:00, by anonymous");
+  });
+
+  it("says a scheduled stage has never run", () => {
+    expect(stageRuns(walk({ next_scheduled_at: "2026-10-08T06:00:00Z" }), NOW, TORONTO)).toBe(
+      "Never run · Next Thu 02:00",
+    );
+  });
+
+  it("is null for stages with no runs to show", () => {
+    expect(stageRuns(stage(), NOW, TORONTO)).toBeNull();
+  });
+});
+
+describe("walkQueued", () => {
+  it.each([
+    [{}, false],
+    [{ pending: 1 }, true],
+    [{ running: 1 }, true],
+    [{ errored: 1 }, true],
+    [{ done: 1, parked: 1 }, false],
+  ] as const)("%o is %s", (fields, queued) => {
+    expect(walkQueued(stage({ stage: "walk", ...fields }))).toBe(queued);
   });
 });
 
