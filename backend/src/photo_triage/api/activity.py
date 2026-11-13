@@ -25,8 +25,9 @@ from photo_triage.api.deps import (
     get_settings,
 )
 from photo_triage.api.feed import Feed
-from photo_triage.db.models import Job, JobStats, JobStatus
+from photo_triage.db.models import Item, Job, JobStats, JobStatus
 from photo_triage.eta import finish_at
+from photo_triage.pipeline.thumbnails import Thumbnail, thumbnail_path
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
 from photo_triage.worker.clock import Clock
@@ -47,6 +48,16 @@ class WorkerActivity(BaseModel):
     """When quiet hours end, while `status` is `quiet`."""
     last_seen_at: AwareDatetime | None
     """The worker's latest heartbeat, or None if it has never run."""
+
+
+class CurrentItem(BaseModel):
+    """The item a stage's running job is working on."""
+
+    id: int
+    path: str
+    """Relative to `PHOTO_DIR`."""
+    has_thumbnail: bool
+    """Whether its 64 px thumbnail exists yet, at `/api/items/{id}/thumbnail?size=64`."""
 
 
 class StageActivity(BaseModel):
@@ -78,6 +89,9 @@ class StageActivity(BaseModel):
     """Item stages with work left and a throughput: when it will be done, counting
     only the time outside quiet hours. None while the stage or the worker is paused,
     or the worker is stopped."""
+    current: CurrentItem | None = None
+    """Item stages: the item its running job is working on. None while no job runs,
+    and always for batch stages."""
     eta_windows: int | None = None
     """With quiet hours, how many working windows the work left spans (1: this one,
     or the next during quiet hours). None without quiet hours."""
@@ -90,12 +104,25 @@ class Activity(BaseModel):
 
 
 type JobCounts = dict[tuple[Stage, JobStatus], int]
+type Running = dict[str, tuple[int, str]]
+"""Each stage's running item job: its item's id and path."""
 type Throughputs = dict[str, float]
 """Items per busy minute, by stage."""
 
 THROUGHPUT_WINDOW = dt.timedelta(hours=24)
 """How far back throughput looks: long enough to span a night's run during the
 day, short enough to follow a change of pace."""
+
+
+def read_running(session: Session, stages: list[Stage]) -> Running:
+    """The item each stage is working on, from its running job. One worker means one
+    at most, over `ix_jobs_stage_status`."""
+    rows = session.execute(
+        sa.select(Job.stage, Item.id, Item.path)
+        .join(Item, Item.id == Job.item_id)
+        .where(Job.stage.in_(stages), Job.status == JobStatus.RUNNING)
+    )
+    return {stage: (item_id, path) for stage, item_id, path in rows}
 
 
 def read_throughputs(session: Session, now: dt.datetime) -> Throughputs:
@@ -156,11 +183,12 @@ def read_activity(
     counts: JobCounts | None = None,
     walked: LastRun | None = None,
     throughputs: Throughputs | None = None,
+    running: Running | None = None,
 ) -> Activity:
     """The activity at `now` (the app's clock), judging the heartbeat at `real_now`.
     Jobs are counted, the last walk read and the throughputs worked out, unless
-    `counts` (from `count_jobs`), `walked` (from `read_last_walk`) and `throughputs`
-    (from `read_throughputs`) are given."""
+    `counts` (from `count_jobs`), `walked` (from `read_last_walk`), `throughputs`
+    (from `read_throughputs`) and `running` (from `read_running`) are given."""
     state = observed_state(session, settings.worker_quiet_hours, settings.tz, now, real_now)
     paused = controls.paused_scopes(session)
     last = heartbeat.last(session)
@@ -171,6 +199,8 @@ def read_activity(
         walked = read_last_walk(session)
     if throughputs is None:
         throughputs = read_throughputs(session, now)
+    if running is None:
+        running = read_running(session, stages)
     held = state.status != WorkerStatus.RUNNING and state.status != WorkerStatus.QUIET
     return Activity(
         worker=WorkerActivity(
@@ -180,16 +210,32 @@ def read_activity(
             last_seen_at=None if last is None else last.seen_at,
         ),
         stages=[
-            _with_eta(
+            _with_current(
                 settings,
-                now,
-                throughputs,
-                held,
-                _with_runs(settings, now, walked, _stage_activity(stage, counts, stage in paused)),
+                running,
+                _with_eta(
+                    settings,
+                    now,
+                    throughputs,
+                    held,
+                    _with_runs(
+                        settings, now, walked, _stage_activity(stage, counts, stage in paused)
+                    ),
+                ),
             )
             for stage in stages
         ],
     )
+
+
+def _with_current(settings: Settings, running: Running, row: StageActivity) -> StageActivity:
+    """Add the item the stage's running job is on, if any."""
+    if row.stage not in running:
+        return row
+    item_id, path = running[row.stage]
+    thumbnail = thumbnail_path(settings.derived_dir, item_id, Thumbnail.MAP)
+    current = CurrentItem(id=item_id, path=path, has_thumbnail=thumbnail.exists())
+    return row.model_copy(update={"current": current})
 
 
 def _with_eta(
@@ -269,6 +315,7 @@ class ActivityReader:
         self._counts: JobCounts | None = None
         self._walked: LastRun | None = None
         self._throughputs: Throughputs | None = None
+        self._running: Running | None = None
 
     def __call__(self) -> Activity:
         if self._connection is None:
@@ -282,6 +329,7 @@ class ActivityReader:
                     self._counts = count_jobs(session, shown_stages(self._settings))
                     self._walked = read_last_walk(session)
                     self._throughputs = read_throughputs(session, self._clock())
+                    self._running = read_running(session, shown_stages(self._settings))
                     self._data_version = version
                 return read_activity(
                     session,
@@ -291,6 +339,7 @@ class ActivityReader:
                     self._counts,
                     self._walked,
                     self._throughputs,
+                    self._running,
                 )
         except Exception:
             self.close()  # start again on a fresh connection

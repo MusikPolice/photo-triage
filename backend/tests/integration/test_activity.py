@@ -18,7 +18,8 @@ from photo_triage.api.activity import Activity, ActivityReader, StageActivity
 from photo_triage.api.app import create_app
 from photo_triage.api.deps import current_actor
 from photo_triage.api.feed import Feed
-from photo_triage.db.models import Job, JobStats, JobStatus, WorkerControl
+from photo_triage.db.models import Item, Job, JobStats, JobStatus, MediaType, WorkerControl
+from photo_triage.pipeline.thumbnails import Thumbnail, thumbnail_path
 from photo_triage.quiet_hours import parse
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
@@ -130,6 +131,7 @@ async def test_every_stage_is_listed_in_priority_order_with_its_counts(
         "next_scheduled_at": None,
         "throughput_per_min": None,
         "eta_at": None,
+        "current": None,
         "eta_windows": None,
     }
     assert stages["layout"]["kind"] == "batch"
@@ -150,6 +152,7 @@ async def test_every_stage_is_listed_in_priority_order_with_its_counts(
         "next_scheduled_at": None,
         "throughput_per_min": None,
         "eta_at": None,
+        "current": None,
         "eta_windows": None,
     }
 
@@ -581,3 +584,79 @@ async def test_batch_stages_get_no_throughput_or_eta(client: AsyncClient, migrat
     layout = _stages((await client.get("/api/activity")).json())["layout"]
 
     assert (layout["throughput_per_min"], layout["eta_at"]) == (None, None)
+
+
+def _running_item(engine: Engine, stage: Stage, path: str) -> int:
+    """An item, with a running `stage` job for it. Returns the item's id."""
+    with Session(engine) as session, session.begin():
+        item = Item(
+            content_hash="0" * 64,
+            path=path,
+            media_type=MediaType.PHOTO,
+            file_size_bytes=1,
+            file_mtime_ns=0,
+            first_seen_at=START,
+            last_seen_at=START,
+        )
+        session.add(item)
+        session.flush()
+        session.add(
+            Job(
+                item_id=item.id,
+                stage=stage,
+                priority=PRIORITY[stage],
+                status=JobStatus.RUNNING,
+                attempts=0,
+                enqueued_at=START,
+                started_at=START,
+            )
+        )
+        return item.id
+
+
+async def test_a_running_item_job_shows_its_item(client: AsyncClient, migrated: Engine) -> None:
+    item_id = _running_item(migrated, Stage.THUMBNAIL, "2024/June/a long folder name/IMG_0001.HEIC")
+
+    stages = _stages((await client.get("/api/activity")).json())
+
+    assert stages["thumbnail"]["current"] == {
+        "id": item_id,
+        "path": "2024/June/a long folder name/IMG_0001.HEIC",
+        "has_thumbnail": False,
+    }
+    assert stages["clip"]["current"] is None
+
+
+async def test_the_current_item_says_when_its_thumbnail_exists(
+    client: AsyncClient, migrated: Engine, settings: Settings
+) -> None:
+    item_id = _running_item(migrated, Stage.CLIP, "a.jpg")
+    thumbnail = thumbnail_path(settings.derived_dir, item_id, Thumbnail.MAP)
+    thumbnail.parent.mkdir(parents=True)
+    thumbnail.write_bytes(b"jpeg")
+
+    clip = _stages((await client.get("/api/activity")).json())["clip"]
+
+    assert clip["current"]["has_thumbnail"] is True
+
+
+async def test_batch_jobs_show_no_item(client: AsyncClient, migrated: Engine) -> None:
+    _add_jobs(migrated, Stage.WALK, running=1)
+
+    walk = _stages((await client.get("/api/activity")).json())["walk"]
+
+    assert (walk["running"], walk["current"]) == (1, None)
+
+
+def test_the_reader_sees_a_new_running_item_after_a_commit(
+    settings: Settings, migrated: Engine, clock: FakeClock, real_clock: FakeClock
+) -> None:
+    reader = ActivityReader(migrated, settings, clock, real_clock)
+    try:
+        assert _stage(reader(), Stage.SCAN).current is None
+        item_id = _running_item(migrated, Stage.SCAN, "b.jpg")
+
+        current = _stage(reader(), Stage.SCAN).current
+    finally:
+        reader.close()
+    assert current is not None and current.id == item_id

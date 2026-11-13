@@ -10,6 +10,12 @@ export type WorkerActivity = Schemas["WorkerActivity"];
 export type StageActivity = Schemas["StageActivity"];
 export type Stage = Schemas["Stage"];
 export type WorkerStatus = Schemas["WorkerStatus"];
+export type CurrentItem = Schemas["CurrentItem"];
+
+/** An item's thumbnail: 64 px (the map's) or `THUMBNAIL_SIZE`. */
+export function thumbnailUrl(itemId: number, size: number): string {
+  return `/api/items/${String(itemId)}/thumbnail?size=${String(size)}`;
+}
 
 /** The Server-Sent Events stream of `Activity` (plan §7 "Live updates"). */
 export const EVENTS_URL = "/api/events";

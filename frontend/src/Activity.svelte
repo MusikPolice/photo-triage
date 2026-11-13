@@ -1,7 +1,7 @@
 <script lang="ts">
   import StageButtons from "./StageButtons.svelte";
   import type { ActivityFeed } from "./lib/activity.svelte";
-  import type { Stage, StageActivity } from "./lib/api";
+  import { thumbnailUrl, type Stage, type StageActivity } from "./lib/api";
   import {
     barTone,
     doneOfTotal,
@@ -132,6 +132,14 @@
             <span class="muted">{counts}</span>
           </div>
           {#if speed !== null}<p class="runs muted">{speed}</p>{/if}
+          {#if stage.current}
+            <div class="current">
+              {#if stage.current.has_thumbnail}
+                <img src={thumbnailUrl(stage.current.id, 64)} alt="" width="40" height="40" />
+              {/if}
+              <span class="path" title={stage.current.path}>{stage.current.path}</span>
+            </div>
+          {/if}
           {#if runs !== null}<p class="runs muted">{runs}</p>{/if}
         </li>
       {/each}
@@ -255,6 +263,30 @@
     border-radius: 0.25rem;
     color: var(--muted);
     font-size: 0.75rem;
+  }
+
+  /* The item being worked on: its thumbnail, cropped square, and its path, which
+     wraps anywhere rather than widening the card on a phone. */
+  .current {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+  }
+
+  .current img {
+    flex-shrink: 0;
+    object-fit: cover;
+    border-radius: 0.25rem;
+    background: var(--border);
+  }
+
+  .path {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8125rem;
   }
 
   .runs {
