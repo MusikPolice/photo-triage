@@ -36,6 +36,11 @@ All versions are pinned, and each pin is written once. `mise.toml` pins the lang
 - `docker/Dockerfile` takes every version as a build arg with no default: Python, uv, Node and pnpm from `mise.toml`, and exiftool and ffmpeg from `versions.env`. `scripts/image_pins.sh` prints them, for `just image` and the CI docker job. A plain `docker build` without them fails, naming the missing arg.
 - `scripts/docker_smoke.sh` checks the image's exiftool and ffmpeg against `versions.env`.
 
+`scripts/install_media_tools.sh DEST` is the one place exiftool and ffmpeg are downloaded from. It installs the pinned versions into `DEST/exiftool` and `DEST/ffmpeg`, checks each download's SHA-256, and checks `exiftool -ver`, `ffmpeg -version` and `ffprobe -version` once they're installed. It exits 1 naming the tool and the problem. The pins come from the environment when all four are set, else from `versions.env`. It's run by:
+- the bootstrap, into `~/.local/share/photo-triage/tools/media-tools`, symlinked from `~/.local/bin`;
+- the Dockerfile's `tools` stage, into `/opt` (`.dockerignore` lets that one script in, and the stage installs `perl` so the script can check exiftool);
+- the CI backend job, into `~/media-tools`, on a cache miss.
+
 So a bump is a one-line edit (plus the checksum, for exiftool and ffmpeg). `just doctor` verifies a local environment matches.
 
 The model weights' checksums live in `scripts/bootstrap.sh`, their only user. `frontend/package.json`'s `packageManager` still repeats the pnpm version from `mise.toml`.
@@ -259,7 +264,7 @@ Config: `.pre-commit-config.yaml`. Ruff covers `backend/` and `scripts/`; pretti
 
 | Job | Checks |
 |---|---|
-| backend | loads `versions.env`; downloads the exiftool and ffmpeg it pins (checksums checked, cached by checksum) and checks `exiftool -ver`, `ffmpeg -version` and `ffprobe -version` match; `uv sync --locked --no-group export`; pre-commit (all hooks except the frontend ones, so including shellcheck and hadolint); ruff; **pyright strict** (tests and `scripts/` at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt). `just test` checks the identity gate, on `pipeline/identity.py` and `pipeline/scan.py` together, with `coverage report --fail-under=90` after pytest |
+| backend | loads `versions.env`; installs the exiftool and ffmpeg it pins with `scripts/install_media_tools.sh` on a cache miss (cached by checksum), and on every run checks `exiftool -ver`, `ffmpeg -version` and `ffprobe -version` match; `uv sync --locked --no-group export`; pre-commit (all hooks except the frontend ones, so including shellcheck and hadolint); ruff; **pyright strict** (tests and `scripts/` at basic); import-linter; pytest unit + integration + safety with real exiftool/ffmpeg and fake ML; coverage gates (≥ 90% branch on `files/`, identity/move detection, and purge; ≥ 75% overall; `ml/` adapters exempt). `just test` checks the identity gate, on `pipeline/identity.py` and `pipeline/scan.py` together, with `coverage report --fail-under=90` after pytest |
 | migrations | upgrade from empty → downgrade → upgrade; `alembic check`; on PRs, migrations already on `main` aren't modified, renamed or deleted (add a new one instead) |
 | frontend | `pnpm install --frozen-lockfile`; svelte-check (strict, fails on warnings); eslint (typescript-eslint `strictTypeChecked`); prettier; Vitest; `vite build`. The backend job's pre-commit run skips the frontend hooks, since it has no `node_modules`. |
 | contract | `scripts/api_types.sh --check` (`just contract`): export OpenAPI from the app, regenerate the TS types with `openapi-typescript`, and fail if they differ from the committed `frontend/src/lib/api-types.ts` |
@@ -332,7 +337,7 @@ These are set in the GitHub repo settings, not in files:
    - ~~Pre-commit: prettier, eslint, and pnpm lockfile checks (with the frontend).~~ Done on 2026-10-03.
    - `pnpm audit --prod` in the audit job, once the frontend has runtime dependencies (it has none yet: Vite bundles everything).
    - The ≥ 90% branch-coverage gates on `files/` and purge (the 75% overall gate is live). The identity and move-detection gate landed on 2026-10-18.
-   - ~~Pinned exiftool and ffmpeg in CI, once tests call them.~~ Done on 2026-10-18: the backend job downloads the versions in `versions.env`, checks their checksums and versions, and caches them.
+   - ~~Pinned exiftool and ffmpeg in CI, once tests call them.~~ Done on 2026-10-18: the backend job downloads the versions in `versions.env`, checks their checksums and versions, and caches them. Since 2026-11-12 the bootstrap, the image and CI all install them with `scripts/install_media_tools.sh`.
    - The remaining app recipe in §5: `just dry-run-full` (Phase 2). `just fixtures` landed on 2026-10-18. `just api`, `just web` and `.env.example` landed on 2026-10-03, `just worker` on 2026-10-04, and `just dev` on 2026-10-08, as did `just shot` and `just preview`, which brought in Playwright ahead of e2e. ~~The `.env` check in `just doctor`, `just stack`, and Ollama in `just dev`.~~ Done on 2026-10-08.
 5. ~~Decide how to track work toward the spec.~~ Done on 2026-10-03. Milestones, issues, and PRs on GitHub, driven by `scripts/tracker.py` (§9).
 6. ~~Plan Phase 1 into issues with the `plan-phase` skill, then start building.~~ Done on 2026-10-03: issues #3–#12 in the Phase 1 milestone.
