@@ -31,7 +31,7 @@ from photo_triage.pipeline.thumbnails import Thumbnail, thumbnail_path
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
 from photo_triage.worker.clock import Clock
-from photo_triage.worker.queue import BATCH_STAGES, JobQueue, Stage
+from photo_triage.worker.queue import BATCH_STAGES, PRIORITY, JobQueue, Stage
 from photo_triage.worker.scan_schedule import last_walk, queue_walk
 from photo_triage.worker.state import WorkerStatus, observed_state
 
@@ -86,9 +86,13 @@ class StageActivity(BaseModel):
     """Item stages (and noop): items done per minute of the worker's time on them, over the
     last `THROUGHPUT_WINDOW`. None with no work in that time."""
     eta_at: AwareDatetime | None = None
-    """Item stages with work left and a throughput: when it will be done, counting
-    only the time outside quiet hours. None while the stage or the worker is paused,
-    or the worker is stopped."""
+    """Item stages with work left and a throughput: when it will be done, after the
+    work queued ahead of it at its priority or higher (`work_ahead`), counting only
+    the time outside quiet hours. None while the stage or the worker is paused, or
+    the worker is stopped."""
+    eta_is_minimum: bool = False
+    """The ETA leaves out a stage ahead that has work but no throughput yet, so it's
+    the soonest it could be."""
     current: CurrentItem | None = None
     """Item stages: the item its running job is working on. None while no job runs,
     and always for batch stages."""
@@ -202,6 +206,11 @@ def read_activity(
     if running is None:
         running = read_running(session, stages)
     held = state.status != WorkerStatus.RUNNING and state.status != WorkerStatus.QUIET
+    rows = [
+        _with_runs(settings, now, walked, _stage_activity(stage, counts, stage in paused))
+        for stage in stages
+    ]
+    ahead = work_ahead(rows, throughputs)
     return Activity(
         worker=WorkerActivity(
             status=state.status,
@@ -211,19 +220,9 @@ def read_activity(
         ),
         stages=[
             _with_current(
-                settings,
-                running,
-                _with_eta(
-                    settings,
-                    now,
-                    throughputs,
-                    held,
-                    _with_runs(
-                        settings, now, walked, _stage_activity(stage, counts, stage in paused)
-                    ),
-                ),
+                settings, running, _with_eta(settings, now, throughputs, ahead, held, row)
             )
-            for stage in stages
+            for row in rows
         ],
     )
 
@@ -238,27 +237,73 @@ def _with_current(settings: Settings, running: Running, row: StageActivity) -> S
     return row.model_copy(update={"current": current})
 
 
+def _timed(row: StageActivity) -> bool:
+    """Whether a stage gets a throughput and an ETA: item stages, and noop, whose
+    jobs each stand for one unit of work (dev only). A batch run covers the whole
+    library, so it has neither."""
+    return row.kind == "item" or row.stage == Stage.NOOP
+
+
+def work_ahead(
+    rows: list[StageActivity], throughputs: Throughputs
+) -> dict[str, tuple[float, bool]]:
+    """For each timed stage with work left: the worker's minutes until it's done,
+    and whether that's only a minimum.
+
+    The worker claims jobs by priority, interleaving a tier's stages by when they
+    were queued. So a stage is done once its own work and that of every stage at
+    its priority or higher is: the sum of each one's work left over its throughput.
+    A paused stage's work counts, since it runs on resume. A stage with work but no
+    throughput yet can't be timed, so the total is then a minimum.
+    """
+    ahead: dict[str, tuple[float, bool]] = {}
+    for row in rows:
+        if not _timed(row) or _left(row) == 0:
+            continue
+        minutes, minimum = 0.0, False
+        for other in rows:
+            if not _timed(other) or _left(other) == 0:
+                continue
+            if PRIORITY[other.stage] > PRIORITY[row.stage]:
+                continue
+            rate = throughputs.get(other.stage)
+            if rate is None:
+                minimum = True
+            else:
+                minutes += _left(other) / rate
+        ahead[row.stage] = (minutes, minimum)
+    return ahead
+
+
+def _left(row: StageActivity) -> int:
+    """Jobs that will still run: pending, running and waiting to retry."""
+    return row.pending + row.running + row.errored
+
+
 def _with_eta(
-    settings: Settings, now: dt.datetime, throughputs: Throughputs, held: bool, row: StageActivity
+    settings: Settings,
+    now: dt.datetime,
+    throughputs: Throughputs,
+    ahead: dict[str, tuple[float, bool]],
+    held: bool,
+    row: StageActivity,
 ) -> StageActivity:
-    """Add an item stage's throughput, and its ETA unless it can't run now: it's
-    paused, or the worker is paused or stopped. Quiet hours are counted in. Batch
-    stages get neither: a run covers the whole library."""
-    # Noop jobs stand for one unit of work each, as items do (dev only).
-    if row.kind != "item" and row.stage != Stage.NOOP:
+    """Add a timed stage's throughput, and its ETA (`work_ahead`) unless it can't
+    run now: it's paused, or the worker is paused or stopped. Quiet hours are
+    counted in."""
+    if not _timed(row):
         return row
     rate = throughputs.get(row.stage)
-    left = row.pending + row.running + row.errored
-    if rate is None or left == 0 or held or row.paused:
+    if rate is None or row.stage not in ahead or held or row.paused:
         return row.model_copy(update={"throughput_per_min": rate})
-    eta = finish_at(
-        now, dt.timedelta(minutes=left / rate), settings.worker_quiet_hours, settings.tz
-    )
+    minutes, minimum = ahead[row.stage]
+    eta = finish_at(now, dt.timedelta(minutes=minutes), settings.worker_quiet_hours, settings.tz)
     return row.model_copy(
         update={
             "throughput_per_min": rate,
             "eta_at": None if eta is None else eta.done_at,
             "eta_windows": None if eta is None else eta.windows,
+            "eta_is_minimum": minimum,
         }
     )
 

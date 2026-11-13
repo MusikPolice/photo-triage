@@ -131,6 +131,7 @@ async def test_every_stage_is_listed_in_priority_order_with_its_counts(
         "next_scheduled_at": None,
         "throughput_per_min": None,
         "eta_at": None,
+        "eta_is_minimum": False,
         "current": None,
         "eta_windows": None,
     }
@@ -152,6 +153,7 @@ async def test_every_stage_is_listed_in_priority_order_with_its_counts(
         "next_scheduled_at": None,
         "throughput_per_min": None,
         "eta_at": None,
+        "eta_is_minimum": False,
         "current": None,
         "eta_windows": None,
     }
@@ -660,3 +662,19 @@ def test_the_reader_sees_a_new_running_item_after_a_commit(
     finally:
         reader.close()
     assert current is not None and current.id == item_id
+
+
+async def test_a_stage_waits_for_the_work_queued_ahead_of_it(
+    client: AsyncClient, migrated: Engine
+) -> None:
+    _beat(migrated, START)
+    _stats(migrated, Stage.SCAN, START.replace(hour=11), 60, 60)  # 60/min
+    _stats(migrated, Stage.CLIP, START.replace(hour=11), 30, 60)  # 30/min
+    _add_jobs(migrated, Stage.SCAN, pending=120)  # 2 min
+    _add_jobs(migrated, Stage.CLIP, pending=30)  # 1 min, after the scans
+
+    stages = _stages((await client.get("/api/activity")).json())
+
+    assert stages["scan"]["eta_at"] == "2026-10-05T12:02:00Z"
+    assert stages["clip"]["eta_at"] == "2026-10-05T12:03:00Z"
+    assert stages["clip"]["eta_is_minimum"] is False
