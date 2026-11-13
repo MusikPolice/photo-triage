@@ -197,3 +197,17 @@ def test_without_daylight_saving_quiet_means_inside_a_period_on_the_wall_clock(
         for start, end in (period.week_minutes() for period in quiet.periods)
     )
     assert quiet.is_quiet(now, UTC) == inside
+
+
+def test_next_start_is_the_first_quiet_period_after_a_time() -> None:
+    zone = ZoneInfo("America/Toronto")
+    quiet = parse("Mon-Fri 17:00-02:00")
+    monday_noon = dt.datetime(2026, 10, 5, 16, tzinfo=dt.UTC)  # 12:00 EDT
+    friday_8pm = dt.datetime(2026, 10, 10, 0, tzinfo=dt.UTC)  # 20:00 EDT
+
+    assert quiet.next_start(monday_noon, zone) == dt.datetime(2026, 10, 5, 21, tzinfo=dt.UTC)
+    # Inside Friday's period, the next start is Monday's.
+    assert quiet.next_start(friday_8pm, zone) == dt.datetime(2026, 10, 12, 21, tzinfo=dt.UTC)
+    # A start exactly at the time isn't after it.
+    start = dt.datetime(2026, 10, 5, 21, tzinfo=dt.UTC)
+    assert quiet.next_start(start, zone) == dt.datetime(2026, 10, 6, 21, tzinfo=dt.UTC)

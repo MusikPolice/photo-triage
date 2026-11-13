@@ -223,6 +223,10 @@ export interface components {
       done: number;
       /** Errored */
       errored: number;
+      /** Eta At */
+      eta_at?: string | null;
+      /** Eta Windows */
+      eta_windows?: number | null;
       /**
        * Kind
        * @enum {string}
@@ -243,6 +247,8 @@ export interface components {
       /** Running */
       running: number;
       stage: components["schemas"]["Stage"];
+      /** Throughput Per Min */
+      throughput_per_min?: number | null;
       /** Total */
       total: number;
     };

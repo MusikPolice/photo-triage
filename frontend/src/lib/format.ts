@@ -117,6 +117,54 @@ export function stageRuns(stage: StageActivity, now: Date, locale: Locale = {}):
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+/** "350/min", "2.3/min", or "12/h" below one a minute. */
+export function formatRate(perMin: number, { locale }: Locale = {}): string {
+  const number = (n: number) =>
+    new Intl.NumberFormat(
+      locale,
+      n < 10 ? { maximumSignificantDigits: 2 } : { maximumFractionDigits: 0 },
+    ).format(n);
+  return perMin >= 1 ? `${number(perMin)}/min` : `${number(perMin * 60)}/h`;
+}
+
+/** A length of time, roughly: "<1 min", "45 min", "3 h", "2.5 days". */
+export function formatSpan(ms: number, { locale }: Locale = {}): string {
+  const minutes = ms / 60_000;
+  if (minutes < 1) return "<1 min";
+  if (minutes < 90) return `${String(Math.round(minutes))} min`;
+  const hours = minutes / 60;
+  if (hours < 36) return `${String(Math.round(hours))} h`;
+  const days = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(hours / 24);
+  return `${days} days`;
+}
+
+/** When a stage will be done: "~3 h left" without quiet hours; with them,
+ * "done ~today 23:40" in this working window, or "~23 working windows, done ~Dec 5
+ * 04:00" across several. Null without an estimate (no throughput yet, nothing left,
+ * or paused or stopped). */
+export function formatEta(stage: StageActivity, now: Date, locale: Locale = {}): string | null {
+  if (stage.eta_at == null) return null;
+  const at = new Date(stage.eta_at);
+  if (stage.eta_windows == null) {
+    const span = formatSpan(at.getTime() - now.getTime(), locale);
+    return span.startsWith("<") ? `${span} left` : `~${span} left`;
+  }
+  const done = `done ~${formatWhen(at, now, locale)}`;
+  return stage.eta_windows <= 1
+    ? done
+    : `~${formatCount(stage.eta_windows, locale)} working windows, ${done}`;
+}
+
+/** A working stage's pace and estimate, e.g. "350/min · ~3 h left". Null for a
+ * stage with neither. */
+export function stageSpeed(stage: StageActivity, now: Date, locale: Locale = {}): string | null {
+  const parts = [];
+  if (stage.throughput_per_min != null) parts.push(formatRate(stage.throughput_per_min, locale));
+  const eta = formatEta(stage, now, locale);
+  if (eta !== null) parts.push(eta);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 /** Whether "Scan now" would add nothing: a walk is already waiting or running. */
 export function walkQueued(stage: StageActivity): boolean {
   return stage.pending + stage.running + stage.errored > 0;
