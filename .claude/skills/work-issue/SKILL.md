@@ -1,13 +1,14 @@
 ---
 name: work-issue
-description: Implement one GitHub issue end to end on its own branch and open a PR for the user to review. Use when the user asks to work on the next issue, a specific issue number, or to address review feedback on an open PR.
+description: Implement one GitHub issue end to end on its own branch, open a PR, and merge it on green CI (or hand it to the user if it touches a sensitive path). Use when the user asks to work on the next issue, a specific issue number, or to address review feedback on an open PR.
 ---
 
 # Work an issue
 
 One issue, one branch, one PR. `scripts/tracker.py` handles the git and GitHub
-mechanics. The user reviews and merges every PR, so **never merge, and never
-commit to `main`.**
+mechanics. **Never commit to `main`**, and merge only with
+`scripts/tracker.py merge N`. It merges on green CI, unless the PR touches a
+sensitive path; those PRs go to the user (dev-environment §9).
 
 ## 1. Pick the issue
 
@@ -71,7 +72,15 @@ gets the issue's acceptance criteria as a checklist for the reviewer, plus
 `Closes #N`. If the PR already exists, `finish` updates its body instead.
 
 Then watch CI with `gh pr checks --watch`. Fix any failure on the same branch and
-run `finish` again. When CI is green, give the user the PR link and stop.
+run `finish` again. When CI is green, run `scripts/tracker.py merge N` with
+the PR number.
+
+- If it merges, carry on with the next issue. Mention the merged PR in the next
+  progress update. If the PR changed a page, tell the user there's something
+  to look at, with the screenshots' PR link.
+- If it refuses because of sensitive paths, it has labelled the PR
+  `needs-human-review`. Give the user the link. Don't build anything on top of
+  that branch until they've merged it.
 
 ## Review feedback
 

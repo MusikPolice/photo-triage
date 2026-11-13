@@ -21,8 +21,14 @@ rather than calling `gh` by hand, so issues, branches and PRs stay consistent.
   are agreed.
 - To work an issue, use the `work-issue` skill: `start N`, build, then
   `finish` opens the PR.
-- **Never commit to `main` and never merge PRs.** The user reviews and merges
-  every PR.
+- **Never commit to `main`. Merge only with `scripts/tracker.py merge N`.** It
+  squash-merges once CI is green, unless the PR touches a sensitive path (the
+  spec, dev-environment, this file, `.claude/`, `.github/`, the tracker, the
+  file-mutation guard, `photo_triage/files` or the safety tests). Those PRs
+  get the `needs-human-review` label, and the user reviews and merges them. A
+  hook blocks every other way of merging. See dev-environment §9.
+- Decisions mid-issue still go to the user, and so does anything to look at in
+  the browser. Point them at the screenshots on UI PRs.
 - Work that's outside the current issue goes in the PR's "Follow-ups" section,
   not into the branch.
 

@@ -388,3 +388,90 @@ def test_feedback_without_a_pr(
     monkeypatch.setattr(tracker, "git", lambda *args: "8-no-pr")
     with pytest.raises(SystemExit):
         tracker.main(["feedback"])
+
+
+# ---------------------------------------------------------------------------
+# merge: the sensitive-path gate and the CI verdict
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "docs/plan.md",
+        "docs/dev-environment.md",
+        "CLAUDE.md",
+        ".claude/settings.json",
+        ".claude/skills/work-issue/SKILL.md",
+        ".claude/hooks/block_direct_merge.py",
+        ".github/workflows/ci.yml",
+        "scripts/tracker.py",
+        "scripts/check_file_mutation.py",
+        "backend/src/photo_triage/files/trash.py",
+        "backend/tests/safety/test_no_escape.py",
+    ],
+)
+def test_sensitive_paths_need_review(path: str) -> None:
+    assert tracker.sensitive([path]) == [path]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "README.md",
+        "docs/plan.md.bak",
+        "docs/other.md",
+        "scripts/tracker_helpers.py",
+        "backend/src/photo_triage/filesystem.py",
+        "backend/src/photo_triage/pipeline/scan.py",
+        "backend/tests/unit/test_tracker.py",
+        "frontend/src/routes/+page.svelte",
+        "backend/pyproject.toml",
+    ],
+)
+def test_other_paths_merge_on_green(path: str) -> None:
+    assert tracker.sensitive([path]) == []
+
+
+def test_a_rename_counts_both_paths() -> None:
+    files = [
+        {
+            "filename": "backend/src/photo_triage/moved.py",
+            "previous_filename": "backend/src/photo_triage/files/trash.py",
+        },
+        {"filename": "README.md"},
+    ]
+    paths = tracker.changed_paths(files)
+    assert tracker.sensitive(paths) == ["backend/src/photo_triage/files/trash.py"]
+
+
+def _run(name: str, status: str = "COMPLETED", conclusion: str | None = "SUCCESS") -> dict:
+    return {"__typename": "CheckRun", "name": name, "status": status, "conclusion": conclusion}
+
+
+def test_ci_green_when_every_check_passes_or_skips() -> None:
+    rollup = [
+        _run("backend"),
+        _run("models", conclusion="SKIPPED"),
+        {"__typename": "StatusContext", "context": "ext", "state": "SUCCESS"},
+    ]
+    assert tracker.ci_problems(rollup) == []
+
+
+def test_ci_not_green_with_no_checks() -> None:
+    assert tracker.ci_problems([]) == ["no checks have reported yet"]
+
+
+def test_ci_reports_pending_and_failing_checks() -> None:
+    rollup = [
+        _run("backend", status="IN_PROGRESS", conclusion=None),
+        _run("audit", conclusion="FAILURE"),
+        _run("docker", conclusion="CANCELLED"),
+        {"__typename": "StatusContext", "context": "ext", "state": "PENDING"},
+    ]
+    assert tracker.ci_problems(rollup) == [
+        "backend is still in_progress",
+        "audit: failure",
+        "docker: cancelled",
+        "ext is still pending",
+    ]
