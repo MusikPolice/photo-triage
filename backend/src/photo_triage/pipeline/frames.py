@@ -2,7 +2,11 @@
 the stages after it read in place of the video (plan §6.1).
 
 The frames are evenly spaced, skipping the first and last 5%, and no closer than
-one frame apart, so a clip too short for them all gives fewer, at least one. ffmpeg
+one frame apart, so a clip too short for them all gives fewer, at least one. The
+span they're spread over ends where the last frame starts, a frame before the
+video stream ends: a time after that has no frame to show, which matters only in
+clips of a second or less (#96). If ffmpeg still finds no frame at a time, the
+first frame stands in. ffmpeg
 writes each as a JPEG at the video's displayed size, at `frame_path`, in the derived
 folder (plan §4), and `item_frames` records when in the video each is.
 
@@ -53,6 +57,15 @@ def timestamps(duration_s: float, count: int, min_gap_s: float = 0.0) -> list[fl
     return [start_s + span_s * index / (count - 1) for index in range(count)]
 
 
+def sample_times(found: video.VideoProbe, count: int) -> list[float]:
+    """When to sample `count` frames: `timestamps` over the span in which frames start,
+    from 0 to one frame before the end of the video stream (or of the file, if the
+    stream doesn't say)."""
+    frame_s = 1 / found.frame_rate if found.frame_rate else 0.0
+    end_s = found.stream_duration_s or found.duration_s
+    return timestamps(max(end_s - frame_s, 0.0), count, min_gap_s=frame_s)
+
+
 def frame_path(derived_dir: Path, item_id: int, frame_index: int) -> Path:
     """Where frame `frame_index` of the item is, once sampled."""
     return _item_dir(derived_dir, item_id) / f"{frame_index}.jpg"
@@ -85,8 +98,7 @@ def sample(
         found = video.probe(path)
     except video.ProbeError as e:
         raise FrameError(str(e)) from e
-    frame_s = 1 / found.frame_rate if found.frame_rate else 0.0
-    times = timestamps(found.duration_s, count, min_gap_s=frame_s)
+    times = sample_times(found, count)
 
     root = derived_dir / FRAMES_FOLDER
     root.mkdir(parents=True, exist_ok=True)
@@ -95,7 +107,16 @@ def sample(
     staged = Path(tempfile.mkdtemp(prefix=f"{item_id}.", suffix=_STAGING_SUFFIX, dir=root))
     try:
         for index, at_s in enumerate(times):
-            _extract(path, at_s, staged / f"{index}.jpg")
+            try:
+                _extract(path, at_s, staged / f"{index}.jpg")
+            except FrameError:
+                if at_s == 0:
+                    raise
+                logger.warning(
+                    "No frame at %.3f s in %s; using the first frame in its place", at_s, relative
+                )
+                times[index] = 0.0
+                _extract(path, 0.0, staged / f"{index}.jpg")
         with sessions.begin() as session:
             if session.get(Item, item_id) is None:
                 return False

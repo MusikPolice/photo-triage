@@ -7,7 +7,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from photo_triage.pipeline.frames import timestamps
+from photo_triage.pipeline.frames import sample_times, timestamps
+from photo_triage.pipeline.video import VideoProbe
 
 durations_s = st.floats(min_value=0.001, max_value=1e6, allow_nan=False)
 counts = st.integers(min_value=1, max_value=50)
@@ -60,3 +61,41 @@ def test_a_video_with_no_length_gives_one_frame_at_the_start() -> None:
 def test_at_least_one_frame_is_asked_for() -> None:
     with pytest.raises(ValueError, match="at least one"):
         timestamps(10.0, 0)
+
+
+# The three phone clips the full-library dry run parked (#96), as ffprobe saw them.
+SHORT_CLIPS = [
+    # (file duration, stream duration, fps, start time of the last frame)
+    (0.1317, 0.131667, 30.0, 0.1),
+    (0.5, 0.5, 30.0, 0.466667),
+    (0.566667, 0.566667, 30.0, 0.533333),
+]
+
+
+@pytest.mark.parametrize(("duration_s", "stream_s", "fps", "last_frame_s"), SHORT_CLIPS)
+def test_short_clips_are_sampled_no_later_than_their_last_frame(
+    duration_s: float, stream_s: float, fps: float, last_frame_s: float
+) -> None:
+    found = VideoProbe(320, 240, duration_s, fps, stream_s)
+
+    times = sample_times(found, 5)
+
+    assert times
+    assert max(times) <= last_frame_s + 1e-6
+
+
+def test_the_stream_s_duration_wins_over_the_file_s() -> None:
+    # Audio or data running on past the picture.
+    found = VideoProbe(320, 240, 10.0, 10.0, 4.1)
+
+    assert max(sample_times(found, 5)) <= 4.0 + 1e-9
+
+
+def test_without_a_stream_duration_the_file_s_is_used() -> None:
+    found = VideoProbe(320, 240, 4.1, 10.0, None)
+
+    assert max(sample_times(found, 5)) <= 4.0 + 1e-9
+
+
+def test_a_clip_of_one_frame_is_sampled_at_its_start() -> None:
+    assert sample_times(VideoProbe(320, 240, 0.0333, 30.0, 0.0333), 5) == [pytest.approx(0.0)]

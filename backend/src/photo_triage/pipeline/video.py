@@ -20,6 +20,9 @@ class VideoProbe:
     duration_s: float
     frame_rate: float | None
     """Frames per second on average, if the stream says."""
+    stream_duration_s: float | None = None
+    """The video stream's own duration, if the file says. It can be shorter than the
+    file's, whose other streams may run on."""
 
 
 def probe(path: Path) -> VideoProbe:
@@ -32,7 +35,7 @@ def probe(path: Path) -> VideoProbe:
             "-select_streams",
             "V:0",
             "-show_entries",
-            "stream=width,height,avg_frame_rate:stream_side_data=rotation:format=duration",
+            "stream=width,height,avg_frame_rate,duration:stream_side_data=rotation:format=duration",
             "-of",
             "json",
             file_url(path),
@@ -55,7 +58,13 @@ def probe(path: Path) -> VideoProbe:
     )
     if rotation % 180 != 0:
         width, height = height, width
-    return VideoProbe(width, height, duration_s, _rate(stream.get("avg_frame_rate")))
+    return VideoProbe(
+        width,
+        height,
+        duration_s,
+        _rate(stream.get("avg_frame_rate")),
+        _seconds(stream.get("duration")),
+    )
 
 
 def file_url(path: Path) -> str:
@@ -70,3 +79,12 @@ def _rate(value: object) -> float | None:
     except (ValueError, ZeroDivisionError):
         return None
     return float(rate) if rate > 0 else None
+
+
+def _seconds(value: object) -> float | None:
+    """A duration ffprobe gave, or None if it didn't (`N/A`, or missing)."""
+    try:
+        seconds = float(str(value))
+    except ValueError:
+        return None
+    return seconds if seconds > 0 else None
