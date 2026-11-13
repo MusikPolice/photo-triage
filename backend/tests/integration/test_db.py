@@ -36,6 +36,7 @@ PHASE_1_COLUMNS = {
     },
     "jobs": {
         "id",
+        "actor",
         "item_id",
         "stage",
         "priority",

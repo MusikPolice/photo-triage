@@ -27,37 +27,22 @@ RUN pnpm run build
 
 # --- exiftool and ffmpeg, downloaded and checked ------------------------------
 
+# scripts/install_media_tools.sh is where they come from, for dev and CI too.
+# perl is here only so it can check exiftool's version; the runtime stage
+# installs its own.
 FROM debian:trixie-slim AS tools
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl xz-utils \
+    && apt-get install --yes --no-install-recommends ca-certificates curl perl xz-utils \
     && rm -rf /var/lib/apt/lists/*
-# exiftool.org only serves the newest release; SourceForge keeps every version.
+COPY scripts/install_media_tools.sh /tmp/
 ARG EXIFTOOL_VERSION
 ARG EXIFTOOL_SHA256
-RUN curl --fail --silent --show-error --location --retry 3 --output /tmp/exiftool.tar.gz \
-        "https://sourceforge.net/projects/exiftool/files/Image-ExifTool-${EXIFTOOL_VERSION:?}.tar.gz/download" \
-    && echo "${EXIFTOOL_SHA256:?}  /tmp/exiftool.tar.gz" | sha256sum --check \
-    && mkdir /opt/exiftool \
-    && tar -xzf /tmp/exiftool.tar.gz -C /opt/exiftool --strip-components=1 \
-    && rm /tmp/exiftool.tar.gz
-# The same static build as local dev. The release URL is rolling, so the
-# old-releases path comes first and the checksum guards against drift.
 ARG FFMPEG_VERSION
 ARG FFMPEG_SHA256
-RUN for url in \
-        "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-${FFMPEG_VERSION:?}-amd64-static.tar.xz" \
-        "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"; do \
-        curl --fail --silent --show-error --location --retry 3 --output /tmp/ffmpeg.tar.xz "$url" \
-            && echo "${FFMPEG_SHA256:?}  /tmp/ffmpeg.tar.xz" | sha256sum --check --status \
-            && break; \
-        rm -f /tmp/ffmpeg.tar.xz; \
-    done \
-    && test -f /tmp/ffmpeg.tar.xz \
-    && mkdir /opt/ffmpeg \
-    && tar -xJf /tmp/ffmpeg.tar.xz -C /opt/ffmpeg --strip-components=1 \
-    && rm /tmp/ffmpeg.tar.xz
+RUN : "${EXIFTOOL_VERSION:?}" "${EXIFTOOL_SHA256:?}" "${FFMPEG_VERSION:?}" "${FFMPEG_SHA256:?}" \
+    && /tmp/install_media_tools.sh /opt
 
 # --- Backend: runtime dependencies only --------------------------------------
 

@@ -19,9 +19,9 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from photo_triage import quiet_hours
+from photo_triage import quiet_hours, schedule
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
@@ -36,6 +36,14 @@ def _quiet_hours(value: object) -> quiet_hours.QuietHours | None:
     if not isinstance(value, str):
         raise ValueError("expected text")
     return quiet_hours.parse(value) if value.strip() else None
+
+
+def _schedule(value: object) -> schedule.Schedule:
+    if isinstance(value, schedule.Schedule):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("expected text")
+    return schedule.parse(value)
 
 
 TRASH_FOLDER = ".photo-triage-trash"
@@ -55,6 +63,9 @@ def _default_trash_dir(data: dict[str, Any]) -> Path:
     return Path(photo_dir) / TRASH_FOLDER if photo_dir is not None else Path(TRASH_FOLDER)
 
 
+ScheduleSetting = Annotated[
+    schedule.Schedule, NoDecode, PlainValidator(_schedule), PlainSerializer(str)
+]
 QuietHoursSetting = Annotated[
     quiet_hours.QuietHours | None, PlainValidator(_quiet_hours), PlainSerializer(str)
 ]
@@ -96,6 +107,10 @@ class Settings(BaseSettings):
 
     clip_model: str = "ViT-B-32"
     """The CLIP model, as exported to `models_dir/clip/<name>` (plan §6.3)."""
+
+    scan_schedule: ScheduleSetting = schedule.Schedule("0 2 * * *")
+    """When the worker queues a walk of the library, as a cron expression in `tz`
+    (plan §6.1). Every night at 02:00 by default."""
 
     worker_quiet_hours: QuietHoursSetting = None
     """When the whole worker stays idle, in `tz` (see `photo_triage.quiet_hours`).

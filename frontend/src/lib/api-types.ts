@@ -76,6 +76,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/scan": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Scan Now
+     * @description Queue a walk of the library, unless one is waiting or running.
+     */
+    post: operations["scan_now_api_scan_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/worker/pause": {
     parameters: {
       query?: never;
@@ -208,6 +228,12 @@ export interface components {
        * @enum {string}
        */
       kind: "item" | "batch";
+      /** Last Actor */
+      last_actor?: string | null;
+      /** Last Finished At */
+      last_finished_at?: string | null;
+      /** Next Scheduled At */
+      next_scheduled_at?: string | null;
       /** Parked */
       parked: number;
       /** Paused */
@@ -360,6 +386,26 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  scan_now_api_scan_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Activity"];
         };
       };
     };
