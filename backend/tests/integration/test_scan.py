@@ -25,8 +25,8 @@ from photo_triage.worker.stages import build_runners, item_stages
 
 START = dt.datetime(2026, 10, 18, 2, tzinfo=dt.UTC)
 
-SUPPORTED = 28
-"""Tier-1 fixtures the scanner registers: all 30 but the PNG and the truncated JPEG,
+SUPPORTED = 29
+"""Tier-1 fixtures the scanner registers: all 31 but the PNG and the truncated JPEG,
 which fails its scan."""
 
 
@@ -400,14 +400,14 @@ def test_a_scan_whose_item_moves_while_hashing_records_nothing(
     with scanner.sessions() as session:
         job = session.scalars(sa.select(Job)).one()
         session.expunge(job)
-    real_hash = scan.identity.content_hash
+    real_hash = scan.identity.hash_content
 
-    def hash_while_moving(path: Path, kind: MediaType) -> str:
+    def hash_while_moving(path: Path, kind: MediaType) -> tuple[str, bool]:
         with scanner.sessions.begin() as session:
             session.execute(sa.update(Item).values(path="b.jpg"))
         return real_hash(path, kind)
 
-    monkeypatch.setattr(scan.identity, "content_hash", hash_while_moving)
+    monkeypatch.setattr(scan.identity, "hash_content", hash_while_moving)
 
     scan.scan(scanner.sessions, scanner.queue, job, settings.photo_dir, scanner.clock())
 
@@ -511,3 +511,24 @@ def test_scan_command_queues_one_walk(migrated: Engine, worker_env: Settings) ->
         walks = session.scalars(sa.select(Job).where(Job.stage == Stage.WALK)).all()
     assert [(j.status, j.item_id) for j in walks] == [(JobStatus.PENDING, None)]
     assert not (worker_env.data_dir / "logs/worker.log").exists()  # stderr only
+
+
+def test_a_damaged_photo_is_scanned_and_marked(scanner: Scanner, library: Path) -> None:
+    scanner.run()
+
+    items = scanner.items()
+    damaged = items["broken/damaged.jpg"]
+    assert damaged.content_hash is not None
+    assert damaged.damaged is True
+    assert not any(i.damaged for p, i in items.items() if p != "broken/damaged.jpg")
+
+
+def test_a_damaged_photo_made_whole_is_no_longer_damaged(scanner: Scanner, library: Path) -> None:
+    scanner.run()
+    whole = library / "scenes/scene-01.jpg"
+    shutil.copyfile(whole, library / "broken/damaged.jpg")
+    scanner.later()
+
+    scanner.run()
+
+    assert scanner.items()["broken/damaged.jpg"].damaged is False

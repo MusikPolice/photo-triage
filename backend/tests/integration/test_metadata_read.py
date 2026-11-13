@@ -36,6 +36,7 @@ EXPECTED: dict[str, tuple[int, int, float | None, dt.datetime | None]] = {
         f"burst/burst-0{n + 1}.jpg": (640, 480, None, dt.datetime(2024, 7, 4, 18, 30, n))
         for n in range(5)
     },
+    "broken/damaged.jpg": (640, 480, None, dt.datetime(2012, 7, 27, 2, 24, 36)),
     "dates/create-date-only.jpg": (640, 480, None, dt.datetime(2023, 5, 6, 7, 8, 9)),
     "dates/modify-date-only.jpg": (640, 480, None, dt.datetime(2022, 3, 4, 5, 6, 7)),
     "dates/no-dates.jpg": (640, 480, None, MTIME),

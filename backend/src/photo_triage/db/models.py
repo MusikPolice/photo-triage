@@ -105,6 +105,10 @@ class Item(Base):
     mirror) still counts as a change (`photo_triage.pipeline.metadata`)."""
     taken_at_local: Mapped[dt.datetime | None]
     """Capture time as the camera recorded it: local wall-clock time, no timezone."""
+    damaged: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
+    """A photo that decodes only partly, its file cut short: the rest of its
+    picture is grey in its thumbnail (`photo_triage.pipeline.pictures`). Set by
+    each scan."""
     first_seen_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
     last_seen_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
     missing_since: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)

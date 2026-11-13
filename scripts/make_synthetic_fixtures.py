@@ -31,7 +31,7 @@ from pathlib import Path
 
 import numpy as np
 import pillow_heif
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+from PIL import ExifTags, Image, ImageDraw, ImageEnhance, ImageFilter
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = REPO_ROOT / "backend" / "tests" / "fixtures" / "synthetic"
@@ -213,13 +213,29 @@ def png(image: Image.Image) -> Callable[[Path], None]:
     return lambda path: image.save(path, "PNG")
 
 
-def truncated_jpeg(image: Image.Image, keep_bytes: int) -> Callable[[Path], None]:
-    """A JPEG cut off partway, as an interrupted copy leaves it: the header reads, the
-    pixels don't."""
+def truncated_jpeg(image: Image.Image) -> Callable[[Path], None]:
+    """A JPEG cut off before its picture data starts: the header reads, the pixels
+    don't, so it can't be scanned at all."""
 
     def write(path: Path) -> None:
         image.save(path, "JPEG", quality=JPEG_QUALITY)
-        path.write_bytes(path.read_bytes()[:keep_bytes])
+        data = path.read_bytes()
+        path.write_bytes(data[: data.index(b"\xff\xda")])  # up to Start Of Scan
+
+    return write
+
+
+def damaged_jpeg(image: Image.Image, taken_at: str) -> Callable[[Path], None]:
+    """A JPEG cut off halfway through its picture data, as an interrupted copy leaves
+    it: the top of the picture decodes, the rest doesn't (#95)."""
+
+    def write(path: Path) -> None:
+        # The date goes in before the cut: exiftool won't write to a broken file.
+        exif = Image.Exif()
+        exif.get_ifd(ExifTags.IFD.Exif)[ExifTags.Base.DateTimeOriginal] = taken_at
+        image.save(path, "JPEG", quality=JPEG_QUALITY, exif=exif)
+        data = path.read_bytes()
+        path.write_bytes(data[: len(data) // 2])
 
     return write
 
@@ -378,8 +394,10 @@ def fixtures() -> list[Fixture]:
                 *(f"-XMP-dc:Subject={k}" for k in keywords),
             ],
         ),
-        # Files the scanner must cope with: a corrupt one and an unsupported type.
-        Fixture("broken/truncated.jpg", truncated_jpeg(scene(41), 4096)),
+        # Files the scanner must cope with: one cut short with part of its picture,
+        # one with none of it, and an unsupported type.
+        Fixture("broken/damaged.jpg", damaged_jpeg(scene(43), "2012:07:27 02:24:36")),
+        Fixture("broken/truncated.jpg", truncated_jpeg(scene(41))),
         Fixture("broken/unsupported.png", png(scene(42))),
     ]
 

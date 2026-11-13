@@ -178,7 +178,7 @@ def scan(
         logger.info("Item %d is gone from %s before its scan", job.item_id, relative)
         return False
     # Stat before hashing: if the file changes meanwhile, the next walk sees it.
-    content_hash = identity.content_hash(path, kind)
+    content_hash, damaged = identity.hash_content(path, kind)
 
     with sessions.begin() as session:
         item = session.get(Item, job.item_id)
@@ -195,6 +195,7 @@ def scan(
                 return False
         changed = item.content_hash != content_hash
         item.content_hash = content_hash
+        item.damaged = damaged
         # Even when the hash is the same: the metadata alone may have changed.
         queue.enqueue(session, Stage.METADATA_READ, item.id)
         return changed
