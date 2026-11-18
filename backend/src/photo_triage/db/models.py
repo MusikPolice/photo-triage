@@ -154,6 +154,29 @@ class Embedding(Base):
     """Little-endian float32, of unit length: 2048 bytes for a 512-d model."""
 
 
+class Layout(Base):
+    """An item's place on the map (plan §6.4): UMAP over the CLIP embeddings.
+
+    Each fit is one `layout_version`, and replaces the last in one transaction
+    (`photo_triage.pipeline.layout`), so there's only ever one version to read.
+    Coordinates are in [0, 1] on the layout's longer axis.
+    """
+
+    __tablename__ = "layout"
+    __table_args__ = (
+        # Purging an item cascades here, by item.
+        sa.Index("ix_layout_item_id", "item_id"),
+    )
+
+    # The map reads a whole version: its primary key covers that.
+    layout_version: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("items.id", ondelete="CASCADE"), primary_key=True
+    )
+    x: Mapped[float] = mapped_column(sa.Float)
+    y: Mapped[float] = mapped_column(sa.Float)
+
+
 class Tag(Base):
     """A keyword on an item, and where it came from (plan §8).
 
