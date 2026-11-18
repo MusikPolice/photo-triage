@@ -61,11 +61,12 @@ def scheduled_walk_due(
     return due_at if seen_to is None else None
 
 
-def last_walk(session: Session) -> Job | None:
-    """The latest finished walk. The queue keeps only one done walk."""
+def last_run(session: Session, stage: Stage) -> Job | None:
+    """The latest finished run of a batch stage. The queue keeps only one done job
+    per batch stage."""
     return session.scalar(
         sa.select(Job)
-        .where(Job.stage == Stage.WALK, Job.status == JobStatus.DONE)
+        .where(Job.stage == stage, Job.item_id.is_(None), Job.status == JobStatus.DONE)
         .order_by(Job.finished_at.desc())
         .limit(1)
     )
