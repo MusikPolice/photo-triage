@@ -32,7 +32,7 @@ from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
 from photo_triage.worker.clock import Clock
 from photo_triage.worker.queue import BATCH_STAGES, PRIORITY, JobQueue, Stage
-from photo_triage.worker.scan_schedule import last_walk, queue_walk
+from photo_triage.worker.scan_schedule import last_run, queue_walk
 from photo_triage.worker.state import WorkerStatus, observed_state
 
 router = APIRouter()
@@ -153,9 +153,19 @@ class LastRun(BaseModel):
     actor: str | None = None
 
 
-def read_last_walk(session: Session) -> LastRun:
-    job = last_walk(session)
-    return LastRun() if job is None else LastRun(finished_at=job.finished_at, actor=job.actor)
+type LastRuns = dict[Stage, LastRun]
+"""The latest finished run of each batch stage that has one."""
+
+
+def read_last_runs(session: Session) -> LastRuns:
+    """The latest finished run of each batch stage: one lookup each over
+    `ix_jobs_stage_status`, since the queue keeps one done job per batch stage."""
+    runs: LastRuns = {}
+    for stage in BATCH_STAGES:
+        job = last_run(session, stage)
+        if job is not None:
+            runs[stage] = LastRun(finished_at=job.finished_at, actor=job.actor)
+    return runs
 
 
 def shown_stages(settings: Settings) -> list[Stage]:
@@ -185,13 +195,13 @@ def read_activity(
     now: dt.datetime,
     real_now: dt.datetime,
     counts: JobCounts | None = None,
-    walked: LastRun | None = None,
+    last_runs: LastRuns | None = None,
     throughputs: Throughputs | None = None,
     running: Running | None = None,
 ) -> Activity:
     """The activity at `now` (the app's clock), judging the heartbeat at `real_now`.
-    Jobs are counted, the last walk read and the throughputs worked out, unless
-    `counts` (from `count_jobs`), `walked` (from `read_last_walk`), `throughputs`
+    Jobs are counted, the last batch runs read and the throughputs worked out, unless
+    `counts` (from `count_jobs`), `last_runs` (from `read_last_runs`), `throughputs`
     (from `read_throughputs`) and `running` (from `read_running`) are given."""
     state = observed_state(session, settings.worker_quiet_hours, settings.tz, now, real_now)
     paused = controls.paused_scopes(session)
@@ -199,15 +209,15 @@ def read_activity(
     stages = shown_stages(settings)
     if counts is None:
         counts = count_jobs(session, stages)
-    if walked is None:
-        walked = read_last_walk(session)
+    if last_runs is None:
+        last_runs = read_last_runs(session)
     if throughputs is None:
         throughputs = read_throughputs(session, now)
     if running is None:
         running = read_running(session, stages)
     held = state.status != WorkerStatus.RUNNING and state.status != WorkerStatus.QUIET
     rows = [
-        _with_runs(settings, now, walked, _stage_activity(stage, counts, stage in paused))
+        _with_runs(settings, now, last_runs, _stage_activity(stage, counts, stage in paused))
         for stage in stages
     ]
     ahead = work_ahead(rows, throughputs)
@@ -309,19 +319,17 @@ def _with_eta(
 
 
 def _with_runs(
-    settings: Settings, now: dt.datetime, walked: LastRun, row: StageActivity
+    settings: Settings, now: dt.datetime, last_runs: LastRuns, row: StageActivity
 ) -> StageActivity:
-    """Add the last and next runs to the walk's row. Layout, duplicates and atlases
-    get theirs with those jobs (Phases 3 and 4)."""
-    if row.stage != Stage.WALK:
+    """Add a batch stage's last run, and the walk's next scheduled one. The other
+    batch stages have no schedule: the pipeline queues them."""
+    if row.kind != "batch":
         return row
-    return row.model_copy(
-        update={
-            "last_finished_at": walked.finished_at,
-            "last_actor": walked.actor,
-            "next_scheduled_at": settings.scan_schedule.next_at(now, settings.tz),
-        }
-    )
+    last = last_runs.get(row.stage, LastRun())
+    update: dict[str, object] = {"last_finished_at": last.finished_at, "last_actor": last.actor}
+    if row.stage == Stage.WALK:
+        update["next_scheduled_at"] = settings.scan_schedule.next_at(now, settings.tz)
+    return row.model_copy(update=update)
 
 
 def _stage_activity(stage: Stage, counts: JobCounts, paused: bool) -> StageActivity:
@@ -344,7 +352,7 @@ class ActivityReader:
 
     `PRAGMA data_version` changes on a connection only when another connection
     commits, so the reader keeps a connection of its own, on which it only reads.
-    So is the last walk. The worker's state and heartbeat are read every time, and
+    So are the batch stages' last runs. The worker's state and heartbeat are read every time, and
     the next scheduled walk worked out, since quiet hours, a stale heartbeat and the
     schedule change with the clock and not with the data. Not thread-safe:
     the feed never runs two reads at once.
@@ -358,7 +366,7 @@ class ActivityReader:
         self._connection: Connection | None = None
         self._data_version: int | None = None
         self._counts: JobCounts | None = None
-        self._walked: LastRun | None = None
+        self._last_runs: LastRuns | None = None
         self._throughputs: Throughputs | None = None
         self._running: Running | None = None
 
@@ -372,7 +380,7 @@ class ActivityReader:
                 version = session.execute(sa.text("PRAGMA data_version")).scalar_one()
                 if version != self._data_version or self._counts is None:
                     self._counts = count_jobs(session, shown_stages(self._settings))
-                    self._walked = read_last_walk(session)
+                    self._last_runs = read_last_runs(session)
                     self._throughputs = read_throughputs(session, self._clock())
                     self._running = read_running(session, shown_stages(self._settings))
                     self._data_version = version
@@ -382,7 +390,7 @@ class ActivityReader:
                     self._clock(),
                     self._real_clock(),
                     self._counts,
-                    self._walked,
+                    self._last_runs,
                     self._throughputs,
                     self._running,
                 )
