@@ -76,6 +76,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/map/atlases": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Manifest
+     * @description Which sheet and cell holds each item's 64 px thumbnail.
+     */
+    get: operations["manifest_api_map_atlases_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/map/atlases/{version}/{sheet}.jpg": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Sheet
+     * @description One sheet of layout `version`'s set.
+     */
+    get: operations["sheet_api_map_atlases__version___sheet__jpg_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/map/points": {
     parameters: {
       query?: never;
@@ -420,6 +460,79 @@ export interface operations {
         content?: never;
       };
       /** @description No such item, size or thumbnail */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  manifest_api_map_atlases_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The newest set's manifest, in the binary format described in `photo_triage.pipeline.atlases`, or an empty one before the first set */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/octet-stream": unknown;
+        };
+      };
+      /** @description Unchanged since the copy the browser has */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  sheet_api_map_atlases__version___sheet__jpg_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        version: number;
+        sheet: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The sheet, a JPEG */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/jpeg": unknown;
+        };
+      };
+      /** @description Unchanged since the copy the browser has */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description No such set or sheet */
       404: {
         headers: {
           [name: string]: unknown;
