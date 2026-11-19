@@ -1,6 +1,7 @@
 """The library scanner: the `walk` batch job and the per-file `scan` job (plan §6.1).
 
-A **walk** lists the supported files under `PHOTO_DIR`, skipping `TRASH_DIR`, and
+A **walk** lists the supported files under `PHOTO_DIR`, skipping `TRASH_DIR` and
+the folders `skipped_folder` names (Synology's system folders and hidden ones), and
 compares them with `items` by `(path, mtime, size)`:
 
 - a new path gets a placeholder item, with no content hash yet, and a scan job;
@@ -38,6 +39,18 @@ from photo_triage.worker.queue import JobQueue, Stage
 
 logger = logging.getLogger(__name__)
 
+SKIPPED_FOLDER_PREFIXES = ("@", ".")
+"""Synology's system folders (`@eaDir` holds its thumbnail of every photo, beside
+it; `@tmp`, `@Recycle`...), and hidden folders (`.thumbnails`, macOS's and editors')."""
+
+SKIPPED_FOLDER_NAMES = frozenset({"#recycle", "#snapshot"})
+"""Synology's recycle bin and snapshots, at a share's root."""
+
+
+def skipped_folder(name: str) -> bool:
+    """Whether the walk stays out of a folder with this name, at any depth."""
+    return name.startswith(SKIPPED_FOLDER_PREFIXES) or name in SKIPPED_FOLDER_NAMES
+
 
 @dataclass(frozen=True)
 class FoundFile:
@@ -60,7 +73,8 @@ class WalkResult:
 
 def find_files(photo_dir: Path, trash_dir: Path) -> Iterator[FoundFile]:
     """Every supported file under `photo_dir`, not following symlinks and not
-    entering `trash_dir`. A folder that can't be listed is logged and skipped."""
+    entering `trash_dir` or a `skipped_folder`. A folder that can't be listed is
+    logged and skipped."""
     trash = trash_dir.resolve()
     pending = [photo_dir.resolve()]
     while pending:
@@ -72,7 +86,7 @@ def find_files(photo_dir: Path, trash_dir: Path) -> Iterator[FoundFile]:
             continue
         for entry in entries:
             if entry.is_dir(follow_symlinks=False):
-                if Path(entry.path) != trash:
+                if Path(entry.path) != trash and not skipped_folder(entry.name):
                     pending.append(Path(entry.path))
                 continue
             kind = identity.media_type(Path(entry.name))

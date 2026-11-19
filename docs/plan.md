@@ -117,7 +117,7 @@ Search blends all three (§6.5).
 
 ### 6.1 Library Scanner
 
-Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MOV, MP4). It never walks `TRASH_DIR`, which may be inside `PHOTO_DIR` (§6.8), so a trashed file isn't seen as moved.
+Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MOV, MP4). It never walks `TRASH_DIR`, which may be inside `PHOTO_DIR` (§6.8), so a trashed file isn't seen as moved. It also skips, at any depth, Synology's system folders (names starting with `@`, such as `@eaDir`, which holds a thumbnail of every photo, plus `#recycle` and `#snapshot`) and hidden folders (names starting with `.`), so a NAS setting change can't register thousands of NAS thumbnails as photos.
 
 **Identity.** Each item is identified by a **content hash** of its decoded pixel data (for video: hash of the media stream, excluding metadata atoms). This is stable across metadata writes (ours and others') and across elodie moving/renaming files. `(path, mtime, size)` is used as a cheap "maybe changed?" pre-check; only when it changes is the content hash recomputed. A known content hash at a new path is treated as a move, not a new item — all history is preserved — when the item that had it is no longer at its old path. If it still is, the new file is an exact copy and becomes an item of its own, so duplicate grouping (§6.7) can offer to remove one. A file changed in place keeps its item and takes the new hash.
 
