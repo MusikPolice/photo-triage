@@ -4,14 +4,16 @@ A fit is **due** when the active items embedded with `CLIP_MODEL` aren't the one
 in the current layout, and either:
 
 - the embedding pipeline has drained: no `walk`, `scan`, `metadata_read`,
-  `frames`, `thumbnail` or `clip` job is open (pending, running or waiting to
-  retry), so a nightly scan gets one fit, after its last item is embedded; or
+  `frames`, `thumbnail` or `clip` job is pending, so a nightly scan gets one
+  fit, after its last item is embedded. A job waiting to retry after a failure
+  doesn't hold it back (#122); if it succeeds later, its item gets the next fit;
 - while it hasn't, enough items have been embedded since the last fit:
   `GROWTH_FRACTION` of the layout, and at least `GROWTH_MIN_ITEMS`. So the map
   appears during the first backfill and grows with it, in about ten fits over
   33k items, rather than dozens of tiny ones.
 
-The worker checks after each job of those stages, and after each reconcile. The
+The worker checks after each job of those stages, and after each reconcile, as
+does `python -m photo_triage.worker reconcile`. The
 drained check is one indexed lookup, and compares the two sets only once it
 passes. The growth check counts both sets, so it runs at most once per
 `GROWTH_CHECK_INTERVAL_S` of the worker's time.
@@ -67,9 +69,14 @@ def latest_version() -> sa.Select[int | None]:
 
 
 def drained(session: Session) -> bool:
-    """Whether no job in `EMBEDDING_PIPELINE` is open."""
+    """Whether no job in `EMBEDDING_PIPELINE` is pending. A job waiting to retry
+    after a failure doesn't count: one unreadable file would otherwise hold the fit
+    back until it's parked. If it succeeds later, the check after it queues another
+    fit for its item."""
     return not session.scalar(
-        sa.select(sa.exists().where(Job.stage.in_(EMBEDDING_PIPELINE), sa.text(JOB_IS_OPEN)))
+        sa.select(
+            sa.exists().where(Job.stage.in_(EMBEDDING_PIPELINE), Job.status == JobStatus.PENDING)
+        )
     )
 
 

@@ -167,8 +167,6 @@ async def test_the_tier_1_fixtures_are_served_once_laid_out(
         "CLIP_MODEL": "fake",
     }.items():
         monkeypatch.setenv(name, str(value))
-    # Its scan waits to retry, which holds the fit back (see test_layout.py).
-    (library / "broken" / "truncated.jpg").unlink()
     assert main(["scan"]) == 0
     assert main(["--once"], clip=FakeClip()) == 0
     with sessionmaker(migrated)() as session:

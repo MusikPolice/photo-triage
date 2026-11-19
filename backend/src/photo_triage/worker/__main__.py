@@ -6,7 +6,8 @@ scan job for each new or changed file, unless one is waiting or running. The
 worker also queues one on `SCAN_SCHEDULE`.
 
 `python -m photo_triage.worker reconcile` queues every item stage that's due
-(`photo_triage.worker.reconcile`), as the worker does at startup and after a walk.
+(`photo_triage.worker.reconcile`), and a layout fit if one is
+(`photo_triage.worker.layout_schedule`), as the worker does at startup.
 
 `python -m photo_triage.worker noop N` queues N jobs for the `noop` stage, to
 exercise the worker by hand (needs `WORKER_NOOP_STAGE=true`).
@@ -39,7 +40,7 @@ from photo_triage.settings import (
     load_settings,
     trash_filesystem_warning,
 )
-from photo_triage.worker import controls
+from photo_triage.worker import controls, layout_schedule
 from photo_triage.worker.clock import Clock, running_from, utc_now
 from photo_triage.worker.heartbeat import Heartbeat
 from photo_triage.worker.loop import Worker
@@ -129,6 +130,11 @@ def main(
         if args.command == "reconcile":
             logs.configure(settings, "worker", to_file=False)  # as for noop
             reconcile(engine, stages, clock())
+            with Session(engine) as session, session.begin():
+                if layout_schedule.queue_if_due(
+                    session, queue, settings.clip_model, check_growth=True
+                ):
+                    logger.info("Queued a layout fit: the embedded items have changed")
             return 0
         if args.command == "noop":
             # The worker may be running and writing worker.log, and two processes

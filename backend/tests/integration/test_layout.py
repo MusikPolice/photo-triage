@@ -169,12 +169,29 @@ def test_an_open_job_in_the_pipeline_holds_a_small_change_back(lib: Library, sta
     assert not lib.queue_if_due()
 
 
-def test_a_job_waiting_to_retry_counts_as_open(lib: Library) -> None:
+@pytest.mark.parametrize("stage", [Stage.SCAN, Stage.CLIP])
+def test_a_job_waiting_to_retry_doesnt_hold_the_fit_back(lib: Library, stage: Stage) -> None:
     lib.add(5)
     lib.fit()
     lib.add(1)
-    lib.job(Stage.CLIP, JobStatus.ERROR)
-    assert not lib.queue_if_due()
+    lib.job(stage, JobStatus.ERROR)
+    assert lib.queue_if_due()
+
+
+def test_an_item_whose_retry_succeeds_gets_the_next_fit(lib: Library) -> None:
+    lib.add(5)
+    retrying = lib.job(Stage.CLIP, JobStatus.ERROR)
+    assert lib.queue_if_due()
+    with lib.sessions.begin() as session:
+        session.execute(sa.delete(Job).where(Job.stage == Stage.LAYOUT))
+    lib.fit()
+
+    # The retry succeeds, and its item is embedded.
+    with lib.sessions.begin() as session:
+        session.get_one(Job, retrying).status = JobStatus.DONE
+    lib.add(1)
+
+    assert lib.queue_if_due()
 
 
 def test_a_parked_pipeline_job_doesnt_hold_it_back(lib: Library) -> None:
@@ -483,6 +500,31 @@ def test_a_reconcile_queues_a_fit_when_one_is_due(lib: Library) -> None:
     assert lib.layout_jobs() == 1
 
 
+def test_the_reconcile_command_queues_a_fit_when_one_is_due(
+    lib: Library, settings: Settings, monkeypatch: pytest.MonkeyPatch, small_growth: None
+) -> None:
+    for name, value in {
+        "PHOTO_DIR": settings.photo_dir,
+        "TRASH_DIR": settings.trash_dir,
+        "DATA_DIR": settings.data_dir,
+        "MODELS_DIR": settings.models_dir,
+        "CLIP_MODEL": MODEL,
+    }.items():
+        monkeypatch.setenv(name, str(value))
+    settings.photo_dir.mkdir(parents=True, exist_ok=True)
+    # Reconciling queues these items' stages, so it's growth that makes a fit due.
+    lib.add(5)
+
+    assert main(["reconcile"]) == 0
+    assert lib.layout_jobs() == 1
+
+    with lib.sessions.begin() as session:
+        session.execute(sa.delete(Job).where(Job.stage == Stage.LAYOUT))
+    lib.fit()
+    assert main(["reconcile"]) == 0
+    assert lib.layout_jobs() == 0
+
+
 def test_a_worker_without_a_layout_model_queues_no_fit(lib: Library) -> None:
     lib.add(5)
     lib.job(Stage.CLIP)
@@ -505,19 +547,24 @@ def test_worker_once_lays_out_the_tier_1_fixtures(
     }.items():
         monkeypatch.setenv(name, str(value))
     lib = Library(migrated)
-    # Its scan fails and waits to retry, which holds every fit back until it's
-    # parked: minutes the --once run doesn't wait for.
-    (library / "broken" / "truncated.jpg").unlink()
+    # broken/truncated.jpg's scan fails and waits to retry, without holding the fit
+    # back (#122).
 
     assert main(["scan"]) == 0
     assert main(["--once"], clip=FakeClip()) == 0
 
     with lib.sessions() as session:
         embedded = set(session.scalars(sa.select(Embedding.item_id)))
-        items = set(session.scalars(sa.select(Item.id)))
+        hashed = set(session.scalars(sa.select(Item.id).where(Item.content_hash.is_not(None))))
+        retrying = session.scalars(
+            sa.select(Item.path)
+            .join(Job, Job.item_id == Item.id)
+            .where(Job.status == JobStatus.ERROR)
+        ).all()
     assert embedded  # the fixtures were embedded
+    assert retrying == ["broken/truncated.jpg"]
     assert lib.versions() == {1}
-    assert set(lib.layout()) == embedded == items
+    assert set(lib.layout()) == embedded == hashed
 
     # Nothing new: a second run fits nothing.
     assert main(["--once"], clip=FakeClip()) == 0
