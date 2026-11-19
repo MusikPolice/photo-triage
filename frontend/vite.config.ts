@@ -13,6 +13,10 @@ export function apiTarget(env: Record<string, string>): string {
 
 export default defineConfig(({ mode }) => ({
   plugins: [svelte()],
+  build: {
+    // deck.gl, loaded only with the map, is a chunk of about 650 kB (190 kB gzipped).
+    chunkSizeWarningLimit: 800,
+  },
   server: {
     proxy: {
       // Real environment variables override the repo-root .env, as for the API.

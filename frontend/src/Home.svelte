@@ -1,29 +1,28 @@
 <script lang="ts">
-  import { getHealth } from "./lib/api";
+  import type { ActivityFeed } from "./lib/activity.svelte";
 
-  const health = getHealth();
-</script>
-
-<h1>Your library</h1>
-<p>The map, search and review queues will live here.</p>
-
-<p class="status">
-  {#await health}
-    Checking the API…
-  {:then}
-    API is up.
-  {:catch error}
-    API is unreachable: {error instanceof Error ? error.message : String(error)}
-  {/await}
-</p>
-
-<style>
-  h1 {
-    margin-top: 0;
-    font-size: 1.5rem;
+  interface Props {
+    feed: ActivityFeed;
   }
 
-  .status {
+  const { feed }: Props = $props();
+
+  // deck.gl is most of the app's code, so it loads only with the map.
+  const LibraryMap = import("./LibraryMap.svelte").then((module) => module.default);
+</script>
+
+{#await LibraryMap then Map}
+  <Map layoutVersion={feed.activity?.layout_version} />
+{:catch error}
+  <p class="note">
+    The map couldn't load: {error instanceof Error ? error.message : String(error)}
+  </p>
+{/await}
+
+<style>
+  .note {
+    margin: 2rem 1rem;
     color: var(--muted);
+    text-align: center;
   }
 </style>

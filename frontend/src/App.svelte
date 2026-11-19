@@ -48,11 +48,11 @@
   <StatusIndicator {feed} />
 </header>
 
-<main>
+<main class:full={route === "home"}>
   {#if route === "activity"}
     <Activity {feed} />
   {:else if route === "home"}
-    <Home />
+    <Home {feed} />
   {:else}
     <h1>No page here</h1>
     <p><a href={ROUTE_HREF.home}>Back to your library</a></p>
@@ -79,5 +79,15 @@
   main {
     max-width: 48rem;
     padding: 1rem;
+  }
+
+  /* The map fills the screen under the header. */
+  main.full {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    max-width: none;
+    padding: 0;
   }
 </style>

@@ -5,6 +5,7 @@ import type { Activity } from "../src/lib/api";
 
 function activity(status: "running" | "paused", done = 0): Activity {
   return {
+    layout_version: null,
     worker: { status, paused: status === "paused", quiet_until_at: null, last_seen_at: null },
     stages: [
       {
