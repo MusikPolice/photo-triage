@@ -457,6 +457,28 @@ async def test_the_walk_shows_its_last_finished_run_and_who_asked(
     assert walk["last_actor"] == "alice@example.com"
 
 
+async def test_layout_shows_its_last_run_and_no_schedule(
+    client: AsyncClient, migrated: Engine
+) -> None:
+    finished_at = START - dt.timedelta(minutes=30)
+    with Session(migrated) as session, session.begin():
+        session.add(
+            Job(
+                stage=Stage.LAYOUT,
+                priority=PRIORITY[Stage.LAYOUT],
+                status=JobStatus.DONE,
+                attempts=0,
+                enqueued_at=finished_at - dt.timedelta(minutes=1),
+                finished_at=finished_at,
+            )
+        )
+
+    layout = _stages((await client.get("/api/activity")).json())["layout"]
+
+    assert layout["last_finished_at"] == "2026-10-05T11:30:00Z"
+    assert (layout["last_actor"], layout["next_scheduled_at"]) == (None, None)
+
+
 async def test_scan_now_queues_one_walk_and_records_who_asked(
     app: FastAPI, client: AsyncClient, migrated: Engine
 ) -> None:

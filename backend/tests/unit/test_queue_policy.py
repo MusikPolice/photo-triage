@@ -14,16 +14,16 @@ def test_every_stage_has_a_priority() -> None:
 
 
 def test_stage_priorities_follow_the_plan() -> None:
-    # plan §6.11: metadata writes > scan > thumbnails > CLIP > quality > faces >
-    # batch jobs > LLM tagging. Lower runs first.
+    # plan §6.11: metadata writes > scan > thumbnails, layout and atlases > CLIP >
+    # quality > faces > duplicate grouping > LLM tagging. Lower runs first.
     plan_order = [
         [Stage.METADATA_WRITE],
         [Stage.SCAN],
-        [Stage.THUMBNAIL],
+        [Stage.THUMBNAIL, Stage.LAYOUT, Stage.ATLASES],
         [Stage.CLIP],
         [Stage.QUALITY],
         [Stage.FACES, Stage.RECOGNIZE],
-        [Stage.LAYOUT, Stage.DUPLICATES, Stage.ATLASES],
+        [Stage.DUPLICATES],
         [Stage.LLM_TAG],
     ]
     for group in plan_order:

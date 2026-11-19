@@ -13,6 +13,10 @@ it queues a walk if `SCAN_SCHEDULE` says one is due, even when paused or quiet
 When an item stage's job finishes, it queues the stages after it that are now due
 for the item (`reconcile.chain`), so new items flow straight through. After each
 walk it reconciles the item stages (`photo_triage.worker.reconcile`).
+
+With `layout_model`, it also queues a layout fit when one is due
+(`photo_triage.worker.layout_schedule`), after each job that leads to an embedding,
+whether it succeeded or failed, and after each reconcile.
 """
 
 import datetime as dt
@@ -30,6 +34,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from photo_triage.db.models import JOB_IS_OPEN, Job, JobStatus
 from photo_triage.quiet_hours import UTC_ZONE, QuietHours
 from photo_triage.schedule import Schedule
+from photo_triage.worker import layout_schedule
 from photo_triage.worker.clock import Clock, Timer, utc_now
 from photo_triage.worker.queue import JobQueue, Stage
 from photo_triage.worker.reconcile import chain, reconcile
@@ -60,10 +65,13 @@ class Worker:
         summary_interval_s: float = SUMMARY_INTERVAL_S,
         item_stages: Mapping[str, ItemStage] | None = None,
         scan_schedule: Schedule | None = None,
+        layout_model: str | None = None,
     ) -> None:
         """`clock` should be the queue's clock. `zone` is the one quiet hours and
         `scan_schedule` are in. `item_stages` are the stages to reconcile, whose
-        versions jobs record. Without `scan_schedule`, walks are queued only by hand."""
+        versions jobs record. Without `scan_schedule`, walks are queued only by hand.
+        `layout_model` is `CLIP_MODEL`, whose embeddings are laid out; without it,
+        layout fits are queued only by hand."""
         self._engine = engine
         self._sessions = sessionmaker(engine, expire_on_commit=False)
         self._runners = dict(runners)
@@ -79,6 +87,8 @@ class Worker:
         """The schedule has nothing due before this, unless a walk is deleted."""
         self._state = WorkerState()
         self._progress = _Progress(timer, summary_interval_s)
+        self._layout_model = layout_model
+        self._growth_checked_s: float | None = None
 
     @property
     def state(self) -> WorkerState:
@@ -109,8 +119,13 @@ class Worker:
         return len(jobs)
 
     def reconcile(self) -> dict[str, int]:
-        """Queue every item stage that's due. Returns how many jobs each stage got."""
-        return reconcile(self._engine, self._item_stages, self._clock())
+        """Queue every item stage that's due, and a layout fit if one is. Returns how
+        many jobs each stage got."""
+        queued = reconcile(self._engine, self._item_stages, self._clock())
+        with self._sessions.begin() as session:
+            if self._queue_layout(session, check_growth=True):
+                queued[Stage.LAYOUT] = 1
+        return queued
 
     def run_one(self) -> bool:
         """Claim the next job for a stage this worker runs, run it, and record the
@@ -148,6 +163,8 @@ class Worker:
                     output_changed=changed is not False,
                 )
                 chained = self._chain(session, job)
+                if job.stage in layout_schedule.EMBEDDING_PIPELINE and self._queue_layout(session):
+                    chained.append(Stage.LAYOUT)
             logger.debug("Finished %s in %.3f s", _describe(job), duration_s)
             if chained:
                 logger.debug("Queued %s after it", ", ".join(chained))
@@ -205,6 +222,26 @@ class Worker:
             return []
         return chain(session, self._item_stages, job.stage, item_id, self._clock())
 
+    def _queue_layout(self, session: Session, *, check_growth: bool | None = None) -> bool:
+        """Queue a layout fit if one is due. The growth rule is checked at most once
+        per `GROWTH_CHECK_INTERVAL_S`, unless `check_growth` says otherwise."""
+        if self._layout_model is None:
+            return False
+        if check_growth is None:
+            now_s = self._timer()
+            last_s = self._growth_checked_s
+            check_growth = (
+                last_s is None or now_s - last_s >= layout_schedule.GROWTH_CHECK_INTERVAL_S
+            )
+            if check_growth:
+                self._growth_checked_s = now_s
+        queued = layout_schedule.queue_if_due(
+            session, self._queue, self._layout_model, check_growth=check_growth
+        )
+        if queued:
+            logger.info("Queued a layout fit: the embedded items have changed")
+        return queued
+
     def _set_state(self, state: WorkerState) -> None:
         if state != self._state:
             logger.info("%s", state.describe(self._zone))
@@ -217,6 +254,9 @@ class Worker:
             )
             failed = session.get_one(Job, job.id)
             attempts, retry_at = failed.attempts, failed.retry_at
+            if job.stage in layout_schedule.EMBEDDING_PIPELINE:
+                # The pipeline's last job may be one that failed.
+                self._queue_layout(session)
         self._progress.errors[job.stage] += 1
         if status == JobStatus.PARKED:
             logger.error(

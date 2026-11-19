@@ -195,7 +195,7 @@ def test_once_runs_every_ready_job_in_priority_order_then_exits_0(
         migrated,
         (Stage.LLM_TAG, a),
         (Stage.CLIP, b),
-        (Stage.LAYOUT, None),
+        (Stage.DUPLICATES, None),
         (Stage.SCAN, b),
         (Stage.CLIP, a),
         (Stage.METADATA_WRITE, a),
@@ -209,7 +209,7 @@ def test_once_runs_every_ready_job_in_priority_order_then_exits_0(
         (Stage.SCAN, b),
         (Stage.CLIP, b),  # same priority: oldest first
         (Stage.CLIP, a),
-        (Stage.LAYOUT, None),
+        (Stage.DUPLICATES, None),
         (Stage.LLM_TAG, a),
     ]
     assert set(_statuses(migrated).values()) == {JobStatus.DONE}
@@ -218,13 +218,13 @@ def test_once_runs_every_ready_job_in_priority_order_then_exits_0(
 def test_jobs_for_stages_without_a_runner_are_left_in_the_queue(
     migrated: Engine, queue: JobQueue
 ) -> None:
-    clip, layout = _enqueue(migrated, (Stage.CLIP, None), (Stage.LAYOUT, None))
+    clip, batch = _enqueue(migrated, (Stage.CLIP, None), (Stage.DUPLICATES, None))
     recorder = Recorder()
 
-    assert Worker(migrated, {Stage.LAYOUT: recorder}, queue=queue).drain() == 1
+    assert Worker(migrated, {Stage.DUPLICATES: recorder}, queue=queue).drain() == 1
 
-    assert recorder.ran == [(Stage.LAYOUT, None)]
-    assert _statuses(migrated) == {clip: JobStatus.PENDING, layout: JobStatus.DONE}
+    assert recorder.ran == [(Stage.DUPLICATES, None)]
+    assert _statuses(migrated) == {clip: JobStatus.PENDING, batch: JobStatus.DONE}
 
 
 KILLED_WORKER = """
@@ -238,14 +238,14 @@ def hang(job):
     Path(sys.argv[2]).touch()
     time.sleep(60)
 
-Worker(open_database(Path(sys.argv[1])), {"layout": hang}).drain()
+Worker(open_database(Path(sys.argv[1])), {"duplicates": hang}).drain()
 """
 
 
 def test_a_job_running_when_the_worker_is_killed_is_completed_after_restart(
     migrated: Engine, tmp_path: Path, queue: JobQueue
 ) -> None:
-    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
+    (job_id,) = _enqueue(migrated, (Stage.DUPLICATES, None))
     started = tmp_path / "started"
     process = subprocess.Popen(
         [sys.executable, "-c", textwrap.dedent(KILLED_WORKER), str(tmp_path / "data"), str(started)]
@@ -262,11 +262,11 @@ def test_a_job_running_when_the_worker_is_killed_is_completed_after_restart(
     assert _statuses(migrated) == {job_id: JobStatus.RUNNING}
 
     recorder = Recorder()
-    worker = Worker(migrated, {Stage.LAYOUT: recorder}, queue=queue)
+    worker = Worker(migrated, {Stage.DUPLICATES: recorder}, queue=queue)
     assert worker.recover() == 1
     assert worker.drain() == 1
 
-    assert recorder.ran == [(Stage.LAYOUT, None)]
+    assert recorder.ran == [(Stage.DUPLICATES, None)]
     assert _statuses(migrated) == {job_id: JobStatus.DONE}
 
 
@@ -274,9 +274,9 @@ def test_a_failing_runner_is_retried_then_parked_and_the_worker_carries_on(
     migrated: Engine, queue: JobQueue, clock: FakeClock
 ) -> None:
     (item,) = _items(migrated, 1)
-    failing, other = _enqueue(migrated, (Stage.SCAN, item), (Stage.LAYOUT, None))
+    failing, other = _enqueue(migrated, (Stage.SCAN, item), (Stage.DUPLICATES, None))
     recorder = Recorder()
-    worker = Worker(migrated, {Stage.SCAN: Failing(), Stage.LAYOUT: recorder}, queue=queue)
+    worker = Worker(migrated, {Stage.SCAN: Failing(), Stage.DUPLICATES: recorder}, queue=queue)
 
     assert worker.drain() == 2  # the failure doesn't stop the other job
     assert _statuses(migrated) == {failing: JobStatus.ERROR, other: JobStatus.DONE}
@@ -297,7 +297,7 @@ def test_another_connection_can_write_while_a_job_runs(
     migrated: Engine, queue: JobQueue, tmp_path: Path
 ) -> None:
     """The claim is committed before the job runs, and the result straight after."""
-    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
+    (job_id,) = _enqueue(migrated, (Stage.DUPLICATES, None))
     other = open_database(tmp_path / "data")
     # Fail at once, rather than after the busy timeout, if the worker holds the lock.
     event.listen(other, "connect", lambda conn, _: conn.execute("PRAGMA busy_timeout = 0"))
@@ -310,7 +310,7 @@ def test_another_connection_can_write_while_a_job_runs(
             session.commit()
 
     try:
-        assert Worker(migrated, {Stage.LAYOUT: enqueue_elsewhere}, queue=queue).run_one()
+        assert Worker(migrated, {Stage.DUPLICATES: enqueue_elsewhere}, queue=queue).run_one()
         with Session(other) as session:
             assert session.get_one(Job, job_id).status == JobStatus.DONE
             JobQueue(clock=lambda: START).enqueue(session, Stage.DUPLICATES)
@@ -352,7 +352,7 @@ def test_each_job_is_logged_at_debug(
     migrated: Engine, queue: JobQueue, timer: FakeTimer, caplog: pytest.LogCaptureFixture
 ) -> None:
     (item,) = _items(migrated, 1)
-    clip, layout = _enqueue(migrated, (Stage.CLIP, item), (Stage.LAYOUT, None))
+    clip, batch = _enqueue(migrated, (Stage.CLIP, item), (Stage.DUPLICATES, None))
     caplog.set_level(logging.DEBUG, logger="photo_triage.worker")
 
     Worker(migrated, dict.fromkeys(Stage, Recorder(timer, 1.25)), queue=queue, timer=timer).drain()
@@ -361,8 +361,8 @@ def test_each_job_is_logged_at_debug(
     assert debug == [
         f"Running clip job {clip} (item {item})",
         f"Finished clip job {clip} (item {item}) in 1.250 s",
-        f"Running layout job {layout} (batch)",
-        f"Finished layout job {layout} (batch) in 1.250 s",
+        f"Running duplicates job {batch} (batch)",
+        f"Finished duplicates job {batch} (batch) in 1.250 s",
     ]
 
 
@@ -386,14 +386,14 @@ def test_a_failure_that_will_retry_is_one_warning_line(
 def test_a_parked_job_is_an_error_with_its_traceback(
     migrated: Engine, queue: JobQueue, clock: FakeClock, caplog: pytest.LogCaptureFixture
 ) -> None:
-    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
-    worker = Worker(migrated, {Stage.LAYOUT: Failing()}, queue=queue)
+    (job_id,) = _enqueue(migrated, (Stage.DUPLICATES, None))
+    worker = Worker(migrated, {Stage.DUPLICATES: Failing()}, queue=queue)
     for _ in range(3):
         worker.drain()
         clock.advance(dt.timedelta(hours=1))
 
     (error,) = [r for r in caplog.records if r.levelno == logging.ERROR]
-    assert error.getMessage() == f"Parked layout job {job_id} (batch) after 3 failed attempts"
+    assert error.getMessage() == f"Parked duplicates job {job_id} (batch) after 3 failed attempts"
     assert error.exc_info is not None
     assert isinstance(error.exc_info[1], OSError)
     assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 2
@@ -437,7 +437,7 @@ def test_nothing_is_summarized_when_nothing_ran(
 
 def test_run_keeps_going_until_stopped(migrated: Engine, queue: JobQueue) -> None:
     recorder = Recorder()
-    worker = Worker(migrated, {Stage.LAYOUT: recorder}, queue=queue)
+    worker = Worker(migrated, {Stage.DUPLICATES: recorder}, queue=queue)
     stop = threading.Event()
     thread = threading.Thread(target=worker.run, args=(stop, 0.01))
     thread.start()
@@ -445,7 +445,7 @@ def test_run_keeps_going_until_stopped(migrated: Engine, queue: JobQueue) -> Non
         for _ in range(2):  # each one arrives after the worker found the queue empty
             count = len(recorder.ran)
             time.sleep(0.05)
-            _enqueue(migrated, (Stage.LAYOUT, None))
+            _enqueue(migrated, (Stage.DUPLICATES, None))
             deadline_s = time.monotonic() + 10
             while len(recorder.ran) == count:
                 assert time.monotonic() < deadline_s
@@ -460,7 +460,7 @@ def test_run_keeps_going_until_stopped(migrated: Engine, queue: JobQueue) -> Non
 def test_sigterm_stops_the_worker_after_the_current_job(
     migrated: Engine, worker_env: Settings, monkeypatch: pytest.MonkeyPatch, recently_walked: None
 ) -> None:
-    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
+    (job_id,) = _enqueue(migrated, (Stage.DUPLICATES, None))
 
     def signal_mid_job(job: Job) -> None:
         os.kill(os.getpid(), signal.SIGTERM)
@@ -469,7 +469,7 @@ def test_sigterm_stops_the_worker_after_the_current_job(
     handler = signal.getsignal(signal.SIGTERM)
     monkeypatch.setattr("photo_triage.worker.loop.IDLE_POLL_S", 60.0)
 
-    assert main([], runners={Stage.LAYOUT: signal_mid_job}) == 0
+    assert main([], runners={Stage.DUPLICATES: signal_mid_job}) == 0
 
     assert _statuses(migrated) == {job_id: JobStatus.DONE}
     assert signal.getsignal(signal.SIGTERM) == handler
@@ -481,18 +481,18 @@ def test_sigterm_stops_the_worker_after_the_current_job(
 def test_main_recovers_interrupted_jobs_and_logs_to_worker_log(
     migrated: Engine, worker_env: Settings, recently_walked: None
 ) -> None:
-    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
+    (job_id,) = _enqueue(migrated, (Stage.DUPLICATES, None))
     with Session(migrated) as session:
         JobQueue(clock=lambda: START).claim(session)
         session.commit()
 
-    assert main(["--once"], runners={Stage.LAYOUT: Recorder()}) == 0
+    assert main(["--once"], runners={Stage.DUPLICATES: Recorder()}) == 0
 
     assert _statuses(migrated) == {job_id: JobStatus.DONE}
     log = (worker_env.data_dir / "logs/worker.log").read_text()
     assert "INFO photo_triage.worker Worker starting: PHOTO_DIR=" in log
     assert (
-        f"WARNING photo_triage.worker.loop Layout job {job_id} (batch) was interrupted when "
+        f"WARNING photo_triage.worker.loop Duplicates job {job_id} (batch) was interrupted when "
         "the worker stopped (attempt 1 of 5), queued again"
     ) in log
     assert "Progress in the last" in log
@@ -540,12 +540,12 @@ def test_the_worker_loads_no_ml_library_before_applying_worker_threads() -> None
 def test_exits_without_claiming_a_job_when_the_database_is_not_at_head(
     migrated: Engine, worker_env: Settings, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
+    (job_id,) = _enqueue(migrated, (Stage.DUPLICATES, None))
     recorder = Recorder()
     with migrated.begin() as conn:  # as if newer code had migrated it
         conn.exec_driver_sql("UPDATE alembic_version SET version_num = '9999'")
 
-    assert main(["--once"], runners={Stage.LAYOUT: recorder}) == 1
+    assert main(["--once"], runners={Stage.DUPLICATES: recorder}) == 1
 
     assert "newer than this code" in capsys.readouterr().err
     assert recorder.ran == []
@@ -562,14 +562,14 @@ def test_exits_when_there_is_no_database(
 def test_a_second_worker_exits_without_recovering_the_first_one_s_job(
     migrated: Engine, worker_env: Settings, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
+    (job_id,) = _enqueue(migrated, (Stage.DUPLICATES, None))
     with Session(migrated) as session:  # the first worker is running it
         JobQueue(clock=lambda: START).claim(session)
         session.commit()
     recorder = Recorder()
 
     with exclusive_lock(worker_env.data_dir / LOCK_FILENAME):
-        assert main(["--once"], runners={Stage.LAYOUT: recorder}) == 1
+        assert main(["--once"], runners={Stage.DUPLICATES: recorder}) == 1
 
     assert "A worker is already running" in capsys.readouterr().err
     assert recorder.ran == []
@@ -655,8 +655,8 @@ def test_fake_now_sets_the_clock(
 def test_a_job_that_keeps_killing_the_worker_is_parked_with_an_error(
     migrated: Engine, queue: JobQueue, caplog: pytest.LogCaptureFixture
 ) -> None:
-    (job_id,) = _enqueue(migrated, (Stage.LAYOUT, None))
-    worker = Worker(migrated, {Stage.LAYOUT: Recorder()}, queue=queue)
+    (job_id,) = _enqueue(migrated, (Stage.DUPLICATES, None))
+    worker = Worker(migrated, {Stage.DUPLICATES: Recorder()}, queue=queue)
     for _ in range(3):  # each time, the worker dies mid-job and restarts
         with Session(migrated) as session:
             assert queue.claim(session) is not None
@@ -669,14 +669,14 @@ def test_a_job_that_keeps_killing_the_worker_is_parked_with_an_error(
     assert levels == [
         (
             logging.WARNING,
-            f"Layout job {job_id} (batch) was interrupted when the worker stopped "
+            f"Duplicates job {job_id} (batch) was interrupted when the worker stopped "
             f"(attempt {n} of 3), queued again",
         )
         for n in (1, 2)
     ] + [
         (
             logging.ERROR,
-            f"Parked layout job {job_id} (batch) after 3 failed attempts, the last "
+            f"Parked duplicates job {job_id} (batch) after 3 failed attempts, the last "
             "interrupted when the worker stopped",
         )
     ]
@@ -697,8 +697,8 @@ def test_pausing_a_stage_stops_its_jobs_being_claimed_and_the_running_one_finish
 ) -> None:
     caplog.set_level(logging.INFO)
     a, b = _items(migrated, 2)
-    clip_a, clip_b, layout = _enqueue(
-        migrated, (Stage.CLIP, a), (Stage.CLIP, b), (Stage.LAYOUT, None)
+    clip_a, clip_b, batch = _enqueue(
+        migrated, (Stage.CLIP, a), (Stage.CLIP, b), (Stage.DUPLICATES, None)
     )
     ran: list[int] = []
 
@@ -710,11 +710,11 @@ def test_pausing_a_stage_stops_its_jobs_being_claimed_and_the_running_one_finish
     worker = Worker(migrated, dict.fromkeys(Stage, pause_clip_mid_job), queue=queue)
 
     assert worker.drain() == 2
-    assert ran == [clip_a, layout]
+    assert ran == [clip_a, batch]
     assert _statuses(migrated) == {
         clip_a: JobStatus.DONE,
         clip_b: JobStatus.PENDING,
-        layout: JobStatus.DONE,
+        batch: JobStatus.DONE,
     }
     assert worker.state == WorkerState(paused_stages=frozenset({"clip"}))
     assert "Worker running; paused stages: clip" in caplog.messages
@@ -729,7 +729,7 @@ def test_a_global_pause_stops_all_claiming_and_the_running_job_finishes(
     migrated: Engine, queue: JobQueue, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO)
-    first, second = _enqueue(migrated, (Stage.SCAN, None), (Stage.LAYOUT, None))
+    first, second = _enqueue(migrated, (Stage.SCAN, None), (Stage.DUPLICATES, None))
 
     def pause_mid_job(job: Job) -> None:
         _pause(migrated, controls.GLOBAL)
@@ -745,7 +745,7 @@ def test_a_global_pause_stops_all_claiming_and_the_running_job_finishes(
 def test_a_pause_survives_a_worker_restart(
     migrated: Engine, worker_env: Settings, recently_walked: None
 ) -> None:
-    clip, layout = _enqueue(migrated, (Stage.CLIP, None), (Stage.LAYOUT, None))
+    clip, batch = _enqueue(migrated, (Stage.CLIP, None), (Stage.DUPLICATES, None))
     _pause(migrated, controls.GLOBAL)
     _pause(migrated, Stage.CLIP)
     recorder = Recorder()
@@ -755,8 +755,8 @@ def test_a_pause_survives_a_worker_restart(
 
     _resume(migrated, controls.GLOBAL)
     assert main(["--once"], runners=dict.fromkeys(Stage, recorder)) == 0
-    assert recorder.ran == [(Stage.LAYOUT, None)]
-    assert _statuses(migrated) == {clip: JobStatus.PENDING, layout: JobStatus.DONE}
+    assert recorder.ran == [(Stage.DUPLICATES, None)]
+    assert _statuses(migrated) == {clip: JobStatus.PENDING, batch: JobStatus.DONE}
     log = (worker_env.data_dir / "logs/worker.log").read_text()
     assert "INFO photo_triage.worker.loop Worker paused; paused stages: clip" in log
 
@@ -783,7 +783,7 @@ def test_no_job_is_claimed_during_quiet_hours_and_a_running_job_finishes(
     migrated: Engine, queue: JobQueue, clock: FakeClock, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO)
-    first, second = _enqueue(migrated, (Stage.LAYOUT, None), (Stage.SCAN, None))
+    first, second = _enqueue(migrated, (Stage.DUPLICATES, None), (Stage.SCAN, None))
 
     def run_into_quiet_hours(job: Job) -> None:
         clock.advance(dt.timedelta(minutes=40))  # START is Saturday 12:00 UTC
@@ -812,13 +812,13 @@ def test_no_job_is_claimed_during_quiet_hours_and_a_running_job_finishes(
 def test_quiet_hours_are_read_in_tz(
     migrated: Engine, worker_env: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _enqueue(migrated, (Stage.LAYOUT, None))
+    _enqueue(migrated, (Stage.DUPLICATES, None))
     monkeypatch.setenv("FAKE_NOW", "2026-10-05T18:00:00-04:00")  # a Monday
     monkeypatch.setenv("TZ", "America/Toronto")
     monkeypatch.setenv("WORKER_QUIET_HOURS", "Mon-Fri 17:00-23:00")
     recorder = Recorder()
 
-    assert main(["--once"], runners={Stage.LAYOUT: recorder}) == 0
+    assert main(["--once"], runners={Stage.DUPLICATES: recorder}) == 0
 
     assert recorder.ran == []
     log = (worker_env.data_dir / "logs/worker.log").read_text()
@@ -923,9 +923,12 @@ def test_the_pause_command_shows_the_state_of_a_running_worker(
     migrated: Engine, worker_env: Settings, capsys: pytest.CaptureFixture[str]
 ) -> None:
     with Heartbeat(migrated):
-        assert main(["pause", "layout"]) == 0
+        assert main(["pause", "duplicates"]) == 0
 
-    assert "Paused stage layout. Worker running; paused stages: layout" in capsys.readouterr().err
+    assert (
+        "Paused stage duplicates. Worker running; paused stages: duplicates"
+        in capsys.readouterr().err
+    )
 
 
 def test_the_pause_command_takes_only_a_stage(

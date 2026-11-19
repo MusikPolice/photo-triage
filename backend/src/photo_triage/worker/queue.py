@@ -69,14 +69,18 @@ PRIORITY: dict[Stage, int] = {
     Stage.QUALITY: 4,
     Stage.FACES: 5,
     Stage.RECOGNIZE: 5,
-    Stage.LAYOUT: 6,  # batch jobs
-    Stage.DUPLICATES: 6,
-    Stage.ATLASES: 6,
+    # The map's batch jobs, ahead of CLIP, so the map grows during a backfill.
+    Stage.LAYOUT: 2,
+    Stage.ATLASES: 2,
+    Stage.DUPLICATES: 6,  # batch
     Stage.LLM_TAG: 7,
     Stage.NOOP: 8,
 }
-"""Lower runs first: metadata writes > scan and reading metadata > thumbnails > CLIP >
-quality > faces > batch jobs > LLM tagging, so the map and search become usable first."""
+"""Lower runs first: metadata writes > scan and reading metadata > thumbnails, layout
+and atlases > CLIP > quality > faces > duplicate grouping > LLM tagging, so the map
+and search become usable first, and the map grows while CLIP works through a
+backfill. A layout fit is queued only when one is due
+(`photo_triage.worker.layout_schedule`), so it costs CLIP little time."""
 
 BATCH_STAGES = frozenset({Stage.WALK, Stage.LAYOUT, Stage.DUPLICATES, Stage.ATLASES, Stage.NOOP})
 """Stages whose jobs cover the whole library rather than one item."""

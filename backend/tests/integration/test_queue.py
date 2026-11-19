@@ -90,10 +90,10 @@ def test_claim_takes_highest_priority_then_oldest(
     clock.advance(dt.timedelta(seconds=1))
     clip_new = queue.enqueue(session, Stage.CLIP, b)
     write = queue.enqueue(session, Stage.METADATA_WRITE, b)
-    layout = queue.enqueue(session, Stage.LAYOUT)
+    batch = queue.enqueue(session, Stage.DUPLICATES)
 
     claimed = [_claim_id(queue, session) for _ in range(6)]
-    assert claimed == [write, clip_old, clip_new, layout, llm, None]
+    assert claimed == [write, clip_old, clip_new, batch, llm, None]
 
 
 def test_claim_marks_the_job_running(queue: JobQueue, session: Session, clock: FakeClock) -> None:
@@ -136,8 +136,8 @@ def test_enqueueing_an_open_job_again_does_not_duplicate_it(
     assert queue.enqueue(session, Stage.THUMBNAIL, a) == first
     assert queue.enqueue(session, Stage.THUMBNAIL, b) != first
     assert queue.enqueue(session, Stage.CLIP, a) != first
-    batch = queue.enqueue(session, Stage.LAYOUT)
-    assert queue.enqueue(session, Stage.LAYOUT) == batch
+    batch = queue.enqueue(session, Stage.DUPLICATES)
+    assert queue.enqueue(session, Stage.DUPLICATES) == batch
     assert session.scalar(sa.select(sa.func.count()).select_from(Job)) == 4
 
 
@@ -177,7 +177,7 @@ def test_the_database_rejects_a_duplicate_open_job(queue: JobQueue, session: Ses
 
 
 def test_a_completed_job_is_done(queue: JobQueue, session: Session, clock: FakeClock) -> None:
-    job_id = queue.enqueue(session, Stage.LAYOUT)
+    job_id = queue.enqueue(session, Stage.DUPLICATES)
     queue.claim(session)
     clock.advance(dt.timedelta(seconds=30))
     queue.complete(session, job_id, 1.0)
@@ -202,9 +202,9 @@ def test_only_the_latest_done_job_per_stage_and_item_is_kept(
     _run(queue, session, Stage.THUMBNAIL, a)
     other_item = _run(queue, session, Stage.THUMBNAIL, b)
     other_stage = _run(queue, session, Stage.CLIP, a)
-    _run(queue, session, Stage.LAYOUT)
+    _run(queue, session, Stage.DUPLICATES)
     latest = _run(queue, session, Stage.THUMBNAIL, a)
-    latest_batch = _run(queue, session, Stage.LAYOUT)
+    latest_batch = _run(queue, session, Stage.DUPLICATES)
     waiting = queue.enqueue(session, Stage.THUMBNAIL, a)  # open jobs are never pruned
 
     remaining = session.scalars(sa.select(Job.id).order_by(Job.id)).all()
@@ -293,7 +293,7 @@ def test_retrying_a_parked_job_that_was_queued_again_keeps_one_job(
 def test_transitions_from_the_wrong_state_are_refused(
     queue: JobQueue, session: Session, action: str
 ) -> None:
-    job_id = queue.enqueue(session, Stage.LAYOUT)  # pending: not running, not parked
+    job_id = queue.enqueue(session, Stage.DUPLICATES)  # pending: not running, not parked
     with pytest.raises(JobStateError, match="is pending"):
         if action == "complete":
             queue.complete(session, job_id, 1.0)
@@ -310,14 +310,14 @@ def test_unknown_jobs_are_refused(queue: JobQueue, session: Session) -> None:
 
 def test_queued_jobs_survive_a_restart(migrated: Engine, clock: FakeClock) -> None:
     with Session(migrated) as session:
-        JobQueue(clock=clock).enqueue(session, Stage.LAYOUT)
+        JobQueue(clock=clock).enqueue(session, Stage.DUPLICATES)
         session.commit()
     migrated.dispose()  # every connection closed, as when the process stops
 
     with Session(migrated) as session:
         job = JobQueue(clock=clock).claim(session)
         assert job is not None
-        assert job.stage == Stage.LAYOUT
+        assert job.stage == Stage.DUPLICATES
 
 
 def _stats(session: Session) -> list[tuple[dt.datetime, str, int, int, float]]:
@@ -346,7 +346,7 @@ def test_runs_are_counted_in_the_hour_they_finish(
     queue.claim(session)
     clock.advance(dt.timedelta(minutes=59, seconds=59))  # still in the 12:00 hour
     queue.fail(session, failing, _boom(), 0.5)
-    _run(queue, session, Stage.LAYOUT)
+    _run(queue, session, Stage.DUPLICATES)
     clock.advance(dt.timedelta(minutes=1))  # 13:00:59, after the backoff
     queue.claim(session)
     queue.fail(session, failing, _boom(), 0.25)
@@ -354,7 +354,7 @@ def test_runs_are_counted_in_the_hour_they_finish(
     noon, one = START, START + dt.timedelta(hours=1)
     assert _stats(session) == [
         (noon, "clip", 2, 1, 6.0),
-        (noon, "layout", 1, 0, 1.0),
+        (noon, "duplicates", 1, 0, 1.0),
         (one, "clip", 0, 1, 0.25),
     ]
 
@@ -362,7 +362,7 @@ def test_runs_are_counted_in_the_hour_they_finish(
 def test_stats_are_written_in_the_same_transaction_as_the_status(
     queue: JobQueue, session: Session
 ) -> None:
-    job_id = queue.enqueue(session, Stage.LAYOUT)
+    job_id = queue.enqueue(session, Stage.DUPLICATES)
     queue.claim(session)
     session.commit()
 
@@ -375,16 +375,16 @@ def test_stats_are_written_in_the_same_transaction_as_the_status(
     queue.complete(session, job_id, 1.0)
     session.commit()
     assert session.get_one(Job, job_id).status == JobStatus.DONE
-    assert _stats(session) == [(START, "layout", 1, 0, 1.0)]
+    assert _stats(session) == [(START, "duplicates", 1, 0, 1.0)]
 
 
 def test_claim_can_be_limited_to_some_stages(queue: JobQueue, session: Session) -> None:
     (item,) = _items(session, 1)
     queue.enqueue(session, Stage.SCAN, item)
-    layout = queue.enqueue(session, Stage.LAYOUT)
+    batch = queue.enqueue(session, Stage.DUPLICATES)
 
-    assert _claim_id_for(queue, session, [Stage.LAYOUT, Stage.ATLASES]) == layout
-    assert queue.claim(session, stages=[Stage.LAYOUT]) is None
+    assert _claim_id_for(queue, session, [Stage.DUPLICATES, Stage.ATLASES]) == batch
+    assert queue.claim(session, stages=[Stage.DUPLICATES]) is None
     assert queue.claim(session, stages=[]) is None
 
 
