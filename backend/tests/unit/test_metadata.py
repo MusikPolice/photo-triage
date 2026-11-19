@@ -5,7 +5,7 @@ exiftool gives them."""
 import datetime as dt
 import shutil
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -47,9 +47,13 @@ def test_a_photo_with_only_date_time_uses_it(exiftool: ExifTool) -> None:
     )
 
 
-@pytest.mark.parametrize("path", ["dates/no-dates.jpg", "heic/no-dates.heic"])
-def test_a_photo_with_no_dates_uses_its_mtime_in_tz(exiftool: ExifTool, path: str) -> None:
-    assert _taken(exiftool, SYNTHETIC / path) == MTIME_LOCAL
+def test_a_photo_with_no_dates_uses_its_mtime_in_tz(exiftool: ExifTool) -> None:
+    assert _taken(exiftool, SYNTHETIC / "heic/no-dates.heic") == MTIME_LOCAL
+
+
+def test_a_photo_with_no_dates_filed_by_elodie_uses_its_filename(exiftool: ExifTool) -> None:
+    path = SYNTHETIC / "dates/2019/April/2019-04-15_10-20-30-no-dates.jpg"
+    assert _taken(exiftool, path) == dt.datetime(2019, 4, 15, 10, 20, 30)
 
 
 def test_a_video_with_keys_creation_date_uses_its_local_time(
@@ -87,11 +91,29 @@ def test_a_video_with_no_dates_uses_its_mtime_in_tz(exiftool: ExifTool, tmp_path
     assert _taken(exiftool, clip, MediaType.VIDEO) == MTIME_LOCAL
 
 
+def test_a_video_with_no_dates_filed_by_elodie_uses_its_filename(
+    exiftool: ExifTool, tmp_path: Path
+) -> None:
+    folder = tmp_path / "2025" / "December"
+    folder.mkdir(parents=True)
+    clip = Path(shutil.copy(SYNTHETIC / "video/clip.mp4", folder / "2025-12-24_23-59-58-clip.mp4"))
+    subprocess.run(
+        ["exiftool", "-q", "-overwrite_original", "-QuickTime:CreateDate=", str(clip)],
+        check=True,
+    )
+
+    assert _taken(exiftool, clip, MediaType.VIDEO) == dt.datetime(2025, 12, 24, 23, 59, 58)
+
+
 # --- Capture time: the rules, on tags as exiftool gives them --------------------------
 
 
-def _from(tags: dict[str, Any], kind: MediaType = MediaType.PHOTO) -> dt.datetime:
-    return metadata.taken_at_local(tags, kind, ZONE, MTIME_NS)
+def _from(
+    tags: dict[str, Any],
+    kind: MediaType = MediaType.PHOTO,
+    path: str = "photos/IMG_0001.jpg",
+) -> dt.datetime:
+    return metadata.taken_at_local(tags, kind, ZONE, MTIME_NS, PurePosixPath(path))
 
 
 def test_photo_dates_are_tried_in_order() -> None:
@@ -159,6 +181,67 @@ def test_photo_date_tags_are_ignored_for_videos_and_video_ones_for_photos() -> N
     assert _from({"EXIF:ExifIFD:DateTimeOriginal": "2024:01:01 00:00:00"}, MediaType.VIDEO) == (
         MTIME_LOCAL
     )
+
+
+# --- Capture time: undated files, by where elodie filed them --------------------------
+
+ELODIE = "2019/April/2019-04-15_10-20-30-IMG_0001.jpg"
+
+
+@pytest.mark.parametrize("kind", [MediaType.PHOTO, MediaType.VIDEO])
+def test_an_undated_file_takes_its_elodie_prefix_as_written(kind: MediaType) -> None:
+    # As written: elodie's UTC, not converted to TZ.
+    assert _from({}, kind, ELODIE) == dt.datetime(2019, 4, 15, 10, 20, 30)
+
+
+def test_an_undated_file_with_only_a_prefix_takes_it() -> None:
+    assert _from({}, path="Imports/2019-04-15_10-20-30-IMG_0001.jpg") == dt.datetime(
+        2019, 4, 15, 10, 20, 30
+    )
+
+
+@pytest.mark.parametrize("kind", [MediaType.PHOTO, MediaType.VIDEO])
+def test_the_folder_wins_over_a_prefix_from_another_month(kind: MediaType) -> None:
+    path = "2019/May/2019-04-30_23-59-59-IMG_0001.jpg"
+    assert _from({}, kind, path) == dt.datetime(2019, 5, 1)
+
+
+@pytest.mark.parametrize("name", ["IMG_0001.jpg", "0000-00-00_00-00-00-IMG_0001.jpg"])
+def test_an_undated_file_in_a_month_folder_takes_its_month(name: str) -> None:
+    assert _from({}, path=f"photos/2019/April/{name}") == dt.datetime(2019, 4, 1)
+
+
+@pytest.mark.parametrize("kind", [MediaType.PHOTO, MediaType.VIDEO])
+def test_a_dated_file_ignores_its_prefix_and_folder(kind: MediaType) -> None:
+    tags = (
+        {"EXIF:ExifIFD:DateTimeOriginal": "2024:01:02 03:04:05"}
+        if kind == MediaType.PHOTO
+        else {"Keys:CreationDate": "2024:01:02 03:04:05-08:00"}
+    )
+    assert _from(tags, kind, "2019/May/2019-04-30_23-59-59-IMG_0001.jpg") == dt.datetime(
+        2024, 1, 2, 3, 4, 5
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "IMG_0001.jpg",
+        "photos/IMG_0001.jpg",
+        "0000-00-00_00-00-00-IMG_0001.jpg",
+        "2019-02-30_10-20-30-IMG_0001.jpg",  # no 30 February
+        "2019-04-15_25-20-30-IMG_0001.jpg",  # no 25 o'clock
+        "2019-04-15_10-20-30IMG_0001.jpg",  # no `-` after the time
+        "x2019-04-15_10-20-30-IMG_0001.jpg",  # not at the start
+        "2019/Spring/IMG_0001.jpg",  # not a month
+        "2019/april/IMG_0001.jpg",  # not as elodie writes it
+        "Holidays/April/IMG_0001.jpg",  # not in a year folder
+        "0000/April/IMG_0001.jpg",  # no year 0
+        "April/IMG_0001.jpg",
+    ],
+)
+def test_an_undated_file_with_neither_uses_its_mtime(path: str) -> None:
+    assert _from({}, path=path) == MTIME_LOCAL
 
 
 # --- Keywords ---------------------------------------------------------------------------
