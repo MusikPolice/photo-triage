@@ -152,6 +152,7 @@ def test_logs_the_backup_and_each_migration_at_info(
         "Applied migration 0013: jobs: actor, who queued a job by hand (null when the schedule "
         "or pipeline did)",
         "Applied migration 0014: items: damaged, for a photo that decodes only partly",
+        "Applied migration 0015: layout: each item's place on the map",
         f"The database is at revision {head_revision()}",
     ]
 

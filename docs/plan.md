@@ -117,7 +117,7 @@ Search blends all three (§6.5).
 
 ### 6.1 Library Scanner
 
-Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MOV, MP4). It never walks `TRASH_DIR`, which may be inside `PHOTO_DIR` (§6.8), so a trashed file isn't seen as moved.
+Walks `PHOTO_DIR` recursively and registers every supported file (JPEG, HEIC, MOV, MP4). It never walks `TRASH_DIR`, which may be inside `PHOTO_DIR` (§6.8), so a trashed file isn't seen as moved. It also skips, at any depth, Synology's system folders (names starting with `@`, such as `@eaDir`, which holds a thumbnail of every photo, plus `#recycle` and `#snapshot`) and hidden folders (names starting with `.`), so a NAS setting change can't register thousands of NAS thumbnails as photos.
 
 **Identity.** Each item is identified by a **content hash** of its decoded pixel data (for video: hash of the media stream, excluding metadata atoms). This is stable across metadata writes (ours and others') and across elodie moving/renaming files. `(path, mtime, size)` is used as a cheap "maybe changed?" pre-check; only when it changes is the content hash recomputed. A known content hash at a new path is treated as a move, not a new item — all history is preserved — when the item that had it is no longer at its old path. If it still is, the new file is an exact copy and becomes an item of its own, so duplicate grouping (§6.7) can offer to remove one. A file changed in place keeps its item and takes the new hash.
 
@@ -144,7 +144,7 @@ Every photo (and video, via frame mean) gets a 512-d L2-normalized CLIP embeddin
 
 The app's home screen: every item as a point in a 2D layout produced by UMAP over CLIP embeddings, so similar images cluster together.
 
-**Layout.** UMAP is **re-fit after every scan** that adds items (a few minutes on CPU for 100k points). Some reshuffling between re-fits is accepted. Layout coordinates are stored per item; the frontend fetches them as a compact binary array. During the initial backfill the map shows whatever has been embedded so far and grows as processing continues.
+**Layout.** UMAP is **re-fit whenever the embedded items change**: once a scan's new items are all embedded (or ones have gone missing), when nothing that leads to an embedding is still queued. During the initial backfill it also re-fits each time the embedded items have grown by 25% and by at least 1,000 since the last fit, so the map shows whatever has been embedded so far and grows as processing continues, in about ten fits over 33k items. A fit takes about a minute on CPU for 33k points. Each re-fit is **warm-started from the current map**, so photos already on it stay roughly in place: they start where they are, each new photo starts beside its most similar ones, and the result is aligned to the old map's orientation. Measured on the real library, adding 30 photos moves the median photo 3% of the map's width, against 18% for a fit from scratch. Small shifts between re-fits are accepted. Layout coordinates are stored per item; the frontend fetches them as a compact binary array.
 
 **Rendering (level of detail).** Zoomed out: colored dots. Zoomed in past a threshold: dots are replaced by thumbnails from the atlases. Tapping/clicking opens the lightbox.
 
@@ -265,7 +265,7 @@ walk ─► scan ─┬─► metadata_read
 metadata writes (high priority, small)
 ```
 
-- **Priority order:** metadata writes > walk, scan and metadata reads > video frames and thumbnails > CLIP > quality > faces > batch jobs > LLM tagging. So the map and search become usable first, and tagging trickles in behind.
+- **Priority order:** metadata writes > walk, scan and metadata reads > video frames, thumbnails, layout re-fit and atlases > CLIP > quality > faces > duplicate grouping > LLM tagging. So the map and search become usable first, and tagging trickles in behind. Layout and atlases run ahead of CLIP so the map grows during a backfill; they're queued only when due (§6.4), so they take little from it.
 - **Resource limits:** CPU/memory caps via Compose (`cpus:`, `mem_limit:`); `WORKER_THREADS` for ONNX/BLAS. The worker sets the OpenMP, BLAS and numba thread variables from it at startup, but ONNX Runtime ignores those: every ONNX Runtime session must be created with `intra_op_num_threads=WORKER_THREADS`.
 - **Quiet hours:** optional `WORKER_QUIET_HOURS` lists the times when the household is using the host, in its local time (`TZ`), e.g. `Mon-Fri 17:00-02:00; Sat-Sun 07:00-02:00`. Each period names the days it starts on, and one whose end is at or before its start ends the next day. The whole worker stays idle during them, and a job already running finishes. Unset means it always runs.
 - **Pause / resume** from the UI or the command line, globally or per stage. A pause is stored in `worker_controls`, so it survives a restart, and a job already running finishes.
