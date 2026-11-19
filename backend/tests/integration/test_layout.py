@@ -36,11 +36,19 @@ class Library:
         self._rng = np.random.default_rng(0)
         self._next = 0
 
-    def add(self, count: int, *, model: str = MODEL, embedded: bool = True) -> list[int]:
-        """`count` active items, embedded with `model` unless not `embedded`."""
+    def add(
+        self,
+        count: int,
+        *,
+        model: str = MODEL,
+        embedded: bool = True,
+        vectors: np.ndarray | None = None,
+    ) -> list[int]:
+        """`count` active items, embedded with `model` unless not `embedded`, with
+        `vectors` (one row each) or random unit vectors."""
         ids: list[int] = []
         with self.sessions.begin() as session:
-            for _ in range(count):
+            for index in range(count):
                 self._next += 1
                 item = Item(
                     content_hash=f"{self._next:064x}",
@@ -54,7 +62,9 @@ class Library:
                 session.add(item)
                 session.flush()
                 if embedded:
-                    vector = self._rng.normal(size=512).astype(np.float32)
+                    vector = (
+                        self._rng.normal(size=512) if vectors is None else vectors[index]
+                    ).astype(np.float32)
                     vector /= np.linalg.norm(vector)
                     session.add(Embedding(item_id=item.id, model=model, vector=to_blob(vector)))
                 ids.append(item.id)
@@ -89,6 +99,21 @@ class Library:
     def layout(self) -> dict[int, tuple[float, float]]:
         with self.sessions() as session:
             return {row.item_id: (row.x, row.y) for row in session.scalars(sa.select(Layout))}
+
+    def clear_layout(self) -> None:
+        with self.sessions.begin() as session:
+            session.execute(sa.delete(Layout))
+
+    def restore_layout(self, points: Mapping[int, tuple[float, float]]) -> None:
+        with self.sessions.begin() as session:
+            session.execute(sa.delete(Layout))
+            session.execute(
+                sa.insert(Layout),
+                [
+                    {"layout_version": 1, "item_id": item_id, "x": x, "y": y}
+                    for item_id, (x, y) in points.items()
+                ],
+            )
 
     def versions(self) -> set[int]:
         with self.sessions() as session:
@@ -265,8 +290,77 @@ def test_the_same_embeddings_give_the_same_layout(lib: Library) -> None:
     lib.add(30)
     lib.fit()
     first = lib.layout()
+    lib.clear_layout()
     lib.fit()
     assert lib.layout() == first
+
+
+def test_the_same_embeddings_and_starting_layout_give_the_same_refit(lib: Library) -> None:
+    lib.add(30)
+    lib.fit()
+    start = lib.layout()
+    lib.add(3)
+    lib.fit()
+    refit = lib.layout()
+    lib.restore_layout(start)
+    lib.fit()
+    assert lib.layout() == refit
+
+
+def _surface(rng: np.random.Generator, basis: np.ndarray, count: int) -> np.ndarray:
+    """`count` vectors near a curved 2D surface in 512 dimensions, like a library
+    whose photos shade into each other rather than forming separate clusters."""
+    t = rng.uniform(0, 1, size=(count, 2))
+    return (
+        basis[0]
+        + np.cos(3 * t[:, :1]) * basis[1]
+        + np.sin(3 * t[:, 1:]) * basis[2]
+        + 0.02 * rng.normal(size=(count, basis.shape[1]))
+    )
+
+
+def test_a_refit_keeps_the_laid_out_items_where_they_were(lib: Library) -> None:
+    rng = np.random.default_rng(2)
+    basis = rng.normal(size=(3, 512))
+    old_vectors, new_vectors = _surface(rng, basis, 1000), _surface(rng, basis, 10)
+    first = lib.add(1000, vectors=old_vectors)
+    lib.fit()
+    before = lib.layout()
+
+    lib.add(10, vectors=new_vectors)
+    lib.fit()
+    after = lib.layout()
+
+    assert len(after) == 1010
+    warm_moved = np.median([np.hypot(*np.subtract(after[i], before[i])) for i in first])
+    # A fit from scratch moves the same items much further.
+    every = np.concatenate([old_vectors, new_vectors]).astype(np.float32)
+    every /= np.linalg.norm(every, axis=1, keepdims=True)
+    cold = layout.normalize(layout.project(every))[:1000]
+    cold_moved = np.median(np.hypot(*(cold - np.array([before[i] for i in first])).T))
+    assert warm_moved < 0.1
+    assert warm_moved < cold_moved / 2
+
+
+def test_a_new_item_starts_among_its_nearest_laid_out_items() -> None:
+    laid_out = np.eye(8, 4, dtype=np.float32)[[0, 0, 0, 0, 0, 1, 1, 1, 1, 1]]
+    laid_out += np.linspace(0, 0.01, 10, dtype=np.float32)[:, None]
+    places = np.array([[0, 0]] * 5 + [[10, 10]] * 5, dtype=np.float64)
+    new = np.array([[0, 1, 0, 0], [1, 0, 0, 0]], dtype=np.float32)
+
+    assert layout.neighbour_places(laid_out, places, new) == pytest.approx(
+        np.array([[10, 10], [0, 0]])
+    )
+
+
+def test_align_undoes_a_rotation_reflection_scale_and_shift() -> None:
+    rng = np.random.default_rng(2)
+    fixed = rng.normal(size=(50, 2))
+    angle = 0.7
+    rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    moving = (fixed @ rotation * [1, -1]) * 3.5 + [4, -2]
+
+    assert layout.align(moving, fixed)(moving) == pytest.approx(fixed)
 
 
 def test_a_fit_with_nothing_embedded_removes_the_old_layout(lib: Library) -> None:
