@@ -179,6 +179,11 @@ def run(
     logger.info("Worker starting: %s", settings.summary())
     if (warning := trash_filesystem_warning(settings)) is not None:
         logger.warning(warning)
+    if clip is None and settings.worker_fake_clip:
+        from photo_triage.ml import FakeClip
+
+        logger.warning("Embedding with FakeClip (WORKER_FAKE_CLIP): search won't mean anything")
+        clip = FakeClip(settings.clip_model)
     # Starts on the first read, and stops with the worker.
     exiftool = ExifTool()
     worker = Worker(

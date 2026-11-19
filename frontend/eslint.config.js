@@ -8,7 +8,7 @@ import ts from "typescript-eslint";
 import svelteConfig from "./svelte.config.js";
 
 export default defineConfig(
-  { ignores: ["dist/"] },
+  { ignores: ["dist/", "test-results/"] },
   js.configs.recommended,
   ts.configs.strictTypeChecked,
   svelte.configs.recommended,

@@ -13,5 +13,5 @@
     "checkJs": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "tests", "scripts", "vite.config.ts", "eslint.config.js"]
+  "include": ["src", "tests", "e2e", "scripts", "vite.config.ts", "eslint.config.js"]
 }

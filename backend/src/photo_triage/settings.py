@@ -132,6 +132,10 @@ class Settings(BaseSettings):
     worker_noop_stage: bool = False
     """Enables the `noop` stage, for exercising the worker by hand."""
 
+    worker_fake_clip: bool = False
+    """Embeds with `FakeClip`, which needs no model weights, under `CLIP_MODEL`'s
+    name, for the end-to-end tests' stack (`just e2e`)."""
+
     fake_now: AwareDatetime | None = None
     """Starts the worker's clock at this time (with a UTC offset, e.g.
     `2026-10-03T21:59:00Z`), from where it advances in real time."""

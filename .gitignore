@@ -24,3 +24,6 @@ node_modules/
 
 # Issue and PR drafts written by the plan-phase and work-issue skills
 .drafts/
+
+# Playwright traces of failed end-to-end tests (just e2e)
+frontend/test-results/
