@@ -43,7 +43,12 @@ def test_one_process_serves_every_read(exiftool: ExifTool) -> None:
 
 
 def test_a_file_with_none_of_the_tags_gives_nothing(exiftool: ExifTool) -> None:
-    assert exiftool.read(SYNTHETIC / "dates/no-dates.jpg", ["DateTimeOriginal"]) == {}
+    assert (
+        exiftool.read(
+            SYNTHETIC / "dates/2019/April/2019-04-15_10-20-30-no-dates.jpg", ["DateTimeOriginal"]
+        )
+        == {}
+    )
 
 
 @pytest.mark.parametrize("name", ["été 2024.jpg", "-execute.jpg", "-q"])

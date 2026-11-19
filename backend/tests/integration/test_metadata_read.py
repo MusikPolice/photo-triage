@@ -39,7 +39,13 @@ EXPECTED: dict[str, tuple[int, int, float | None, dt.datetime | None]] = {
     "broken/damaged.jpg": (640, 480, None, dt.datetime(2012, 7, 27, 2, 24, 36)),
     "dates/create-date-only.jpg": (640, 480, None, dt.datetime(2023, 5, 6, 7, 8, 9)),
     "dates/modify-date-only.jpg": (640, 480, None, dt.datetime(2022, 3, 4, 5, 6, 7)),
-    "dates/no-dates.jpg": (640, 480, None, MTIME),
+    # Undated: its elodie filename's time.
+    "dates/2019/April/2019-04-15_10-20-30-no-dates.jpg": (
+        640,
+        480,
+        None,
+        dt.datetime(2019, 4, 15, 10, 20, 30),
+    ),
     "heic/no-dates.heic": (640, 480, None, MTIME),
     "heic/scene.heic": (640, 480, None, dt.datetime(2024, 11, 1, 8)),
     "metadata/face-region.jpg": (640, 480, None, dt.datetime(2024, 9, 3, 12)),
@@ -230,7 +236,10 @@ def test_bumping_its_version_reads_every_file_again_without_hashing_them(
 
     stages = {
         **pipeline.stages,
-        Stage.METADATA_READ: ItemStage(code_version=3, upstream=(Stage.SCAN,)),
+        Stage.METADATA_READ: ItemStage(
+            code_version=pipeline.stages[Stage.METADATA_READ].code_version + 1,
+            upstream=(Stage.SCAN,),
+        ),
     }
     queued = reconcile(pipeline.engine, stages, pipeline.now)
     worker = Worker(

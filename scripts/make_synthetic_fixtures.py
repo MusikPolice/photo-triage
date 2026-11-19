@@ -343,7 +343,9 @@ def fixtures() -> list[Fixture]:
             ],
         ),
         # Each step of the capture-time fallback (plan §6.1), and orientations.
-        Fixture("dates/no-dates.jpg", jpeg(scene(21)), CAMERA),
+        # No date tag, at a path as elodie files it: in its `YYYY/Month/` folder,
+        # named with a UTC time.
+        Fixture("dates/2019/April/2019-04-15_10-20-30-no-dates.jpg", jpeg(scene(21)), CAMERA),
         Fixture(
             "dates/create-date-only.jpg",
             jpeg(scene(22)),
