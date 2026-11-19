@@ -170,7 +170,7 @@ def test_a_named_mwg_face_region(tags: dict[str, dict[str, Any]]) -> None:
         ("heic/scene.heic", "2024:11:01 08:00:00", "2024:11:01 08:00:00", None),
         ("dates/create-date-only.jpg", None, "2023:05:06 07:08:09", None),
         ("dates/modify-date-only.jpg", None, None, "2022:03:04 05:06:07"),
-        ("dates/no-dates.jpg", None, None, None),
+        ("dates/2019/April/2019-04-15_10-20-30-no-dates.jpg", None, None, None),
         ("heic/no-dates.heic", None, None, None),
     ],
 )

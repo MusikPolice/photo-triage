@@ -72,7 +72,8 @@ def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
         # Separate from scan, so a new field to import re-reads every file without
         # hashing it again.
         # 2: records the orientation.
-        Stage.METADATA_READ: ItemStage(code_version=2, upstream=(Stage.SCAN,)),
+        # 3: dates undated files from their elodie filename or folder (#102).
+        Stage.METADATA_READ: ItemStage(code_version=3, upstream=(Stage.SCAN,)),
         # 2: times end where the last frame starts, for clips under a second (#96).
         Stage.FRAMES: ItemStage(
             code_version=2,

@@ -8,10 +8,15 @@
 - **Duration** of a video, from ffprobe.
 - **`taken_at_local`**, the capture time on the camera's clock, with no timezone.
   Photos: `DateTimeOriginal`, then `CreateDate`, each from EXIF and then XMP,
-  then EXIF's `DateTime` (exiftool's `ModifyDate`), then the file's mtime in `TZ`.
+  then EXIF's `DateTime` (exiftool's `ModifyDate`).
   Videos: `Keys:CreationDate`, which phones write in local time with an offset,
   then `QuickTime:CreateDate`, which the QuickTime format stores in UTC, converted
-  to `TZ`, then the mtime.
+  to `TZ`.
+  A file with no date tag takes the dates elodie filed it by (`undated_taken_at`):
+  its `YYYY-MM-DD_HH-MM-SS-` filename prefix, as written (elodie's UTC, kept so it
+  stays in elodie's month), then its `YYYY/Month/` folder, and last its mtime in
+  `TZ`. The folder wins over a prefix from another month, since moving a file
+  between month folders is how a date gets corrected.
 - **Keywords** in `IPTC:Keywords`, `XMP-dc:Subject` and `QuickTime:Keywords`, kept
   as `tags` with `source=imported`, once each. Each read replaces the item's
   imported tags with what the file has now.
@@ -24,9 +29,10 @@ the stages after the scan read, as it was. Reading is all it does to the files.
 
 import datetime as dt
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -60,6 +66,25 @@ _ORIENTATION = 0x0112
 _SIDEWAYS = frozenset({5, 6, 7, 8})
 """EXIF orientations that turn the image a quarter, so width and height swap."""
 _EXIF_DATE_FORMAT = "%Y:%m:%d %H:%M:%S"
+
+_ELODIE_PREFIX = re.compile(r"(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})-")
+"""The time elodie puts at the start of every name it files, in UTC."""
+_YEAR_FOLDER = re.compile(r"\d{4}")
+MONTH_FOLDERS = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+"""elodie's month folder names, in English whatever the locale."""
 
 
 @dataclass(frozen=True)
@@ -96,13 +121,13 @@ def read(
         height=height,
         duration_s=duration_s,
         orientation=orientation,
-        taken_at_local=taken_at_local(tags, kind, zone, mtime_ns),
+        taken_at_local=taken_at_local(tags, kind, zone, mtime_ns, path),
         keywords=keywords(tags),
     )
 
 
 def taken_at_local(
-    tags: Mapping[str, Any], kind: MediaType, zone: ZoneInfo, mtime_ns: int
+    tags: Mapping[str, Any], kind: MediaType, zone: ZoneInfo, mtime_ns: int, path: PurePath
 ) -> dt.datetime:
     """The capture time, from exiftool's `tags` as `MetadataReader.read` returns
     them, by the fallbacks in the module docstring. Whole seconds, no timezone."""
@@ -115,8 +140,42 @@ def taken_at_local(
             return when
         if (when := _first_date(tags, VIDEO_UTC_DATE_TAG)) is not None:
             return when.replace(tzinfo=dt.UTC).astimezone(zone).replace(tzinfo=None)
-    mtime = dt.datetime.fromtimestamp(mtime_ns // 10**9, zone)
-    return mtime.replace(tzinfo=None)
+    return undated_taken_at(path, zone, mtime_ns)
+
+
+def undated_taken_at(path: PurePath, zone: ZoneInfo, mtime_ns: int) -> dt.datetime:
+    """The capture time of a file with no date tag: its elodie filename prefix, or
+    the 1st of its elodie month folder's month if the prefix is missing or in
+    another month, or else its mtime in `zone`."""
+    prefix = elodie_prefix(path.name)
+    month = month_folder(path)
+    if month is not None and (prefix is None or (prefix.year, prefix.month) != month):
+        return dt.datetime(*month, 1)
+    if prefix is not None:
+        return prefix
+    return dt.datetime.fromtimestamp(mtime_ns // 10**9, zone).replace(tzinfo=None)
+
+
+def elodie_prefix(name: str) -> dt.datetime | None:
+    """The time in an elodie `YYYY-MM-DD_HH-MM-SS-` prefix, as written, or None if
+    `name` doesn't start with a valid one."""
+    if (found := _ELODIE_PREFIX.match(name)) is None:
+        return None
+    try:
+        year, month, day, hour, minute, second = (int(part) for part in found.groups())
+        return dt.datetime(year, month, day, hour, minute, second)
+    except ValueError:  # 0000-00-00, 2019-02-30, 25 o'clock...
+        return None
+
+
+def month_folder(path: PurePath) -> tuple[int, int] | None:
+    """(year, month) if `path` is in an elodie `YYYY/Month/` folder, else None."""
+    if len(path.parts) < 3:
+        return None
+    month, year = path.parent.name, path.parent.parent.name
+    if month not in MONTH_FOLDERS or not _YEAR_FOLDER.fullmatch(year) or int(year) < 1:
+        return None
+    return int(year), MONTH_FOLDERS.index(month) + 1
 
 
 def keywords(tags: Mapping[str, Any]) -> tuple[str, ...]:
