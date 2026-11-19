@@ -18,7 +18,15 @@ from photo_triage.api.activity import Activity, ActivityReader, StageActivity
 from photo_triage.api.app import create_app
 from photo_triage.api.deps import current_actor
 from photo_triage.api.feed import Feed
-from photo_triage.db.models import Item, Job, JobStats, JobStatus, MediaType, WorkerControl
+from photo_triage.db.models import (
+    Item,
+    Job,
+    JobStats,
+    JobStatus,
+    Layout,
+    MediaType,
+    WorkerControl,
+)
 from photo_triage.pipeline.thumbnails import Thumbnail, thumbnail_path
 from photo_triage.quiet_hours import parse
 from photo_triage.settings import Settings
@@ -311,7 +319,7 @@ async def test_the_openapi_schema_describes_the_responses(client: AsyncClient) -
     events = response_schema("/api/events", "get", "text/event-stream")
     assert events["itemSchema"]["properties"]["data"]["contentSchema"] == activity
     components = schema["components"]["schemas"]
-    assert set(components["Activity"]["properties"]) == {"worker", "stages"}
+    assert set(components["Activity"]["properties"]) == {"worker", "stages", "layout_version"}
     assert set(components["WorkerActivity"]["properties"]) == {
         "status",
         "paused",
@@ -477,6 +485,28 @@ async def test_layout_shows_its_last_run_and_no_schedule(
 
     assert layout["last_finished_at"] == "2026-10-05T11:30:00Z"
     assert (layout["last_actor"], layout["next_scheduled_at"]) == (None, None)
+
+
+async def test_the_current_layout_version_is_reported(
+    client: AsyncClient, migrated: Engine
+) -> None:
+    assert (await client.get("/api/activity")).json()["layout_version"] is None
+
+    with Session(migrated) as session, session.begin():
+        item = Item(
+            content_hash="0" * 64,
+            path="photo.jpg",
+            media_type=MediaType.PHOTO,
+            file_size_bytes=1,
+            file_mtime_ns=0,
+            first_seen_at=START,
+            last_seen_at=START,
+        )
+        session.add(item)
+        session.flush()
+        session.add(Layout(layout_version=3, item_id=item.id, x=0, y=0))
+
+    assert (await client.get("/api/activity")).json()["layout_version"] == 3
 
 
 async def test_scan_now_queues_one_walk_and_records_who_asked(

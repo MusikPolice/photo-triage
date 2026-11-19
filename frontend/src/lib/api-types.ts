@@ -76,6 +76,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/map/points": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Points
+     * @description The current map layout as a compact binary array: item id, x, y, capture day
+     *     and media type per point.
+     */
+    get: operations["points_api_map_points_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/scan": {
     parameters: {
       query?: never;
@@ -179,6 +200,8 @@ export interface components {
   schemas: {
     /** Activity */
     Activity: {
+      /** Layout Version */
+      layout_version: number | null;
       /** Stages */
       stages: components["schemas"]["StageActivity"][];
       worker: components["schemas"]["WorkerActivity"];
@@ -411,6 +434,33 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+    };
+  };
+  points_api_map_points_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Every point of the current layout, in the binary format described in `photo_triage.api.map_points` */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/octet-stream": unknown;
+        };
+      };
+      /** @description Unchanged since the copy the browser has */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

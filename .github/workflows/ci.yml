@@ -235,11 +235,11 @@ jobs:
 
       - uses: jdx/mise-action@v5
         with:
-          install_args: python uv just
+          install_args: python uv just node pnpm
 
       - name: Install pip-audit
         working-directory: backend
         run: uv sync --locked --only-group dev
 
-      - name: pip-audit (runtime dependencies)
+      - name: pip-audit and pnpm audit (runtime dependencies)
         run: just audit

@@ -126,6 +126,8 @@ audit:
     req="$(mktemp)"; trap 'rm -f "$req"' EXIT
     uv export --locked --no-dev --no-group export --no-emit-project --format requirements-txt -o "$req" >/dev/null
     uv run --no-sync pip-audit --disable-pip --require-hashes -r "$req"
+    # The frontend's runtime dependencies (deck.gl), from its lockfile: high and critical
+    cd ../frontend && pnpm audit --prod --audit-level high
 
 # Install frontend dependencies exactly as locked
 [working-directory: 'frontend']

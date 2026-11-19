@@ -8,6 +8,7 @@
   --ok: #2f9e44;
   --idle: #d08700;
   --alert: #d63939;
+  --map-dot: #2f6fdb;
   font-family: system-ui, sans-serif;
   line-height: 1.5;
 }
@@ -22,6 +23,7 @@
     --ok: #51cf66;
     --idle: #fab005;
     --alert: #ff6b6b;
+    --map-dot: #6ea8ff;
   }
 }
 
@@ -29,4 +31,12 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
+}
+
+/* A column the height of the screen, so a page (the map) can fill what's left
+   under the header. */
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
 }
