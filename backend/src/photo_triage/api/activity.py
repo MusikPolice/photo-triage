@@ -31,6 +31,7 @@ from photo_triage.pipeline.thumbnails import Thumbnail, thumbnail_path
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
 from photo_triage.worker.clock import Clock
+from photo_triage.worker.layout_schedule import latest_version
 from photo_triage.worker.queue import BATCH_STAGES, PRIORITY, JobQueue, Stage
 from photo_triage.worker.scan_schedule import last_run, queue_walk
 from photo_triage.worker.state import WorkerStatus, observed_state
@@ -105,6 +106,9 @@ class Activity(BaseModel):
     worker: WorkerActivity
     stages: list[StageActivity]
     """In priority order."""
+    layout_version: int | None
+    """The current map layout's version (`GET /api/map/points`), or None before the
+    first fit. Open maps reload their points when it changes."""
 
 
 type JobCounts = dict[tuple[Stage, JobStatus], int]
@@ -222,6 +226,7 @@ def read_activity(
     ]
     ahead = work_ahead(rows, throughputs)
     return Activity(
+        layout_version=session.scalar(latest_version()),
         worker=WorkerActivity(
             status=state.status,
             paused=controls.GLOBAL in paused,
