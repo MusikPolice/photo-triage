@@ -222,6 +222,8 @@ Get a logger with `logging.getLogger(__name__)` (in a `__main__` module, name it
 | Frontend types | svelte-check | Strict TypeScript across `.svelte` and `.ts`. |
 | End-to-end | Playwright (Chromium; desktop + Pixel-class viewport) | Against `just stack` with tier-1 fixtures: search highlights matches, lightbox + neighbor walk, quality review keep/delete, duplicate pick, trash + restore, Activity page progress. The map is asserted through a test-only hook exposing deck.gl layer state (visible IDs, highlighted IDs, zoom), not pixels. |
 
+Running tests: `just test` runs the default suite (everything but `models` and `bench`) with the coverage gates (§8). `just test PATH…` or `just test -k EXPR` runs only what it selects, without coverage or gates. Paths can be given from the repo root (`backend/tests/unit/test_eta.py`) or from `backend/` (`tests/unit/test_eta.py::test_name`), and other pytest options pass through.
+
 Determinism: fixed seeds for UMAP (`random_state`) and any sampling; injected clock; fake adapters derive outputs from content hashes; tests never depend on wall-clock time or network (Ollama is faked except in the model tier).
 
 ## 7. Safety invariants

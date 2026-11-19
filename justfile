@@ -75,12 +75,30 @@ lint:
 typecheck:
     uv run --no-sync pyright
 
-# Unit, integration, and safety tests with coverage gates (fake ML; fast)
+# Unit, integration, and safety tests with coverage gates (fake ML; fast).
+# `just test PATH…` or `just test -k EXPR` runs only those, without coverage. Paths
+# are relative to where you run it, or to backend/.
 [working-directory: 'backend']
+[positional-arguments]  # so a quoted -k expression stays one
 test *args:
-    uv run --no-sync pytest --cov {{args}}
-    @# ≥ 90% branch coverage on identity and move detection (dev-environment §8)
-    uv run --no-sync coverage report --fail-under=90 --include='src/photo_triage/pipeline/identity.py,src/photo_triage/pipeline/scan.py'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ $# -eq 0 ]; then
+        uv run --no-sync pytest --cov=photo_triage
+        # ≥ 90% branch coverage on identity and move detection (dev-environment §8)
+        uv run --no-sync coverage report --fail-under=90 --include='src/photo_triage/pipeline/identity.py,src/photo_triage/pipeline/scan.py'
+        exit
+    fi
+    selected=()
+    for arg in "$@"; do
+        # A path from the directory `just` ran in, e.g. backend/tests/... from the root.
+        path="${arg%%::*}"
+        if [[ "$arg" != -* && ! -e "$path" && -e "{{invocation_directory()}}/$path" ]]; then
+            arg="{{invocation_directory()}}/$arg"
+        fi
+        selected+=("$arg")
+    done
+    uv run --no-sync pytest --no-cov "${selected[@]}"
 
 # Copy the model weights (scripts/bootstrap.sh puts them in ~/.cache/photo-triage/models)
 # to DEST, the stack's MODELS_DIR host folder, e.g. to carry them to the NUC
