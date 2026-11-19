@@ -22,8 +22,8 @@ export COMPOSE_PROJECT_NAME=photo-triage-e2e
 scratch="$(mktemp -d -t photo-triage-e2e.XXXXXX)"
 mkdir "$scratch/photos" "$scratch/data" "$scratch/models"
 cp -r backend/tests/fixtures/synthetic/. "$scratch/photos/"
-# Its scan fails and waits to retry, which holds the layout back for minutes
-# (#122); the scan's handling of it is covered by the backend's tests.
+# Its scan fails and waits minutes to retry, so the scan stage would never show
+# done; the backend's tests cover how it's handled.
 rm "$scratch/photos/broken/truncated.jpg"
 cat >"$scratch/app.env" <<'EOF'
 # Settings for `just e2e`'s containers, in place of `.env`.
