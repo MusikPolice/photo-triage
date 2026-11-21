@@ -66,6 +66,10 @@ The model weights' checksums live in `scripts/bootstrap.sh`, their only user. `f
 
 Libraries of note (exact versions live in the lockfiles): FastAPI, SQLAlchemy 2, Alembic, Pydantic 2, onnxruntime, open_clip (export to ONNX), regex and ftfy (CLIP's tokenizer, ported from open_clip into `photo_triage.ml.tokenizer` so the runtime needs no torch), insightface, umap-learn, scikit-learn (including its HDBSCAN), Pillow + pillow-heif, OpenCV (headless); Svelte 5, Vite, TypeScript, deck.gl.
 
+**New npm releases wait 7 days.** `frontend/pnpm-workspace.yaml` sets `minimumReleaseAge: 10080` (minutes), so `pnpm install`, `pnpm add` and `pnpm update` resolve only versions published at least 7 days ago. A range falls back to the newest version that old, and an exact pin to a newer one fails, naming the setting. Hijacked npm releases (the chalk/debug hijack, the Shai-Hulud worm, the nx release) were pulled within hours to a couple of days, so the wait keeps them out of the lockfile; 14 days would double the wait for wanted releases for little more protection (#131). It only applies when resolving: `pnpm install --frozen-lockfile` (CI, the bootstrap and the Docker build) installs the lockfile as it is, whatever its versions' ages, on pnpm 10. pnpm 11 checks the lockfile too, so revisit this when upgrading.
+
+- **An urgent fix can skip the wait.** List the package under `minimumReleaseAgeExclude` in `pnpm-workspace.yaml`, in the PR that upgrades it, and remove it once the release is 7 days old. List any new transitive dependency it pulls in too: excluding `svelte` alone wasn't enough to install a day-old `svelte`, which needed a 4-day-old `esrap`.
+
 TypeScript is pinned to 6.0 (`~6.0` in `frontend/package.json`). TypeScript 7 is out, but svelte-check and typescript-eslint don't support it yet.
 
 `backend/pyproject.toml` has three dependency sets:
@@ -324,7 +328,7 @@ These are set in the GitHub repo settings, not in files:
   - A required job must run on every PR. GitHub waits indefinitely for a required check that never reports, so don't add `paths:` filters to these jobs; skip steps inside the job instead. Renaming a required job also needs this setting updated.
   - Because `audit` is required, a newly published vulnerability in a runtime dependency blocks merges until the dependency is upgraded or the advisory is dealt with.
   - This is deliberate. If it ever blocks urgent work, an admin can relax the rule temporarily.
-- **Dependabot security updates are on, and grouped.** `.github/dependabot.yml` puts every open advisory in an ecosystem into one PR: one for `backend/` (uv) and one for `frontend/` (npm). Per-package PRs would each fail `audit` on the other packages' advisories, so none of them could merge. Version updates are off (`open-pull-requests-limit: 0`).
+- **Dependabot security updates are on, and grouped.** `.github/dependabot.yml` puts every open advisory in an ecosystem into one PR: one for `backend/` (uv) and one for `frontend/` (npm). Per-package PRs would each fail `audit` on the other packages' advisories, so none of them could merge. Version updates are off (`open-pull-requests-limit: 0`). Dependabot regenerates the lockfile with its own pnpm, which may not apply `minimumReleaseAge` (§2), so its PRs can bring in versions under 7 days old, and on pnpm 10 nothing in CI rejects them. That suits a security fix, which shouldn't wait. Check the lockfile diff for young versions before merging one.
 - **Squash merges only.** Each PR lands as one commit whose message is the PR title and body.
 - **Branches are deleted** automatically after merge.
 
