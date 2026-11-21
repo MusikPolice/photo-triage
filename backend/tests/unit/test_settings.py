@@ -36,6 +36,7 @@ PUBLIC_SETTINGS = {
     "thumbnail_size",
     "video_sample_frames",
     "worker_noop_stage",
+    "worker_fake_clip",
     "fake_now",
 }
 SECRET_SETTINGS: set[str] = set()  # tokens, passwords, URLs that may embed either
@@ -114,6 +115,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.models_dir == Path.home() / ".cache/photo-triage/models"
     assert settings.clip_model == "ViT-B-32"
     assert settings.worker_noop_stage is False
+    assert settings.worker_fake_clip is False
     assert settings.fake_now is None
 
 

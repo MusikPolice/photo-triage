@@ -168,6 +168,13 @@ image tag="photo-triage:dev":
 stack *args:
     scripts/stack.sh "$@"
 
+# End-to-end tests: Playwright at desktop and phone sizes against the Compose stack,
+# on a fresh copy of the tier-1 fixtures with the fake embedder (scripts/e2e.sh).
+# Arguments go to Playwright, e.g. `just e2e --project phone`
+[positional-arguments]  # so a quoted argument stays one
+e2e *args:
+    scripts/e2e.sh "$@"
+
 # The stack against the whole library at /mnt/pictures, read-only, for measuring at
 # scale; `just dry-run-full report` prints the numbers so far, `… down` stops it
 [positional-arguments]  # so a quoted argument stays one

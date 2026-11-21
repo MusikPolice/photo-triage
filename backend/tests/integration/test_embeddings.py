@@ -140,6 +140,25 @@ def test_worker_once_gives_every_supported_item_one_embedding(
         assert np.isclose(np.linalg.norm(from_blob(row.vector)), 1.0, rtol=1e-6)
 
 
+def test_worker_fake_clip_embeds_without_models_under_clip_models_name(
+    migrated: Engine, settings: Settings, library: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # For the end-to-end stack (`just e2e`): MODELS_DIR is empty.
+    monkeypatch.setenv("PHOTO_DIR", str(settings.photo_dir))
+    monkeypatch.setenv("TRASH_DIR", str(settings.trash_dir))
+    monkeypatch.setenv("DATA_DIR", str(settings.data_dir))
+    monkeypatch.setenv("MODELS_DIR", str(settings.models_dir))
+    monkeypatch.setenv("WORKER_FAKE_CLIP", "true")
+
+    assert main(["scan"]) == 0
+    assert main(["--once"]) == 0
+
+    with Session(migrated) as session:
+        models = list(session.scalars(sa.select(Embedding.model)))
+    assert len(models) == SUPPORTED
+    assert set(models) == {settings.clip_model}
+
+
 def test_a_finished_thumbnail_queues_a_clip_job(pipeline: Pipeline, library: Path) -> None:
     # The reconcile after the walk runs before any item has its thumbnails, so each
     # clip job is queued by its item's thumbnail job finishing.

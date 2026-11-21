@@ -1,0 +1,85 @@
+# The end-to-end tests (docs/dev-environment.md §6, §8): Playwright at desktop and
+# phone sizes against the Compose stack, on the tier-1 fixtures with the fake
+# embedder (`just e2e`). They build and start the whole stack, so they run on main,
+# nightly and by hand, not on every PR. Not a required check. Traces of failed
+# tests are uploaded.
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Every version the Dockerfile takes, from mise.toml and versions.env.
+      - name: Read the pins
+        id: pins
+        run: |
+          {
+            echo "build_args<<EOF"
+            scripts/image_pins.sh
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      # Shares the docker job's cache, so an unchanged image builds in seconds.
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: photo-triage:ci
+          build-args: ${{ steps.pins.outputs.build_args }}
+          load: true
+          cache-from: type=gha
+
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: node pnpm just
+
+      - name: Find the pnpm store
+        id: pnpm-store
+        working-directory: frontend
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: frontend-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: frontend-
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps --only-shell chromium
+
+      - name: End-to-end tests
+        env:
+          E2E_IMAGE: photo-triage:ci
+        run: just e2e
+
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 14
