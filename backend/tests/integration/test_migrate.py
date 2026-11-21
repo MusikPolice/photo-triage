@@ -3,6 +3,7 @@ startup (dev-environment §5, §6)."""
 
 import datetime as dt
 import logging
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -190,6 +191,25 @@ def test_command_exits_1_for_a_newer_database(env: Settings, migrated: Engine) -
 def test_command_exits_2_for_bad_settings(capsys: pytest.CaptureFixture[str]) -> None:
     assert db_main(["migrate"]) == 2
     assert "PHOTO_DIR" in capsys.readouterr().err
+
+
+def test_command_exits_2_when_data_dir_is_not_writable(
+    env: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A plain message, in place of logging's traceback for the log file it can't
+    open, which is what a container running as the wrong UID used to show."""
+    if os.getuid() == 0:
+        pytest.skip("root can write anywhere")
+    env.data_dir.mkdir(parents=True, exist_ok=True)
+    env.data_dir.chmod(0o555)
+    try:
+        assert db_main(["migrate"]) == 2
+    finally:
+        env.data_dir.chmod(0o755)
+
+    err = capsys.readouterr().err
+    assert f"DATA_DIR ({env.data_dir}) isn't writable by this process" in err
+    assert "Traceback" not in err
 
 
 # --- Alembic's env.py ----------------------------------------------------------

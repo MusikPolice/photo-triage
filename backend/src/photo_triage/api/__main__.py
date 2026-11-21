@@ -12,7 +12,13 @@ from fastapi import FastAPI
 from photo_triage import logs
 from photo_triage.api.app import FRONTEND_DIR, create_app
 from photo_triage.db.migrate import SchemaError, check_schema
-from photo_triage.settings import SettingsError, load_settings, trash_filesystem_warning
+from photo_triage.settings import (
+    SettingsError,
+    data_dir_error,
+    load_settings,
+    photo_dir_warning,
+    trash_filesystem_warning,
+)
 
 # Named, since `__name__` is "__main__" when run with `python -m`.
 logger = logging.getLogger("photo_triage.api")
@@ -33,6 +39,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = load_settings()
     except SettingsError as e:
         print(e, file=sys.stderr)
+        return 2
+    if (error := data_dir_error(settings)) is not None:
+        print(error, file=sys.stderr)
         return 2
     # The migrate step runs before the API starts; the API never migrates.
     try:
@@ -70,8 +79,9 @@ def serve(frontend_dir: Path = FRONTEND_DIR) -> FastAPI:
     settings = load_settings()
     logs.configure(settings, "api")
     logger.info("API starting: %s", settings.summary())
-    if (warning := trash_filesystem_warning(settings)) is not None:
-        logger.warning(warning)
+    for warning in (trash_filesystem_warning(settings), photo_dir_warning(settings)):
+        if warning is not None:
+            logger.warning(warning)
     if frontend_dir.is_dir():
         logger.info("Serving the frontend from %s", frontend_dir)
         return create_app(settings, frontend_dir=frontend_dir)

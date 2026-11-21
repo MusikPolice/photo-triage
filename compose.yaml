@@ -10,9 +10,10 @@
 #   port;
 # - as each app container's environment, for the other settings in plan §9.
 #   The container paths below override the host ones.
-# The folders must exist, and PHOTO_DIR and DATA_DIR be writable by UID 1000, the
-# image's user. Compose won't create them, since Docker would make them owned by
-# root. `just models DEST` fills a MODELS_DIR folder from the dev machine's.
+# APP_UID and APP_GID (default 1000, the image's user) are who the app runs as:
+# set them to the owner of PHOTO_DIR and DATA_DIR (`ls -ln` shows the numbers).
+# The folders must exist and be writable by that user. Compose won't create them,
+# since Docker would make them owned by root. `just models DEST` fills a MODELS_DIR folder from the dev machine's.
 
 name: photo-triage
 
@@ -25,6 +26,8 @@ x-logging: &logging
 
 x-app: &app
   image: ${PHOTO_TRIAGE_IMAGE:-photo-triage:dev}
+  # The library owner's, so the stack can write PHOTO_DIR and DATA_DIR as they are.
+  user: "${APP_UID:-1000}:${APP_GID:-1000}"
   env_file:
     - path: ${APP_ENV_FILE:-.env}
       required: false
