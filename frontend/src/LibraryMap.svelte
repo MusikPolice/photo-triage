@@ -1,14 +1,31 @@
 <script lang="ts">
-  /* The map of the library (plan §6.4): every laid-out item as a dot, with deck.gl.
-   * It pans and zooms with the mouse, the trackpad and touch, and reloads its points
-   * when the activity feed announces a new layout version. */
-  import { Deck, OrthographicView, type OrthographicViewState } from "@deck.gl/core";
-  import { ScatterplotLayer } from "@deck.gl/layers";
+  /* The map of the library (plan §6.4): every laid-out item as a dot, with deck.gl,
+   * and zoomed in, as its thumbnail from the atlas sheets. It pans and zooms with the
+   * mouse, the trackpad and touch, and reloads its points and atlas manifest when the
+   * activity feed announces a new layout or set of sheets. */
+  import { Deck, OrthographicView, type Layer, type OrthographicViewState } from "@deck.gl/core";
+  import { IconLayer, ScatterplotLayer } from "@deck.gl/layers";
+  import { untrack } from "svelte";
 
+  import {
+    atlasIndex,
+    capacity,
+    fetchAtlas,
+    nextDetail,
+    sheetGroups,
+    sheetsFor,
+    sheetUrl,
+    thumbnailSize,
+    type Atlas,
+    type Detail,
+    type SheetGroup,
+  } from "./lib/map-atlas";
   import {
     fetchPoints,
     fitView,
+    grown,
     idsWithin,
+    indicesWithin,
     viewBounds,
     type MapPoints,
     type MapView,
@@ -28,14 +45,22 @@
     /** The layout version from the activity feed, or null before the first fit or
      * before the feed's first update. */
     layoutVersion: number | null | undefined;
+    /** The newest atlas set's layout version, likewise. */
+    atlasVersion: number | null | undefined;
   }
 
-  const { layoutVersion }: Props = $props();
+  const { layoutVersion, atlasVersion }: Props = $props();
 
   let container = $state<HTMLDivElement | null>(null);
   let points = $state.raw<MapPoints | null>(null);
   let failure = $state<string | null>(null);
   let loading: Promise<void> | null = null;
+  let atlas = $state.raw<Atlas | null>(null);
+  let loadingAtlas: Promise<void> | null = null;
+  /** Dots or thumbnails, from how many items are in view. */
+  let detail = $state<Detail>("dots");
+  /** The sheets drawn, in thumbnail mode: those holding items in or near the view. */
+  let sheets = $state.raw<number[]>([]);
 
   /** deck.gl's own state, outside Svelte's: it redraws by itself. */
   let deck: Deck<OrthographicView> | null = null;
@@ -100,6 +125,66 @@
     if (points === null || (layoutVersion != null && layoutVersion !== points.version)) load();
   });
 
+  function loadAtlas(): void {
+    loadingAtlas ??= fetchAtlas()
+      .then(
+        (loaded) => {
+          atlas = loaded;
+        },
+        (error: unknown) => {
+          // The map still works as dots.
+          console.warn("The map's thumbnails couldn't load", error);
+        },
+      )
+      .finally(() => {
+        loadingAtlas = null;
+      });
+  }
+
+  // Likewise for the atlas manifest, when a new set of sheets is announced.
+  $effect(() => {
+    if (atlas === null || (atlasVersion != null && atlasVersion !== atlas.version)) loadAtlas();
+  });
+
+  /** Which points are on which sheet, for the current points and atlas. */
+  const groups = $derived.by(() => {
+    if (points === null || atlas === null) return null;
+    const index = atlasIndex(points, atlas);
+    return { atlas, index, bySheet: sheetGroups(atlas, index) };
+  });
+
+  /** How far beyond the view to load sheets, as a fraction of its size, so a pan
+   * finds the next sheet already there. */
+  const PRELOAD_MARGIN = 0.25;
+
+  type Groups = NonNullable<typeof groups>;
+
+  /** Work out dots or thumbnails, and which sheets, for the current view. */
+  function updateDetail(current: Groups | null = groups): void {
+    if (points === null || view === null || container === null) return;
+    const { clientWidth: width, clientHeight: height } = container;
+    const bounds = viewBounds(view, width, height);
+    const next = nextDetail(detail, indicesWithin(points, bounds).length, capacity(width, height));
+    if (next !== detail) detail = next;
+    const near =
+      next === "thumbnails" && current !== null
+        ? sheetsFor(
+            indicesWithin(points, grown(bounds, PRELOAD_MARGIN)),
+            current.atlas,
+            current.index,
+          )
+        : [];
+    if (near.join() !== sheets.join()) sheets = near;
+  }
+
+  // Again when new points or a new atlas arrive, without waiting for the view to move.
+  $effect(() => {
+    const current = groups;
+    untrack(() => {
+      updateDetail(current);
+    });
+  });
+
   /** The plain dots' colour, `--map-dot`, which follows the theme. */
   function plainColour(element: Element): Rgb {
     const css = getComputedStyle(element).getPropertyValue("--map-dot").trim();
@@ -107,7 +192,7 @@
     return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)) as unknown as Rgb;
   }
 
-  function layer(shown: MapPoints, colours: Uint8Array) {
+  function dotsLayer(shown: MapPoints, colours: Uint8Array) {
     return new ScatterplotLayer({
       id: "points",
       data: {
@@ -122,12 +207,34 @@
     });
   }
 
+  /** One sheet's thumbnails, over the dots: an item with no thumbnail stays a dot. */
+  function sheetLayer(shown: MapPoints, version: number, group: SheetGroup) {
+    return new IconLayer<number>({
+      // A new set gets new layers, and so new textures.
+      id: `thumbnails-${String(version)}-${String(group.sheet)}`,
+      data: group.points,
+      iconAtlas: sheetUrl(version, group.sheet),
+      iconMapping: group.mapping,
+      getIcon: (i) => String(i),
+      getPosition: (i) => [shown.positions[2 * i] ?? 0, shown.positions[2 * i + 1] ?? 0],
+      getSize: (i) => {
+        const rect = group.mapping[String(i)];
+        return rect === undefined ? 0 : thumbnailSize(rect);
+      },
+      sizeUnits: "pixels",
+    });
+  }
+
+  /** The dots' layer, rebuilt only when the points or their colours change. */
+  let dots: ScatterplotLayer | null = null;
+
   $effect(() => {
     const parent = container;
     const shown = points;
     if (parent === null || shown === null || shown.count === 0) return;
     // Read here, so a change of either redraws the dots.
     const colours = pointColours(shown, colourBy, theme, plainColour(parent));
+    dots = dotsLayer(shown, colours);
     if (deck === null) {
       const { width, height } = parent.getBoundingClientRect();
       view = fitView(shown.positions, width, height);
@@ -142,14 +249,35 @@
             target: [state.target?.[0] ?? 0, state.target?.[1] ?? 0],
             zoom: Number(state.zoom),
           };
+          updateDetail();
         },
-        layers: [layer(shown, colours)],
       });
-    } else {
-      // New points or colours: keep the view where the user left it.
-      deck.setProps({ layers: [layer(shown, colours)] });
     }
+    // New points or colours keep the view where the user left it. Untracked, so
+    // the thumbnails coming and going don't recolour every dot.
+    untrack(() => {
+      updateDetail();
+      draw(detail, sheets, groups);
+    });
   });
+
+  // The thumbnails, as they come and go with the view.
+  $effect(() => {
+    draw(detail, sheets, groups);
+  });
+
+  function draw(mode: Detail, shownSheets: number[], current: Groups | null): void {
+    const shown = points;
+    if (deck === null || dots === null || shown === null) return;
+    const layers: Layer[] = [dots];
+    if (mode === "thumbnails" && current !== null) {
+      for (const sheet of shownSheets) {
+        const group = current.bySheet.get(sheet);
+        if (group !== undefined) layers.push(sheetLayer(shown, current.atlas.version, group));
+      }
+    }
+    deck.setProps({ layers });
+  }
 
   $effect(() => {
     return () => {
@@ -170,6 +298,17 @@
       },
       get zoom() {
         return view?.zoom ?? null;
+      },
+      get atlasVersion() {
+        return atlas?.version ?? null;
+      },
+      /** "dots" or "thumbnails". */
+      get detail() {
+        return detail;
+      },
+      /** The atlas sheets drawn, by number. */
+      get sheets() {
+        return detail === "thumbnails" ? sheets : [];
       },
       visibleIds(): number[] {
         if (points === null || view === null || container === null) return [];

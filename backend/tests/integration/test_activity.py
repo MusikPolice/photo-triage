@@ -31,6 +31,7 @@ from photo_triage.pipeline.thumbnails import Thumbnail, thumbnail_path
 from photo_triage.quiet_hours import parse
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
+from photo_triage.worker.atlas_schedule import MANIFEST, set_path
 from photo_triage.worker.loop import Worker
 from photo_triage.worker.queue import PRIORITY, JobQueue, Stage
 
@@ -319,7 +320,12 @@ async def test_the_openapi_schema_describes_the_responses(client: AsyncClient) -
     events = response_schema("/api/events", "get", "text/event-stream")
     assert events["itemSchema"]["properties"]["data"]["contentSchema"] == activity
     components = schema["components"]["schemas"]
-    assert set(components["Activity"]["properties"]) == {"worker", "stages", "layout_version"}
+    assert set(components["Activity"]["properties"]) == {
+        "worker",
+        "stages",
+        "layout_version",
+        "atlas_version",
+    }
     assert set(components["WorkerActivity"]["properties"]) == {
         "status",
         "paused",
@@ -508,6 +514,21 @@ async def test_the_current_layout_version_is_reported(
         session.add(Layout(layout_version=3, item_id=item.id, x=0, y=0))
 
     assert (await client.get("/api/activity")).json()["layout_version"] == 3
+
+
+async def test_the_newest_complete_atlas_set_is_reported(
+    client: AsyncClient, settings: Settings
+) -> None:
+    assert (await client.get("/api/activity")).json()["atlas_version"] is None
+
+    for version in (2, 3):
+        set_path(settings.derived_dir, version).mkdir(parents=True)
+    (set_path(settings.derived_dir, 2) / MANIFEST).write_bytes(b"")
+    # Version 3's set has no manifest yet, so it isn't complete.
+    assert (await client.get("/api/activity")).json()["atlas_version"] == 2
+
+    (set_path(settings.derived_dir, 3) / MANIFEST).write_bytes(b"")
+    assert (await client.get("/api/activity")).json()["atlas_version"] == 3
 
 
 async def test_scan_now_queues_one_walk_and_records_who_asked(
