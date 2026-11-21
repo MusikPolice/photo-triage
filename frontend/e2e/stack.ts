@@ -33,7 +33,21 @@ export async function waitUntilProcessed(request: APIRequestContext): Promise<Ac
 export interface MapHook {
   version: number | null;
   zoom: number | null;
+  atlasVersion: number | null;
+  detail: "dots" | "thumbnails";
+  sheets: number[];
   visibleIds(): number[];
+}
+
+/** How the map is drawn: dots or thumbnails, and from which atlas sheets. */
+export async function mapDetail(
+  page: Page,
+): Promise<{ atlasVersion: number | null; detail: string | null; sheets: number[] }> {
+  return page.evaluate(() => {
+    const hook = (window as unknown as { __photoTriageMap?: MapHook }).__photoTriageMap;
+    if (hook === undefined) return { atlasVersion: null, detail: null, sheets: [] };
+    return { atlasVersion: hook.atlasVersion, detail: hook.detail, sheets: hook.sheets };
+  });
 }
 
 export async function mapState(

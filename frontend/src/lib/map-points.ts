@@ -127,15 +127,32 @@ export function viewBounds(view: MapView, width: number, height: number): Bounds
   return { minX: x - halfX, maxX: x + halfX, minY: y - halfY, maxY: y + halfY };
 }
 
-/** The ids of the points inside `bounds`, in id order. */
-export function idsWithin(points: MapPoints, bounds: Bounds): number[] {
+/** The indices of the points inside `bounds`, in order. */
+export function indicesWithin(points: MapPoints, bounds: Bounds): number[] {
   const inside: number[] = [];
   for (let i = 0; i < points.count; i++) {
     const x = points.positions[2 * i] ?? NaN;
     const y = points.positions[2 * i + 1] ?? NaN;
     if (x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY) {
-      inside.push(points.ids[i] ?? 0);
+      inside.push(i);
     }
   }
   return inside;
+}
+
+/** The ids of the points inside `bounds`, in id order. */
+export function idsWithin(points: MapPoints, bounds: Bounds): number[] {
+  return indicesWithin(points, bounds).map((i) => points.ids[i] ?? 0);
+}
+
+/** `bounds` grown by `fraction` of its width and height on every side. */
+export function grown(bounds: Bounds, fraction: number): Bounds {
+  const dx = (bounds.maxX - bounds.minX) * fraction;
+  const dy = (bounds.maxY - bounds.minY) * fraction;
+  return {
+    minX: bounds.minX - dx,
+    maxX: bounds.maxX + dx,
+    minY: bounds.minY - dy,
+    maxY: bounds.maxY + dy,
+  };
 }

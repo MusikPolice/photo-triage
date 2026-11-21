@@ -12,7 +12,7 @@
 </script>
 
 {#await LibraryMap then Map}
-  <Map layoutVersion={feed.activity?.layout_version} />
+  <Map layoutVersion={feed.activity?.layout_version} atlasVersion={feed.activity?.atlas_version} />
 {:catch error}
   <p class="note">
     The map couldn't load: {error instanceof Error ? error.message : String(error)}
