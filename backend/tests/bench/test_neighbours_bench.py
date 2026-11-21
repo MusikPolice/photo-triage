@@ -14,6 +14,7 @@ import tracemalloc
 
 import numpy as np
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -40,7 +41,7 @@ def test_neighbours_on_100k_items(migrated: Engine) -> None:
     vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
     with Session(engine) as session, session.begin():
         session.execute(
-            Item.__table__.insert(),
+            sa.insert(Item),
             [
                 {
                     "id": i + 1,
@@ -58,14 +59,14 @@ def test_neighbours_on_100k_items(migrated: Engine) -> None:
             ],
         )
         session.execute(
-            Embedding.__table__.insert(),
+            sa.insert(Embedding),
             [
                 {"item_id": i + 1, "model": MODEL, "vector": to_blob(vectors[i])}
                 for i in range(ITEMS)
             ],
         )
         session.execute(
-            Job.__table__.insert(),
+            sa.insert(Job),
             [
                 {
                     "item_id": i + 1,
