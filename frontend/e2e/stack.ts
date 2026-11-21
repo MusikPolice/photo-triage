@@ -37,6 +37,7 @@ export interface MapHook {
   detail: "dots" | "thumbnails";
   sheets: number[];
   visibleIds(): number[];
+  pagePosition(itemId: number): [number, number] | null;
 }
 
 /** How the map is drawn: dots or thumbnails, and from which atlas sheets. */

@@ -97,7 +97,7 @@ async def test_details_say_what_the_lightbox_shows(
         height=480,
     )
     with Session(migrated) as session, session.begin():
-        for tag in ("zebra", "apple"):
+        for tag in ("zebra", "Tofino", "apple"):
             session.add(Tag(item_id=item_id, source=TagSource.IMPORTED, tag=tag, created_at=NOW))
 
     response = await client.get(f"/api/items/{item_id}")
@@ -113,7 +113,7 @@ async def test_details_say_what_the_lightbox_shows(
         "duration_s": None,
         "file_size_bytes": (Path("photos/metadata/keywords.jpg")).stat().st_size,
         "damaged": False,
-        "keywords": ["apple", "zebra"],
+        "keywords": ["apple", "Tofino", "zebra"],
     }
 
 

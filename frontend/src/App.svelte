@@ -3,10 +3,41 @@
   import Home from "./Home.svelte";
   import StatusIndicator from "./StatusIndicator.svelte";
   import { ActivityFeed } from "./lib/activity.svelte";
+  import { itemFromSearch, withItem } from "./lib/item";
   import { inAppPath, parseRoute, ROUTE_HREF } from "./lib/route";
 
   let pathname = $state(location.pathname);
+  let search = $state(location.search);
   const route = $derived(parseRoute(pathname));
+  /** The item open in the lightbox, from `?item=`, so a reload reopens it. */
+  const openItem = $derived(route === "home" ? itemFromSearch(search) : null);
+
+  function readLocation(): void {
+    pathname = location.pathname;
+    search = location.search;
+  }
+
+  /** History entries the lightbox pushed, so closing it goes back to the map. */
+  const LIGHTBOX_STATE = "lightbox";
+
+  function openLightbox(itemId: number): void {
+    // Each item opened from the map is its own entry; one opened from another
+    // (the neighbours, later) replaces it, so back always returns to the map.
+    const url = location.pathname + withItem(location.search, itemId);
+    if (history.state === LIGHTBOX_STATE) history.replaceState(LIGHTBOX_STATE, "", url);
+    else history.pushState(LIGHTBOX_STATE, "", url);
+    readLocation();
+  }
+
+  function closeLightbox(): void {
+    if (history.state === LIGHTBOX_STATE) {
+      history.back(); // popstate reads the location
+    } else {
+      // Opened by a link or a reload: there's no map entry behind it to go back to.
+      history.replaceState(null, "", location.pathname + withItem(location.search, null));
+      readLocation();
+    }
+  }
 
   /** Follow links within the app without reloading it. */
   function followLink(event: MouseEvent): void {
@@ -18,7 +49,7 @@
     if (path !== location.pathname + location.search + location.hash) {
       history.pushState(null, "", path);
     }
-    pathname = location.pathname;
+    readLocation();
   }
 
   function pick(event: MouseEvent) {
@@ -36,12 +67,7 @@
   });
 </script>
 
-<svelte:window
-  onclick={followLink}
-  onpopstate={() => {
-    pathname = location.pathname;
-  }}
-/>
+<svelte:window onclick={followLink} onpopstate={readLocation} />
 
 <header>
   <a class="name" href={ROUTE_HREF.home}>photo-triage</a>
@@ -52,7 +78,7 @@
   {#if route === "activity"}
     <Activity {feed} />
   {:else if route === "home"}
-    <Home {feed} />
+    <Home {feed} {openItem} onOpen={openLightbox} onClose={closeLightbox} />
   {:else}
     <h1>No page here</h1>
     <p><a href={ROUTE_HREF.home}>Back to your library</a></p>

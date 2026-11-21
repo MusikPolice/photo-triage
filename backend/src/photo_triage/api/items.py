@@ -84,7 +84,7 @@ class ItemDetails(BaseModel):
     damaged: bool
     """A photo cut short: only the top of its picture is there."""
     keywords: list[str]
-    """The keywords in the file, alphabetically."""
+    """The keywords in the file, alphabetically, ignoring case."""
 
 
 def _active(session: DbSession, item_id: int) -> Item:
@@ -101,7 +101,7 @@ def details(item_id: int, session: DbSession) -> ItemDetails:
     keywords = session.scalars(
         sa.select(Tag.tag)
         .where(Tag.item_id == item_id, Tag.source == TagSource.IMPORTED)
-        .order_by(Tag.tag)
+        .order_by(sa.func.lower(Tag.tag), Tag.tag)
     ).all()
     return ItemDetails(
         id=item.id,

@@ -132,6 +132,10 @@ def conversion_command(path: Path) -> list[str]:
         "veryfast",
         "-crf",
         "23",
+        # A keyframe each second, so each second is a fragment the browser can play:
+        # the first frame shows after one second's conversion, not one default GOP's.
+        "-force_key_frames",
+        "expr:gte(t,n_forced*1)",
         "-pix_fmt",
         "yuv420p",
         "-c:a",
