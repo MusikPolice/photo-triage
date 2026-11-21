@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { formatTakenAt, itemFromSearch, type ItemDetails } from "../src/lib/item";
+import { formatTakenAt, itemFromSearch, type ItemDetails, type Neighbours } from "../src/lib/item";
 import { activity, mapDetail, mapState, waitUntilProcessed, type MapHook } from "./stack";
 
 test("tapping an item opens it in the lightbox, with its date", async ({
@@ -46,10 +46,10 @@ test("tapping an item opens it in the lightbox, with its date", async ({
           locale: await page.evaluate(() => navigator.language),
         });
   await expect(lightbox.getByRole("heading", { level: 2 })).toHaveText(date);
-  await expect(lightbox.locator("img")).toHaveJSProperty("complete", true);
-  expect(await lightbox.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(
-    shown.width,
-  );
+  await expect(lightbox.locator(".media img")).toHaveJSProperty("complete", true);
+  expect(
+    await lightbox.locator(".media img").evaluate((img: HTMLImageElement) => img.naturalWidth),
+  ).toBe(shown.width);
 
   // A reload reopens it; the back button closes it.
   await page.reload();
@@ -111,4 +111,46 @@ test("tapping a thumbnail opens its item", async ({ page, request, isMobile }) =
   // A thumbnail's pick is an index into its sheet's points: it must map back to
   // the item tapped.
   expect(itemFromSearch(new URL(page.url()).search)).toBe(id);
+});
+
+test("opening a similar item moves the lightbox and the map to it", async ({ page, request }) => {
+  await waitUntilProcessed(request);
+  await page.goto("/");
+  await expect.poll(async () => (await mapState(page)).visible.length).toBeGreaterThan(0);
+  const [first] = (await mapState(page)).visible;
+  if (first === undefined) throw new Error("Nothing on the map");
+  await page.goto(`/?item=${String(first)}`);
+
+  const lightbox = page.getByRole("dialog");
+  const strip = lightbox.getByRole("region", { name: "Similar" });
+  const neighbours = (await (
+    await request.get(`/api/items/${String(first)}/neighbours?limit=12`)
+  ).json()) as Neighbours;
+  const [next] = neighbours.items;
+  if (next === undefined) throw new Error(`Item ${String(first)} has no neighbours`);
+  await strip.getByRole("button", { name: `Similar ${next.media_type} 1` }).click();
+
+  // The lightbox shows it, at its own URL.
+  await expect.poll(() => itemFromSearch(new URL(page.url()).search)).toBe(next.id);
+  const shown = (await (await request.get(`/api/items/${String(next.id)}`)).json()) as ItemDetails;
+  await expect(lightbox).toHaveAccessibleName(shown.path.split("/").at(-1) ?? "");
+
+  // The map, behind it, flies to it: it ends up at the centre.
+  const box = await page.locator(".map canvas").boundingBox();
+  if (box === null) throw new Error("No map canvas");
+  const centre = [box.x + box.width / 2, box.y + box.height / 2];
+  await expect
+    .poll(async () => {
+      const at = await page.evaluate(
+        (itemId) =>
+          (window as unknown as { __photoTriageMap: MapHook }).__photoTriageMap.pagePosition(
+            itemId,
+          ),
+        next.id,
+      );
+      return at === null
+        ? Infinity
+        : Math.hypot(at[0] - (centre[0] ?? 0), at[1] - (centre[1] ?? 0));
+    })
+    .toBeLessThan(1);
 });

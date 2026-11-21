@@ -3,7 +3,13 @@
    * and zoomed in, as its thumbnail from the atlas sheets. It pans and zooms with the
    * mouse, the trackpad and touch, and reloads its points and atlas manifest when the
    * activity feed announces a new layout or set of sheets. */
-  import { Deck, OrthographicView, type Layer, type OrthographicViewState } from "@deck.gl/core";
+  import {
+    Deck,
+    LinearInterpolator,
+    OrthographicView,
+    type Layer,
+    type OrthographicViewState,
+  } from "@deck.gl/core";
   import { IconLayer, ScatterplotLayer } from "@deck.gl/layers";
   import { untrack } from "svelte";
 
@@ -47,11 +53,14 @@
     layoutVersion: number | null | undefined;
     /** The newest atlas set's layout version, likewise. */
     atlasVersion: number | null | undefined;
+    /** The item open in the lightbox, or null: the map flies to it, so it's where
+     * the walk through similar items has got to when the lightbox closes. */
+    focusItem: number | null;
     /** Opens an item, tapped or clicked on the map, in the lightbox. */
     onOpen: (itemId: number) => void;
   }
 
-  const { layoutVersion, atlasVersion, onOpen }: Props = $props();
+  const { layoutVersion, atlasVersion, focusItem, onOpen }: Props = $props();
 
   let container = $state<HTMLDivElement | null>(null);
   let points = $state.raw<MapPoints | null>(null);
@@ -108,6 +117,10 @@
    * than a fingertip. */
   const PICKING_RADIUS_PX = 10;
   const MAX_ZOOM = 20;
+  /** How long flying to an item takes. */
+  const FLY_MS = 600;
+  /** The zoom range, set by the first fit. */
+  let minZoom = 0;
 
   function load(): void {
     loading ??= fetchPoints()
@@ -251,7 +264,7 @@
       deck = new Deck<OrthographicView>({
         parent,
         views: new OrthographicView({ id: "map" }),
-        initialViewState: { ...view, minZoom: view.zoom - 2, maxZoom: MAX_ZOOM },
+        initialViewState: { ...view, minZoom: (minZoom = view.zoom - 2), maxZoom: MAX_ZOOM },
         controller: { dragRotate: false, inertia: true },
         pickingRadius: PICKING_RADIUS_PX,
         getCursor: ({ isDragging, isHovering }) =>
@@ -285,6 +298,33 @@
   $effect(() => {
     draw(detail, sheets, groups);
   });
+
+  // The open item, at the centre, at the current zoom.
+  $effect(() => {
+    const id = focusItem;
+    const shown = points;
+    if (id === null || shown === null) return;
+    untrack(() => {
+      flyTo(shown, id);
+    });
+  });
+
+  function flyTo(shown: MapPoints, itemId: number): void {
+    if (deck === null || view === null) return;
+    const i = shown.ids.indexOf(itemId);
+    if (i < 0) return;
+    const target: [number, number] = [shown.positions[2 * i] ?? 0, shown.positions[2 * i + 1] ?? 0];
+    deck.setProps({
+      initialViewState: {
+        target,
+        zoom: view.zoom,
+        minZoom,
+        maxZoom: MAX_ZOOM,
+        transitionDuration: FLY_MS,
+        transitionInterpolator: new LinearInterpolator(["target"]),
+      },
+    });
+  }
 
   function draw(mode: Detail, shownSheets: number[], current: Groups | null): void {
     const shown = points;

@@ -11,6 +11,20 @@ export function getItem(itemId: number, fetchFn: typeof fetch = fetch): Promise<
   return getJson<ItemDetails>(`/items/${String(itemId)}`, fetchFn);
 }
 
+export type Neighbours = components["schemas"]["Neighbours"];
+
+/** How many similar items the lightbox's strip shows. */
+export const NEIGHBOURS_SHOWN = 12;
+
+/** The items most like this one by CLIP, most similar first (plan §6.4). */
+export function getNeighbours(
+  itemId: number,
+  limit: number = NEIGHBOURS_SHOWN,
+  fetchFn: typeof fetch = fetch,
+): Promise<Neighbours> {
+  return getJson<Neighbours>(`/items/${String(itemId)}/neighbours?limit=${String(limit)}`, fetchFn);
+}
+
 /** The picture (a JPEG) or the video (an MP4), whatever the original's format. */
 export function viewUrl(itemId: number): string {
   return `/api/items/${String(itemId)}/view`;
