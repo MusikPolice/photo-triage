@@ -39,6 +39,7 @@
     type Rgb,
     type Theme,
   } from "./lib/map-colours";
+  import { FrameMeter, wantsFrameRate, type FrameRate } from "./lib/frame-rate";
   import { ROUTE_HREF } from "./lib/route";
 
   interface Props {
@@ -102,6 +103,24 @@
   });
 
   const shownLegend = $derived(legend(points, colourBy, theme));
+
+  /** `?fps`: a frame-rate readout, for trying the map on a phone (#119). */
+  const showFrameRate = wantsFrameRate(location.search);
+  let frameRate = $state<FrameRate | null>(null);
+  $effect(() => {
+    if (!showFrameRate) return;
+    const meter = new FrameMeter();
+    let request = 0;
+    const tick = (nowMs: number) => {
+      const reading = meter.frame(nowMs);
+      if (reading !== null) frameRate = reading;
+      request = requestAnimationFrame(tick);
+    };
+    request = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(request);
+    };
+  });
 
   const DOT_RADIUS_PX = 2.5;
   /** How near a tap or click must be to an item to open it: a dot is far smaller
@@ -404,6 +423,14 @@
       {/if}
     </div>
   {/if}
+  {#if showFrameRate}
+    <output class="frame-rate" aria-label="Frame rate">
+      {frameRate === null
+        ? "… fps"
+        : `${String(frameRate.fps)} fps · worst ${String(Math.round(frameRate.worstMs))} ms`}
+      · {points?.count ?? 0} items
+    </output>
+  {/if}
 </div>
 
 <style>
@@ -431,6 +458,20 @@
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  }
+
+  .frame-rate {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    z-index: 1;
+    padding: 0.25rem 0.5rem;
+    font:
+      0.8125rem/1.4 ui-monospace,
+      monospace;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
   }
 
   .colour-by {
