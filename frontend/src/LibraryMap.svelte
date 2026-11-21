@@ -232,6 +232,9 @@
     });
   }
 
+  /** The layers last drawn, for the test hook. */
+  let drawn: Layer[] = [];
+
   /** The dots' layer, rebuilt only when the points or their colours change. */
   let dots: ScatterplotLayer | null = null;
 
@@ -293,6 +296,7 @@
         if (group !== undefined) layers.push(sheetLayer(shown, current.atlas.version, group));
       }
     }
+    drawn = layers;
     deck.setProps({ layers });
   }
 
@@ -326,6 +330,11 @@
       /** The atlas sheets drawn, by number. */
       get sheets() {
         return detail === "thumbnails" ? sheets : [];
+      },
+      /** Whether every layer drawn has what it draws: a sheet's image loads after
+       * its layer is made, and until then its thumbnails aren't drawn or tappable. */
+      get loaded() {
+        return drawn.length > 0 && drawn.every((layer) => layer.isLoaded);
       },
       /** Where an item is on the page, in CSS pixels from the viewport's top left,
        * or null if it isn't on the map. */

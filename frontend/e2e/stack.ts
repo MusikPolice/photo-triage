@@ -36,18 +36,28 @@ export interface MapHook {
   atlasVersion: number | null;
   detail: "dots" | "thumbnails";
   sheets: number[];
+  loaded: boolean;
   visibleIds(): number[];
   pagePosition(itemId: number): [number, number] | null;
 }
 
-/** How the map is drawn: dots or thumbnails, and from which atlas sheets. */
-export async function mapDetail(
-  page: Page,
-): Promise<{ atlasVersion: number | null; detail: string | null; sheets: number[] }> {
+/** How the map is drawn: dots or thumbnails, from which atlas sheets, and whether
+ * every layer has what it draws (a sheet's image loads after its layer is made). */
+export async function mapDetail(page: Page): Promise<{
+  atlasVersion: number | null;
+  detail: string | null;
+  sheets: number[];
+  loaded: boolean;
+}> {
   return page.evaluate(() => {
     const hook = (window as unknown as { __photoTriageMap?: MapHook }).__photoTriageMap;
-    if (hook === undefined) return { atlasVersion: null, detail: null, sheets: [] };
-    return { atlasVersion: hook.atlasVersion, detail: hook.detail, sheets: hook.sheets };
+    if (hook === undefined) return { atlasVersion: null, detail: null, sheets: [], loaded: false };
+    return {
+      atlasVersion: hook.atlasVersion,
+      detail: hook.detail,
+      sheets: hook.sheets,
+      loaded: hook.loaded,
+    };
   });
 }
 
