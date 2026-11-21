@@ -1,6 +1,8 @@
 """Settings come from the environment and `.env`, and fail fast (plan §9)."""
 
 import datetime as dt
+import os
+from collections.abc import Iterator
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -12,7 +14,9 @@ from photo_triage.settings import (
     TRASH_FOLDER,
     Settings,
     SettingsError,
+    data_dir_error,
     load_settings,
+    photo_dir_warning,
     trash_filesystem_warning,
 )
 
@@ -400,3 +404,47 @@ def test_unknown_timezone_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(SettingsError, match="TZ"):
         load_settings()
+
+
+@pytest.fixture
+def read_only(tmp_path: Path) -> Iterator[Path]:
+    """A folder this process can read but not write."""
+    if os.getuid() == 0:
+        pytest.skip("root can write anywhere")
+    folder = tmp_path / "read-only"
+    folder.mkdir()
+    folder.chmod(0o555)
+    yield folder
+    folder.chmod(0o755)
+
+
+def test_writable_folders_raise_nothing(tmp_path: Path) -> None:
+    # DATA_DIR needn't exist yet: its nearest existing parent is what's written.
+    settings = Settings(photo_dir=tmp_path, data_dir=tmp_path / "not-yet" / "data")
+
+    assert data_dir_error(settings) is None
+    assert photo_dir_warning(settings) is None
+
+
+def test_a_missing_library_is_not_called_unwritable(tmp_path: Path, read_only: Path) -> None:
+    assert photo_dir_warning(Settings(photo_dir=read_only / "not-there")) is None
+
+
+def test_an_unwritable_data_dir_says_whose_it_is_and_what_to_set(
+    tmp_path: Path, read_only: Path
+) -> None:
+    error = data_dir_error(Settings(photo_dir=tmp_path, data_dir=read_only / "data"))
+
+    assert error is not None
+    assert error.startswith(f"DATA_DIR ({read_only / 'data'}) isn't writable by this process, ")
+    assert f"UID {os.getuid()} (GID {os.getgid()})" in error
+    assert f"{read_only} belongs to UID {os.getuid()}" in error
+    assert "set APP_UID and APP_GID in .env" in error
+
+
+def test_an_unwritable_library_is_a_warning_that_trashing_will_fail(read_only: Path) -> None:
+    warning = photo_dir_warning(Settings(photo_dir=read_only))
+
+    assert warning is not None
+    assert warning.startswith(f"PHOTO_DIR ({read_only}) isn't writable")
+    assert warning.endswith("Trashing a file will fail.")
