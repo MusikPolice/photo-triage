@@ -193,6 +193,7 @@ def run(
         item_stages=stages,
         scan_schedule=settings.scan_schedule,
         layout_model=settings.clip_model,
+        derived_dir=settings.derived_dir,
     )
     # Real time, not `clock`: see `photo_triage.worker.heartbeat`.
     with exiftool, Heartbeat(engine, utc_now):
