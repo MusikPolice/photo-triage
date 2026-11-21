@@ -240,6 +240,8 @@ export interface components {
   schemas: {
     /** Activity */
     Activity: {
+      /** Atlas Version */
+      atlas_version: number | null;
       /** Layout Version */
       layout_version: number | null;
       /** Stages */

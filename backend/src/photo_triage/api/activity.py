@@ -30,6 +30,7 @@ from photo_triage.eta import finish_at
 from photo_triage.pipeline.thumbnails import Thumbnail, thumbnail_path
 from photo_triage.settings import Settings
 from photo_triage.worker import controls, heartbeat
+from photo_triage.worker.atlas_schedule import current_set
 from photo_triage.worker.clock import Clock
 from photo_triage.worker.layout_schedule import latest_version
 from photo_triage.worker.queue import BATCH_STAGES, PRIORITY, JobQueue, Stage
@@ -109,6 +110,10 @@ class Activity(BaseModel):
     layout_version: int | None
     """The current map layout's version (`GET /api/map/points`), or None before the
     first fit. Open maps reload their points when it changes."""
+    atlas_version: int | None
+    """The layout version of the newest complete set of atlas sheets
+    (`GET /api/map/atlases`), or None before the first. It trails `layout_version`
+    while a new set is drawn. Open maps reload the manifest when it changes."""
 
 
 type JobCounts = dict[tuple[Stage, JobStatus], int]
@@ -227,6 +232,7 @@ def read_activity(
     ahead = work_ahead(rows, throughputs)
     return Activity(
         layout_version=session.scalar(latest_version()),
+        atlas_version=current_set(settings.derived_dir),
         worker=WorkerActivity(
             status=state.status,
             paused=controls.GLOBAL in paused,
