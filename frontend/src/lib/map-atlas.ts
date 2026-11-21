@@ -132,7 +132,14 @@ export interface SheetGroup {
   /** Indices into the points. */
   points: number[];
   /** Keyed by the point's index, as a string. */
-  mapping: Record<string, CellRect>;
+  mapping: Record<string, IconRect>;
+}
+
+/** A thumbnail's pixels on its sheet, and its centre, which `IconLayer` puts on the
+ * point (its default is the bottom middle). Relative to the rect's top left. */
+export interface IconRect extends CellRect {
+  anchorX: number;
+  anchorY: number;
 }
 
 /** The points with a cell, grouped by sheet. */
@@ -147,7 +154,8 @@ export function sheetGroups(atlas: Atlas, index: Int32Array): Map<number, SheetG
       groups.set(sheet, group);
     }
     group.points.push(i);
-    group.mapping[String(i)] = iconRect(atlas, j);
+    const rect = iconRect(atlas, j);
+    group.mapping[String(i)] = { ...rect, anchorX: rect.width / 2, anchorY: rect.height / 2 };
   });
   return groups;
 }

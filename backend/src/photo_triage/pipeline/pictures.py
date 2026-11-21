@@ -7,7 +7,8 @@ truncated decoding allowed: the missing part comes out grey, and the caller is
 told the picture is damaged. A file with no picture data at all still fails.
 
 Pillow's switch for this is process-wide, so it's turned on only around the retry.
-The worker decodes on one thread; nothing else in the process decodes photos.
+The worker decodes on one thread. The API decodes only to convert HEICs for the
+lightbox, one at a time (`photo_triage.pipeline.viewing`).
 """
 
 from collections.abc import Callable, Generator

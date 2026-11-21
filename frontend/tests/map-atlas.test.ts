@@ -176,7 +176,13 @@ describe("sheets", () => {
     const groups = sheetGroups(atlas, index);
     expect([...groups.keys()]).toEqual([0, 1]);
     expect(groups.get(0)?.points).toEqual([0, 2]);
-    expect(groups.get(0)?.mapping["2"]).toEqual(iconRect(atlas, 1));
+    const rect = iconRect(atlas, 1);
+    // Centred on its point.
+    expect(groups.get(0)?.mapping["2"]).toEqual({
+      ...rect,
+      anchorX: rect.width / 2,
+      anchorY: rect.height / 2,
+    });
     expect(groups.get(1)?.points).toEqual([3]);
   });
 

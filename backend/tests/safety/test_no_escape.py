@@ -1,6 +1,7 @@
 """No escape, and the library is untouched (dev-environment §7): a full worker run over
 a copy of the tier-1 fixtures, through every Phase 2 stage with the fake embedder,
-changes nothing but `DATA_DIR`, and leaves every library file as it was.
+changes nothing but `DATA_DIR`, and leaves every library file as it was. Nor does
+showing every item in the lightbox afterwards, converting the HEICs and an HEVC video.
 
 The run is `python -m photo_triage.worker`'s own `main`: a walk, then `--once`. The
 temp root holds `PHOTO_DIR`, `TRASH_DIR` and `DATA_DIR`, plus a home folder, a temp
@@ -13,6 +14,7 @@ runs these with writes off and adds the write-back cases.
 
 import hashlib
 import os
+import subprocess
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -20,8 +22,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy.engine import Engine
+from starlette.testclient import TestClient
 
+from photo_triage.api.app import create_app
+from photo_triage.db.models import Item, ItemStatus
 from photo_triage.ml import FakeClip
 from photo_triage.pipeline import thumbnails
 from photo_triage.settings import Settings
@@ -187,6 +193,52 @@ def _temp_file_in_the_library(s: Settings) -> None:
     stray = s.photo_dir / "scenes/.stray.tmp"
     stray.write_text("stray")
     stray.unlink()
+
+
+def _add_an_hevc_video(library: Path) -> None:
+    """An iPhone-like HEVC video, which the lightbox converts."""
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error",
+            "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=30",
+            "-f", "lavfi", "-i", "sine=duration=1",
+            "-c:v", "libx265", "-preset", "ultrafast", "-tag:v", "hvc1",
+            "-x265-params", "log-level=error",
+            "-c:a", "aac", "-shortest", str(library / "video/iphone.mov"),
+        ],
+        check=True,
+    )  # fmt: skip
+
+
+def test_showing_every_item_in_the_lightbox_reads_only(
+    run_worker: Callable[[], Run], settings: Settings, library: Path, migrated: Engine
+) -> None:
+    _add_an_hevc_video(library)
+    run = run_worker()
+    with migrated.connect() as connection:
+        item_ids = connection.scalars(
+            sa.select(Item.id).where(Item.status == ItemStatus.ACTIVE)
+        ).all()
+    client = TestClient(create_app(settings))
+    before = snapshot(run.root)
+
+    types: list[str] = []
+    for item_id in item_ids:
+        assert client.get(f"/api/items/{item_id}").status_code == 200
+        view = client.get(f"/api/items/{item_id}/view")
+        assert view.status_code == 200, (item_id, view.text)
+        types.append(view.headers["content-type"])
+
+    after = snapshot(run.root)
+    # Every supported file, the new video among them (the PNG isn't one). The
+    # truncated JPEG's scan fails, but it's still an item, and served as it is.
+    assert len(item_ids) == 31
+    assert types.count("video/mp4") == 4
+    assert outside(differences(before, after), _relative(run, settings.data_dir)) == set()
+    photos = _relative(run, settings.photo_dir)
+    assert {p: e for p, e in after.items() if Path(p).is_relative_to(photos)} == {
+        p: e for p, e in before.items() if Path(p).is_relative_to(photos)
+    }
 
 
 @pytest.mark.parametrize(

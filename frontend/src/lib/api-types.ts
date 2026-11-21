@@ -55,6 +55,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/items/{item_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Details
+     * @description What the lightbox shows about an item.
+     */
+    get: operations["details_api_items__item_id__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/items/{item_id}/thumbnail": {
     parameters: {
       query?: never;
@@ -68,6 +88,26 @@ export interface paths {
      *     by default) or 64, the map's.
      */
     get: operations["thumbnail_api_items__item_id__thumbnail_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/items/{item_id}/view": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * View
+     * @description The item's picture or video, in a format every browser shows.
+     */
+    get: operations["view_api_items__item_id__view_get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -274,6 +314,33 @@ export interface components {
        */
       status: "ok";
     };
+    /** ItemDetails */
+    ItemDetails: {
+      /** Damaged */
+      damaged: boolean;
+      /** Duration S */
+      duration_s: number | null;
+      /** File Size Bytes */
+      file_size_bytes: number;
+      /** Height */
+      height: number | null;
+      /** Id */
+      id: number;
+      /** Keywords */
+      keywords: string[];
+      media_type: components["schemas"]["MediaType"];
+      /** Path */
+      path: string;
+      /** Taken At Local */
+      taken_at_local: string | null;
+      /** Width */
+      width: number | null;
+    };
+    /**
+     * MediaType
+     * @enum {string}
+     */
+    MediaType: "photo" | "video";
     /**
      * Stage
      * @enum {string}
@@ -432,6 +499,44 @@ export interface operations {
       };
     };
   };
+  details_api_items__item_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        item_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ItemDetails"];
+        };
+      };
+      /** @description No such item */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   thumbnail_api_items__item_id__thumbnail_get: {
     parameters: {
       query: {
@@ -476,6 +581,57 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+    };
+  };
+  view_api_items__item_id__view_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        item_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The picture as a JPEG, or the video as an MP4 (fragmented, if converted) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/jpeg": unknown;
+          "video/mp4": unknown;
+        };
+      };
+      /** @description Part of a video that needs no conversion */
+      206: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unchanged since the copy the browser has */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description No such item, or its file is gone */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The file can't be read */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

@@ -47,9 +47,11 @@
     layoutVersion: number | null | undefined;
     /** The newest atlas set's layout version, likewise. */
     atlasVersion: number | null | undefined;
+    /** Opens an item, tapped or clicked on the map, in the lightbox. */
+    onOpen: (itemId: number) => void;
   }
 
-  const { layoutVersion, atlasVersion }: Props = $props();
+  const { layoutVersion, atlasVersion, onOpen }: Props = $props();
 
   let container = $state<HTMLDivElement | null>(null);
   let points = $state.raw<MapPoints | null>(null);
@@ -102,6 +104,9 @@
   const shownLegend = $derived(legend(points, colourBy, theme));
 
   const DOT_RADIUS_PX = 2.5;
+  /** How near a tap or click must be to an item to open it: a dot is far smaller
+   * than a fingertip. */
+  const PICKING_RADIUS_PX = 10;
   const MAX_ZOOM = 20;
 
   function load(): void {
@@ -204,6 +209,7 @@
       },
       radiusUnits: "pixels",
       getRadius: DOT_RADIUS_PX,
+      pickable: true,
     });
   }
 
@@ -222,8 +228,12 @@
         return rect === undefined ? 0 : thumbnailSize(rect);
       },
       sizeUnits: "pixels",
+      pickable: true,
     });
   }
+
+  /** The layers last drawn, for the test hook. */
+  let drawn: Layer[] = [];
 
   /** The dots' layer, rebuilt only when the points or their colours change. */
   let dots: ScatterplotLayer | null = null;
@@ -243,6 +253,16 @@
         views: new OrthographicView({ id: "map" }),
         initialViewState: { ...view, minZoom: view.zoom - 2, maxZoom: MAX_ZOOM },
         controller: { dragRotate: false, inertia: true },
+        pickingRadius: PICKING_RADIUS_PX,
+        getCursor: ({ isDragging, isHovering }) =>
+          isDragging ? "grabbing" : isHovering ? "pointer" : "grab",
+        onClick: ({ index, object }) => {
+          // A thumbnail's object is its point's index (its index is within its
+          // sheet); a dot has no object, and its index is the point's.
+          const i = typeof object === "number" ? object : index;
+          const id = i >= 0 ? points?.ids[i] : undefined;
+          if (id !== undefined) onOpen(id);
+        },
         onViewStateChange: ({ viewState }) => {
           const state = viewState as OrthographicViewState;
           view = {
@@ -276,6 +296,7 @@
         if (group !== undefined) layers.push(sheetLayer(shown, current.atlas.version, group));
       }
     }
+    drawn = layers;
     deck.setProps({ layers });
   }
 
@@ -309,6 +330,23 @@
       /** The atlas sheets drawn, by number. */
       get sheets() {
         return detail === "thumbnails" ? sheets : [];
+      },
+      /** Whether every layer drawn has what it draws: a sheet's image loads after
+       * its layer is made, and until then its thumbnails aren't drawn or tappable. */
+      get loaded() {
+        return drawn.length > 0 && drawn.every((layer) => layer.isLoaded);
+      },
+      /** Where an item is on the page, in CSS pixels from the viewport's top left,
+       * or null if it isn't on the map. */
+      pagePosition(itemId: number): [number, number] | null {
+        if (points === null || view === null || container === null) return null;
+        const i = points.ids.indexOf(itemId);
+        if (i < 0) return null;
+        const box = container.getBoundingClientRect();
+        const scale = 2 ** view.zoom;
+        const x = (points.positions[2 * i] ?? 0) - view.target[0];
+        const y = (points.positions[2 * i + 1] ?? 0) - view.target[1];
+        return [box.left + box.width / 2 + x * scale, box.top + box.height / 2 + y * scale];
       },
       visibleIds(): number[] {
         if (points === null || view === null || container === null) return [];
