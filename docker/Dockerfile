@@ -88,7 +88,10 @@ COPY --from=frontend /app/frontend/dist /app/frontend/dist
 ENV PATH=/app/backend/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PHOTO_DIR=/photos \
-    DATA_DIR=/data
+    DATA_DIR=/data \
+    NUMBA_CACHE_DIR=/tmp/numba
+# NUMBA_CACHE_DIR: UMAP's compiled functions, somewhere any UID can write. Compose
+# may run the image as the library owner's UID (APP_UID), which has no home here.
 # TRASH_DIR is left to its default, /photos/.photo-triage-trash, on the photo
 # library's filesystem, so trashing a file is a rename (plan §6.8).
 
