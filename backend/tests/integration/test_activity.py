@@ -465,15 +465,16 @@ async def test_the_walk_shows_its_last_finished_run_and_who_asked(
     assert walk["last_actor"] == "alice@example.com"
 
 
-async def test_layout_shows_its_last_run_and_no_schedule(
-    client: AsyncClient, migrated: Engine
+@pytest.mark.parametrize("stage", [Stage.LAYOUT, Stage.ATLASES])
+async def test_layout_and_atlases_show_their_last_run_and_no_schedule(
+    client: AsyncClient, migrated: Engine, stage: Stage
 ) -> None:
     finished_at = START - dt.timedelta(minutes=30)
     with Session(migrated) as session, session.begin():
         session.add(
             Job(
-                stage=Stage.LAYOUT,
-                priority=PRIORITY[Stage.LAYOUT],
+                stage=stage,
+                priority=PRIORITY[stage],
                 status=JobStatus.DONE,
                 attempts=0,
                 enqueued_at=finished_at - dt.timedelta(minutes=1),
@@ -481,10 +482,10 @@ async def test_layout_shows_its_last_run_and_no_schedule(
             )
         )
 
-    layout = _stages((await client.get("/api/activity")).json())["layout"]
+    row = _stages((await client.get("/api/activity")).json())[stage]
 
-    assert layout["last_finished_at"] == "2026-10-05T11:30:00Z"
-    assert (layout["last_actor"], layout["next_scheduled_at"]) == (None, None)
+    assert row["last_finished_at"] == "2026-10-05T11:30:00Z"
+    assert (row["last_actor"], row["next_scheduled_at"]) == (None, None)
 
 
 async def test_the_current_layout_version_is_reported(

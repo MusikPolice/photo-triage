@@ -1,7 +1,8 @@
 """The runner for each stage the worker can run, and the item stages that reconcile
 keeps current (plan §6.11).
 
-`walk`, `scan`, `metadata_read`, `frames`, `thumbnail`, `clip` and `layout` always run. `noop`
+`walk`, `scan`, `metadata_read`, `frames`, `thumbnail`, `clip`, `layout` and `atlases`
+always run. `noop`
 exists only when `WORKER_NOOP_STAGE` is on.
 
 Nothing here imports NumPy or ONNX Runtime until a job needs them, so the worker can
@@ -174,6 +175,12 @@ def build_runners(
 
         layout.fit(sessions, settings.clip_model)
 
+    def run_atlases(job: Job) -> None:
+        # Here, not at the top, like layout: it imports NumPy.
+        from photo_triage.pipeline import atlases
+
+        atlases.build(sessions, settings.derived_dir)
+
     runners: dict[str, Runner] = {
         Stage.WALK: run_walk,
         Stage.SCAN: run_scan,
@@ -182,6 +189,7 @@ def build_runners(
         Stage.THUMBNAIL: run_thumbnail,
         Stage.CLIP: run_clip,
         Stage.LAYOUT: run_layout,
+        Stage.ATLASES: run_atlases,
     }
     if settings.worker_noop_stage:
         runners[Stage.NOOP] = run_noop

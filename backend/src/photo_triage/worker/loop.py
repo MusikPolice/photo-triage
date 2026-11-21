@@ -16,7 +16,9 @@ walk it reconciles the item stages (`photo_triage.worker.reconcile`).
 
 With `layout_model`, it also queues a layout fit when one is due
 (`photo_triage.worker.layout_schedule`), after each job that leads to an embedding,
-whether it succeeded or failed, and after each reconcile.
+whether it succeeded or failed, and after each reconcile. With `derived_dir`, it
+queues the atlases after each layout job and each reconcile, when the newest set
+isn't the current layout's (`photo_triage.worker.atlas_schedule`).
 """
 
 import datetime as dt
@@ -25,6 +27,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Mapping
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
@@ -34,7 +37,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from photo_triage.db.models import JOB_IS_OPEN, Job, JobStatus
 from photo_triage.quiet_hours import UTC_ZONE, QuietHours
 from photo_triage.schedule import Schedule
-from photo_triage.worker import layout_schedule
+from photo_triage.worker import atlas_schedule, layout_schedule
 from photo_triage.worker.clock import Clock, Timer, utc_now
 from photo_triage.worker.queue import JobQueue, Stage
 from photo_triage.worker.reconcile import chain, reconcile
@@ -66,12 +69,14 @@ class Worker:
         item_stages: Mapping[str, ItemStage] | None = None,
         scan_schedule: Schedule | None = None,
         layout_model: str | None = None,
+        derived_dir: Path | None = None,
     ) -> None:
         """`clock` should be the queue's clock. `zone` is the one quiet hours and
         `scan_schedule` are in. `item_stages` are the stages to reconcile, whose
         versions jobs record. Without `scan_schedule`, walks are queued only by hand.
         `layout_model` is `CLIP_MODEL`, whose embeddings are laid out; without it,
-        layout fits are queued only by hand."""
+        layout fits are queued only by hand. `derived_dir` holds the atlases;
+        without it, they're queued only by hand."""
         self._engine = engine
         self._sessions = sessionmaker(engine, expire_on_commit=False)
         self._runners = dict(runners)
@@ -88,6 +93,7 @@ class Worker:
         self._state = WorkerState()
         self._progress = _Progress(timer, summary_interval_s)
         self._layout_model = layout_model
+        self._derived_dir = derived_dir
         self._growth_checked_s: float | None = None
 
     @property
@@ -119,12 +125,14 @@ class Worker:
         return len(jobs)
 
     def reconcile(self) -> dict[str, int]:
-        """Queue every item stage that's due, and a layout fit if one is. Returns how
-        many jobs each stage got."""
+        """Queue every item stage that's due, a layout fit if one is, and the atlases if
+        they're behind the layout. Returns how many jobs each stage got."""
         queued = reconcile(self._engine, self._item_stages, self._clock())
         with self._sessions.begin() as session:
             if self._queue_layout(session, check_growth=True):
                 queued[Stage.LAYOUT] = 1
+            if self._queue_atlases(session):
+                queued[Stage.ATLASES] = 1
         return queued
 
     def run_one(self) -> bool:
@@ -165,6 +173,8 @@ class Worker:
                 chained = self._chain(session, job)
                 if job.stage in layout_schedule.EMBEDDING_PIPELINE and self._queue_layout(session):
                     chained.append(Stage.LAYOUT)
+                if job.stage == Stage.LAYOUT and self._queue_atlases(session):
+                    chained.append(Stage.ATLASES)
             logger.debug("Finished %s in %.3f s", _describe(job), duration_s)
             if chained:
                 logger.debug("Queued %s after it", ", ".join(chained))
@@ -240,6 +250,15 @@ class Worker:
         )
         if queued:
             logger.info("Queued a layout fit: the embedded items have changed")
+        return queued
+
+    def _queue_atlases(self, session: Session) -> bool:
+        """Queue an atlases job if the newest set isn't the current layout's."""
+        if self._derived_dir is None:
+            return False
+        queued = atlas_schedule.queue_if_due(session, self._queue, self._derived_dir)
+        if queued:
+            logger.info("Queued the atlases: the layout has changed")
         return queued
 
     def _set_state(self, state: WorkerState) -> None:
