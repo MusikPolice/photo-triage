@@ -37,7 +37,9 @@ from photo_triage.files import ExifTool, LockHeldError, exclusive_lock
 from photo_triage.settings import (
     Settings,
     SettingsError,
+    data_dir_error,
     load_settings,
+    photo_dir_warning,
     trash_filesystem_warning,
 )
 from photo_triage.worker import controls, layout_schedule
@@ -70,6 +72,16 @@ NumPy, and numba (UMAP) when they load. ONNX Runtime sessions also take the coun
 directly."""
 
 
+def default_actor() -> str:
+    """Who a command from the shell is recorded as: the user's name, or `uid-N` for
+    a UID with no name, as when the stack runs as the library owner's UID (APP_UID)
+    and the image has no user by that number."""
+    try:
+        return getpass.getuser()
+    except (OSError, KeyError):
+        return f"uid-{os.getuid()}"
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -86,7 +98,7 @@ def main(
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
     scan = commands.add_parser("scan", help="queue a scan of the library and exit")
     scan.add_argument(
-        "--actor", default=getpass.getuser(), help="who to record (default: your user name)"
+        "--actor", default=default_actor(), help="who to record (default: your user name)"
     )
     commands.add_parser("reconcile", help="queue every item stage that's due and exit")
     noop = commands.add_parser(
@@ -101,7 +113,7 @@ def main(
             "stage", nargs="?", choices=list(Stage), metavar="STAGE", help="default: every stage"
         )
         control.add_argument(
-            "--actor", default=getpass.getuser(), help="who to record (default: your user name)"
+            "--actor", default=default_actor(), help="who to record (default: your user name)"
         )
     args = parser.parse_args(argv)
 
@@ -109,6 +121,9 @@ def main(
         settings = load_settings()
     except SettingsError as e:
         print(e, file=sys.stderr)
+        return 2
+    if (error := data_dir_error(settings)) is not None:
+        print(error, file=sys.stderr)
         return 2
     # The migrate step runs before the worker starts; the worker never migrates.
     try:
@@ -177,8 +192,9 @@ def run(
 ) -> int:
     logs.configure(settings, "worker")
     logger.info("Worker starting: %s", settings.summary())
-    if (warning := trash_filesystem_warning(settings)) is not None:
-        logger.warning(warning)
+    for warning in (trash_filesystem_warning(settings), photo_dir_warning(settings)):
+        if warning is not None:
+            logger.warning(warning)
     if clip is None and settings.worker_fake_clip:
         from photo_triage.ml import FakeClip
 

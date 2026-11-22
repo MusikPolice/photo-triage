@@ -151,12 +151,16 @@ fi
 # temporary folders. Not Ollama: nothing uses it yet, and its image is large.
 stack_dir="$(mktemp -d)"
 mkdir "$stack_dir/photos" "$stack_dir/data" "$stack_dir/models"
-chmod 777 "$stack_dir/photos" "$stack_dir/data"  # for the containers' UID 1000
+# The stack runs as APP_UID: a UID that isn't the image's 1000 and has no name in
+# it, as a NAS account's would be, owning the folders.
+stack_uid=1234
+docker run --rm --user 0 --volume "$stack_dir:/stack" "$image" \
+  chown "$stack_uid:$stack_uid" /stack/photos /stack/data
 stack_port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 stack() {
   COMPOSE_PROJECT_NAME="photo-triage-smoke-$$" PHOTO_TRIAGE_IMAGE="$image" \
     PHOTO_DIR="$stack_dir/photos" DATA_DIR="$stack_dir/data" MODELS_DIR="$stack_dir/models" \
-    APP_ENV_FILE=/dev/null \
+    APP_ENV_FILE=/dev/null APP_UID="$stack_uid" APP_GID="$stack_uid" \
     APP_PORT="$stack_port" docker compose -f "$here/../compose.yaml" "$@"
 }
 
@@ -175,6 +179,12 @@ if [[ -f "$stack_dir/data/photo-triage.db" ]]; then
   ok "compose: the database is in the DATA_DIR bind mount"
 else
   fail "compose: no database in the DATA_DIR bind mount"
+fi
+owner="$(stat -c %u "$stack_dir/data/photo-triage.db" 2>/dev/null || true)"
+if [[ "$owner" == "$stack_uid" ]] && [[ "$(stack exec -T worker id -u)" == "$stack_uid" ]]; then
+  ok "compose: runs as APP_UID ($stack_uid), which owns what it writes"
+else
+  fail "compose: not running as APP_UID $stack_uid (the database belongs to UID ${owner:-?})"
 fi
 stack_log="$(stack logs --no-color app worker 2>&1 || true)"
 if [[ "$stack_log" == *"TRASH_DIR=/photos/.photo-triage-trash "* && "$stack_log" != *"different filesystem"* ]]; then
