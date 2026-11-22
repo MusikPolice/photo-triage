@@ -191,15 +191,9 @@ Worker dev affordances, read from `.env` or the environment like the settings in
 
 ### Trying the map on a phone
 
-`just map-stack` serves a 100k-item map on port 8100 of WSL. Windows forwards `localhost:8100` to WSL by itself, so a browser on the dev machine can open `http://localhost:8100/?fps` at once. A phone on the LAN reaches WSL only through Windows, which needs a port forward and a firewall opening, in an admin PowerShell:
+`just map-stack` serves a 100k-item map on port 8100 of WSL. Windows forwards `localhost:8100` to WSL by itself, so a browser on the dev machine can open `http://localhost:8100/?fps` at once. A phone on the LAN reaches WSL only through Windows, which needs a port forward to WSL's address and a firewall opening. Once the stack is up, `just map-stack` prints both commands with the address filled in; run them in a PowerShell opened with "Run as administrator". (Working the address out in PowerShell with `wsl hostname -I` isn't reliable: it runs in the default distro, which Docker Desktop can make a BusyBox one.) The firewall rule covers networks Windows calls Private; if `Get-NetConnectionProfile` says the Wi-Fi is Public, set it to Private in Windows' network settings.
 
-```powershell
-$wsl = (wsl hostname -I).Split(" ")[0]
-netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=8100 connectaddress=$wsl connectport=8100
-New-NetFirewallRule -DisplayName "photo-triage map-stack" -Direction Inbound -Protocol TCP -LocalPort 8100 -Action Allow -Profile Private
-```
-
-The phone then opens `http://<the PC's LAN address>:8100/?fps` (`ipconfig` shows the address). WSL's address changes when it restarts, so run the first two lines again after one. Remove both afterwards:
+The phone then opens `http://<the PC's LAN address>:8100/?fps` (`ipconfig` shows the address). WSL's address can change when it restarts, so run the portproxy line again after one. Remove both afterwards:
 
 ```powershell
 netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=8100

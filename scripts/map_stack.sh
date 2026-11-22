@@ -54,8 +54,14 @@ compose run --rm --no-deps --volume "$root/scripts/seed_map.py:/seed_map.py:ro" 
 compose up --detach --wait --no-deps app
 
 echo "Map stack at http://localhost:$port (add ?fps for a frame-rate readout)" >&2
-for address in $(hostname -I 2>/dev/null); do
-  echo "  on the LAN, once forwarded: http://$address:$port" >&2
-done
+wsl_address="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [[ -n "${WSL_DISTRO_NAME:-}" && -n "$wsl_address" ]]; then
+  cat >&2 <<EOF
+For a phone on the LAN, in an admin PowerShell (dev-environment §5):
+  netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=$port connectaddress=$wsl_address connectport=$port
+  New-NetFirewallRule -DisplayName "photo-triage map-stack" -Direction Inbound -Protocol TCP -LocalPort $port -Action Allow -Profile Private
+then open http://<the PC's LAN address, from ipconfig>:$port/?fps
+EOF
+fi
 echo "Ctrl-C to stop" >&2
 compose logs --follow --no-log-prefix app >/dev/null 2>&1 || true
