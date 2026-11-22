@@ -196,6 +196,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 |---|---|
 | `just dev` | Migrate, then the API, worker and Vite dev server (hot reload) against the sample library, and Ollama in Docker, together; Ctrl-C stops them all |
 | `just stack` | The production Docker Compose stack (migrate, app, worker, Ollama), on an image of your checkout, against a test folder `.stack/`, whose library starts as a copy of the tier-1 fixtures. `just stack exec worker python -m photo_triage.worker scan` scans it, and `… worker noop 50` queues jobs to watch |
+| `just map-stack` | The app on a synthetic 100k-item library, for trying the map's speed on a phone (dev-environment §5, "Trying the map on a phone"); add `?fps` to the URL for a frame-rate readout |
 | `just test` | Unit, integration, and safety tests (fake ML models; fast). `just test PATH…` or `-k EXPR` runs a subset |
 | `just e2e` | End-to-end tests: Playwright against the Compose stack on the tier-1 fixtures (needs Docker) |
 | `just test-models` | Tests that run the real CLIP/InsightFace models (slow; cached weights) |

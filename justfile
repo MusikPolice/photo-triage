@@ -168,6 +168,10 @@ image tag="photo-triage:dev":
 stack *args:
     scripts/stack.sh "$@"
 
+# The app on a synthetic library of N items (default 100k), on the LAN at MAP_STACK_PORT (8100), for trying the map on phones; Ctrl-C stops it
+map-stack count="100000":
+    scripts/map_stack.sh {{count}}
+
 # End-to-end tests: Playwright at desktop and phone sizes against the Compose stack,
 # on a fresh copy of the tier-1 fixtures with the fake embedder (scripts/e2e.sh).
 # Arguments go to Playwright, e.g. `just e2e --project phone`

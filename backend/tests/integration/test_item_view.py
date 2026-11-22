@@ -314,7 +314,11 @@ async def test_a_disconnect_mid_conversion_stops_ffmpeg(
 
     async def send(message: dict[str, Any]) -> None:
         if gone.is_set():
-            raise OSError("The browser has gone")
+            # As uvicorn does: from 2.4 a send fails once the browser has gone; before
+            # it, the send is dropped, so a chunk that races the disconnect is harmless.
+            if asgi_spec == "2.4":
+                raise OSError("The browser has gone")
+            return
         if message["type"] == "http.response.body" and message.get("body"):
             streaming.set()
 
