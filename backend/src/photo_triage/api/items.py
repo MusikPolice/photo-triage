@@ -17,12 +17,13 @@ from typing import Annotated, Any
 
 import anyio
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from starlette.responses import FileResponse, Response, StreamingResponse
 from starlette.types import Receive, Scope, Send
 
-from photo_triage.api.deps import DbSession, get_settings
+from photo_triage.api.deps import DbSession, get_settings, get_similarity
+from photo_triage.api.similarity import Similarity
 from photo_triage.db.models import Item, ItemStatus, MediaType, Tag, TagSource
 from photo_triage.pipeline import viewing
 from photo_triage.pipeline.thumbnails import MAP_SIZE, Thumbnail, thumbnail_path
@@ -114,6 +115,58 @@ def details(item_id: int, session: DbSession) -> ItemDetails:
         file_size_bytes=item.file_size_bytes,
         damaged=item.damaged,
         keywords=list(keywords),
+    )
+
+
+class Neighbour(BaseModel):
+    id: int
+    media_type: MediaType
+    thumbnail_url: str
+    """Its large thumbnail (`THUMBNAIL_SIZE`)."""
+
+
+class Neighbours(BaseModel):
+    embedded: bool
+    """False until the item's CLIP embedding is made: it has no neighbours yet."""
+    items: list[Neighbour]
+    """Most similar first."""
+
+
+MAX_NEIGHBOURS = 50
+
+
+@router.get("/items/{item_id}/neighbours", responses={404: {"description": "No such item"}})
+def neighbours(
+    item_id: int,
+    session: DbSession,
+    settings: Annotated[Settings, Depends(get_settings)],
+    similarity: Annotated[Similarity, Depends(get_similarity)],
+    limit: Annotated[int, Query(ge=1, le=MAX_NEIGHBOURS)] = 12,
+) -> Neighbours:
+    """The items most like this one by CLIP (cosine similarity), for the lightbox's
+    strip: a walk through the library (plan §6.4)."""
+    _active(session, item_id)
+    found = similarity.neighbours(session, item_id, limit)
+    if found is None:
+        return Neighbours(embedded=False, items=[])
+    media = {
+        item_id: media_type
+        for item_id, media_type in session.execute(
+            sa.select(Item.id, Item.media_type).where(Item.id.in_(found))
+        )
+    }
+    size = settings.thumbnail_size
+    return Neighbours(
+        embedded=True,
+        items=[
+            Neighbour(
+                id=i,
+                media_type=media[i],
+                thumbnail_url=f"/api/items/{i}/thumbnail?size={size}",
+            )
+            for i in found
+            if i in media
+        ],
     )
 
 
