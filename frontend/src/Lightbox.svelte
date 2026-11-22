@@ -1,6 +1,7 @@
 <script lang="ts">
   /* An item at full size over the map, with what's known about it (plan §6.4
-   * "Lightbox"). A modal dialog: Escape, the close button or the back button
+   * "Lightbox"), and a strip of the items most like it: opening one walks through
+   * the library. A modal dialog: Escape, the close button or the back button
    * closes it. */
   import {
     fileName,
@@ -9,28 +10,44 @@
     formatDuration,
     formatTakenAt,
     getItem,
+    getNeighbours,
     viewUrl,
     type ItemDetails,
+    type Neighbours,
   } from "./lib/item";
 
   interface Props {
     itemId: number;
+    /** Opens another item in the lightbox: a similar one, from the strip. */
+    onOpen: (itemId: number) => void;
     onClose: () => void;
   }
 
-  const { itemId, onClose }: Props = $props();
+  const { itemId, onOpen, onClose }: Props = $props();
 
   let dialog = $state<HTMLDialogElement | null>(null);
   let item = $state.raw<ItemDetails | null>(null);
   let failure = $state<string | null>(null);
   let mediaFailed = $state(false);
+  let neighbours = $state.raw<Neighbours | null>(null);
+  let neighboursFailed = $state(false);
 
   $effect(() => {
     const id = itemId;
     item = null;
     failure = null;
     mediaFailed = false;
+    neighbours = null;
+    neighboursFailed = false;
     let current = true;
+    getNeighbours(id).then(
+      (loaded) => {
+        if (current) neighbours = loaded;
+      },
+      () => {
+        if (current) neighboursFailed = true;
+      },
+    );
     getItem(id).then(
       (loaded) => {
         if (current) item = loaded;
@@ -108,6 +125,34 @@
       <h2>
         {item.taken_at_local === null ? "Unknown date" : formatTakenAt(item.taken_at_local)}
       </h2>
+      <section class="similar" aria-label="Similar">
+        <h3>Similar</h3>
+        {#if neighboursFailed}
+          <p class="note">Similar items couldn't be loaded.</p>
+        {:else if neighbours === null}
+          <p class="note">Loading…</p>
+        {:else if !neighbours.embedded}
+          <p class="note">Not compared with the others yet.</p>
+        {:else if neighbours.items.length === 0}
+          <p class="note">Nothing else to compare it with yet.</p>
+        {:else}
+          <ul>
+            {#each neighbours.items as neighbour, i (neighbour.id)}
+              <li>
+                <button
+                  type="button"
+                  aria-label={`Similar ${neighbour.media_type} ${String(i + 1)}`}
+                  onclick={() => {
+                    onOpen(neighbour.id);
+                  }}
+                >
+                  <img src={neighbour.thumbnail_url} alt="" loading="lazy" />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
       <dl>
         <dt>File</dt>
         <dd class="path">{fileName(item.path)}</dd>
@@ -270,6 +315,51 @@
     list-style: none;
   }
 
+  .similar {
+    margin-bottom: 1.25rem;
+  }
+
+  .similar h3 {
+    margin-top: 0;
+  }
+
+  .similar .note {
+    margin: 0;
+  }
+
+  .similar ul {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.375rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .similar button {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    padding: 0;
+    overflow: hidden;
+    background: var(--border);
+    border: 0;
+    border-radius: 0.375rem;
+    cursor: pointer;
+  }
+
+  .similar button:focus-visible {
+    outline: 2px solid var(--fg);
+    outline-offset: 2px;
+  }
+
+  .similar img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
   .keywords li {
     padding: 0.125rem 0.625rem;
     font-size: 0.8125rem;
@@ -282,6 +372,14 @@
     .lightbox[open] {
       grid-template-columns: minmax(0, 1fr);
       grid-template-rows: minmax(0, 1fr) auto;
+    }
+
+    /* One row, scrolled sideways, so the strip doesn't push the details away. */
+    .similar ul {
+      grid-template-columns: none;
+      grid-auto-columns: 4.5rem;
+      grid-auto-flow: column;
+      overflow-x: auto;
     }
 
     .details {

@@ -75,6 +75,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/items/{item_id}/neighbours": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Neighbours
+     * @description The items most like this one by CLIP (cosine similarity), for the lightbox's
+     *     strip: a walk through the library (plan §6.4).
+     */
+    get: operations["neighbours_api_items__item_id__neighbours_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/items/{item_id}/thumbnail": {
     parameters: {
       query?: never;
@@ -341,6 +362,21 @@ export interface components {
      * @enum {string}
      */
     MediaType: "photo" | "video";
+    /** Neighbour */
+    Neighbour: {
+      /** Id */
+      id: number;
+      media_type: components["schemas"]["MediaType"];
+      /** Thumbnail Url */
+      thumbnail_url: string;
+    };
+    /** Neighbours */
+    Neighbours: {
+      /** Embedded */
+      embedded: boolean;
+      /** Items */
+      items: components["schemas"]["Neighbour"][];
+    };
     /**
      * Stage
      * @enum {string}
@@ -517,6 +553,46 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ItemDetails"];
+        };
+      };
+      /** @description No such item */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  neighbours_api_items__item_id__neighbours_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        item_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Neighbours"];
         };
       };
       /** @description No such item */

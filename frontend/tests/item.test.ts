@@ -7,7 +7,9 @@ import {
   formatDuration,
   formatTakenAt,
   getItem,
+  getNeighbours,
   itemFromSearch,
+  NEIGHBOURS_SHOWN,
   viewUrl,
   withItem,
 } from "../src/lib/item";
@@ -30,6 +32,19 @@ describe("getItem", () => {
 
   it("shows the item from its view URL", () => {
     expect(viewUrl(7)).toBe("/api/items/7/view");
+  });
+});
+
+describe("getNeighbours", () => {
+  it("asks for the strip's worth of similar items", async () => {
+    const neighbours = { embedded: true, items: [{ id: 8, media_type: "photo" }] };
+    const fetchFn = vi.fn<typeof fetch>(() => Promise.resolve(Response.json(neighbours)));
+
+    expect(await getNeighbours(7, undefined, fetchFn)).toEqual(neighbours);
+    expect(fetchFn).toHaveBeenCalledWith(
+      `/api/items/7/neighbours?limit=${String(NEIGHBOURS_SHOWN)}`,
+      expect.anything(),
+    );
   });
 });
 

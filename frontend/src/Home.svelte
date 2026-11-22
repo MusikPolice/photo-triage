@@ -20,6 +20,7 @@
   <Map
     layoutVersion={feed.activity?.layout_version}
     atlasVersion={feed.activity?.atlas_version}
+    focusItem={openItem}
     {onOpen}
   />
 {:catch error}
@@ -29,7 +30,7 @@
 {/await}
 
 {#if openItem !== null}
-  <Lightbox itemId={openItem} {onClose} />
+  <Lightbox itemId={openItem} {onOpen} {onClose} />
 {/if}
 
 <style>

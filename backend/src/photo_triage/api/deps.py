@@ -7,6 +7,7 @@ from fastapi import Depends, Request
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from photo_triage.api.similarity import Similarity
 from photo_triage.settings import Settings
 from photo_triage.worker.clock import Clock
 
@@ -26,6 +27,11 @@ def get_session(engine: Annotated[Engine, Depends(get_engine)]) -> Iterator[Sess
     `session.begin()`, so the change is committed before they respond."""
     with Session(engine) as session:
         yield session
+
+
+def get_similarity(request: Request) -> Similarity:
+    """The CLIP vectors, for similarity (`photo_triage.api.similarity`)."""
+    return cast(Similarity, request.app.state.similarity)
 
 
 def get_clock(request: Request) -> Clock:
