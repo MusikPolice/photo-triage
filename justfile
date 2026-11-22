@@ -1,4 +1,4 @@
-# Task runner (docs/dev-environment.md §5). `just` lists recipes.
+# Task runner (docs/dev-reference.md §2). `just` lists recipes.
 
 # List recipes
 default:

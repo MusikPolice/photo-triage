@@ -366,7 +366,7 @@
     };
   });
 
-  // A hook for the end-to-end tests (dev-environment §6), which check the map's
+  // A hook for the end-to-end tests (dev-reference §3), which check the map's
   // state rather than its pixels.
   $effect(() => {
     const hook = {

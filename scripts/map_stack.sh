@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `just map-stack` (dev-environment §5): the production image's app, serving a
+# `just map-stack` (dev-reference §2): the production image's app, serving a
 # synthetic library of N items (default 100,000), for trying the map's speed on
 # phones and desktops (#119, plan §6.4).
 #
@@ -11,7 +11,7 @@
 # app alone, with no worker, since a scan of the empty library would mark every
 # item missing. The app listens on every interface, on MAP_STACK_PORT (default
 # 8100), so a phone on the LAN can open it; from WSL that needs a port forward
-# (dev-environment §5, "Trying the map on a phone"). Add `?fps` to the URL for a
+# (dev-reference §2, "Trying the map on a phone"). Add `?fps` to the URL for a
 # frame-rate readout. Ctrl-C stops it and removes the scratch folder. The real
 # library, DATA_DIR and `.stack/` are never touched.
 set -euo pipefail
@@ -57,7 +57,7 @@ echo "Map stack at http://localhost:$port (add ?fps for a frame-rate readout)" >
 wsl_address="$(hostname -I 2>/dev/null | awk '{print $1}')"
 if [[ -n "${WSL_DISTRO_NAME:-}" && -n "$wsl_address" ]]; then
   cat >&2 <<EOF
-For a phone on the LAN, in an admin PowerShell (dev-environment §5):
+For a phone on the LAN, in an admin PowerShell (dev-reference §2):
   netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=$port connectaddress=$wsl_address connectport=$port
   New-NetFirewallRule -DisplayName "photo-triage map-stack" -Direction Inbound -Protocol TCP -LocalPort $port -Action Allow -Profile Private
 then open http://<the PC's LAN address, from ipconfig>:$port/?fps

@@ -127,7 +127,7 @@ class Settings(BaseSettings):
     video_sample_frames: Annotated[int, Field(ge=1)] = 5
     """Frames sampled from each video, which the stages after it read (plan §6.1)."""
 
-    # Development only (dev-environment §5), so not in plan §9 or `.env.example`.
+    # Development only (dev-reference §2), so not in plan §9 or `.env.example`.
 
     worker_noop_stage: bool = False
     """Enables the `noop` stage, for exercising the worker by hand."""
@@ -244,7 +244,7 @@ class SettingsError(Exception):
 
 
 ENV_FILE = "ENV_FILE"
-"""Names the file read in place of `.env`. Development only (dev-environment §5):
+"""Names the file read in place of `.env`. Development only (dev-reference §2):
 the scratch stack sets it to `/dev/null` so the developer's `.env` can't reach it."""
 
 

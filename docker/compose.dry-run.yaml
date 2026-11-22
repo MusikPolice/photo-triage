@@ -1,4 +1,4 @@
-# `just dry-run-full` (dev-environment §5): compose.yaml against the real library,
+# `just dry-run-full` (dev-reference §2): compose.yaml against the real library,
 # with nothing able to write to it. Layered on compose.yaml by
 # scripts/dry_run_full.sh, which refuses to start unless the host's library mount
 # is read-only too.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `just e2e` (dev-environment §6): Playwright against the production Compose stack.
+# `just e2e` (dev-reference §3): Playwright against the production Compose stack.
 #
 #   scripts/e2e.sh [PLAYWRIGHT_ARGS...]
 #

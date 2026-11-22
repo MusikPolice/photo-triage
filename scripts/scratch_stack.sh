@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A throwaway copy of the app for looking at pages (`just preview`, `just shot`;
-# dev-environment §5): `scripts/dev.sh` on free ports, against empty photo,
+# dev-reference §2): `scripts/dev.sh` on free ports, against empty photo,
 # trash and data directories in a temporary folder.
 #   scripts/scratch_stack.sh [--state FILE]
 # It reads no `.env` (ENV_FILE=/dev/null), so it never sees the developer's

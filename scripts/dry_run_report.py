@@ -1,4 +1,4 @@
-"""The numbers for `just dry-run-full report` (dev-environment §5).
+"""The numbers for `just dry-run-full report` (dev-reference §2).
 
 Runs inside the dry run's worker container, on its database, with the standard
 library alone: `scripts/dry_run_full.sh report` pipes it to `python -`. Prints

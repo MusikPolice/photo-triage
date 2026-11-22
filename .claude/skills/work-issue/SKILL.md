@@ -35,10 +35,13 @@ Read every spec section the issue cites in full, and the safety invariants in
 - Stay within the issue. If you find needed work outside it, note it for the PR
   under "Follow-ups" and don't do it. If the spec and the issue disagree, or the
   spec is silent on something that matters, stop and ask.
-- Write tests alongside the code at the levels in dev-environment §6. Each
-  acceptance criterion should map to something that checks it.
+- Write tests alongside the code at the levels in dev-environment §6 (what each
+  layer covers is in dev-reference §3). Each acceptance criterion should map to
+  something that checks it.
 - Update the docs the change affects, as `CLAUDE.md` describes under "Keeping docs
-  current". Propose any edit to `docs/plan.md` to the user and don't make it
+  current". A new recipe, test or switch goes in `docs/dev-reference.md`, which
+  merges on green; a changed decision goes in `docs/dev-environment.md`, which
+  the user reviews. Propose any edit to `docs/plan.md` to the user and don't make it
   yourself.
 - Commit in logical steps with clear messages. Run `just check` before
   finishing. `finish` runs it again and refuses to continue if it fails.

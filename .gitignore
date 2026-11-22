@@ -13,13 +13,13 @@ htmlcov/
 node_modules/
 /frontend/dist/
 
-# Local config and app state (docs/dev-environment.md §5)
+# Local config and app state (docs/dev-reference.md §2)
 .env
 /data/
 /trash/
 /.stack/
 
-# `just shot` screenshots and `just preview`'s state (docs/dev-environment.md §5)
+# `just shot` screenshots and `just preview`'s state (docs/dev-reference.md §2)
 /.screenshots/
 
 # Issue and PR drafts written by the plan-phase and work-issue skills

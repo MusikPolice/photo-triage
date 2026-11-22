@@ -3,8 +3,10 @@
 A self-hosted photo library explorer and triage tool.
 
 - `docs/plan.md` is the spec. §11 lists the phases of work.
-- `docs/dev-environment.md` covers tooling, testing strategy (§6), safety
-  invariants (§7) and checks (§8).
+- `docs/dev-environment.md` records the decisions: tooling and pins, testing
+  strategy (§6), safety invariants (§7), checks (§8) and the workflow (§9).
+- `docs/dev-reference.md` describes how things currently are: the layout,
+  every recipe and dev switch (§2), the tests at each layer (§3).
 
 ## Tracking work
 
@@ -37,26 +39,29 @@ rather than calling `gh` by hand, so issues, branches and PRs stay consistent.
 Update the docs in the same PR as the change, without being asked. Docs that
 lag behind the code mislead the next session as well as the user.
 
-- **`docs/dev-environment.md`, `README.md` and `CLAUDE.md`** describe how the
+- **`docs/dev-reference.md`, `README.md` and `CLAUDE.md`** describe how the
   project is built, run, tested and tracked. When a change affects any of
-  that, update them. That includes new tools, recipes, checks, CI jobs, scripts,
-  repo settings and workflow steps. Mark finished items in
-  dev-environment "Next steps" as done, with the date.
+  that, update them. A new recipe, script, test, e2e spec, test-hook property,
+  dev switch or folder is a reference update: make it without asking.
+  `dev-reference.md` isn't a sensitive path, so a PR that only touches it
+  merges on green CI. Mark finished items in its "Next steps" as done, with
+  the date.
 - **`docs/plan.md` is the spec, and changing it is a decision.** If the
   implementation needs to diverge from it, or the work answers a question in
   plan §12, propose the edit to the user and don't change the spec quietly.
   Once they agree, update the spec in the same PR.
-- `docs/dev-environment.md` also records decisions: where a tool comes from,
-  what's pinned, how CI and the workflow are designed. Changing one of those is
-  the user's call, like a spec change, so ask first. Describing how things
-  currently work (a new recipe, a check that landed) just needs updating.
+- **`docs/dev-environment.md` records decisions:** where a tool comes from,
+  what's pinned, the test strategy, the safety invariants, how CI and the
+  workflow are designed. A change to how something is chosen, pinned, checked,
+  protected or merged goes there, and it's the user's call, like a spec
+  change, so ask first. Don't put a decision in the reference to dodge review.
 - In a PR, list doc updates in the summary so the reviewer sees them.
 
 ## Debugging
 
 - Logs are in `DATA_DIR/logs/<process>.log` (and stderr). `LOG_LEVEL=DEBUG` adds a
-  line per job and per request, and the SQL. See dev-environment §5 "Logging".
-- The worker has dev-only switches, listed in dev-environment §5 and not in plan §9:
+  line per job and per request, and the SQL. See dev-reference §2 "Logging".
+- The worker has dev-only switches, listed in dev-reference §2 and not in plan §9:
   `just worker --once` runs every ready job and exits, `FAKE_NOW` sets its clock,
   and `WORKER_NOOP_STAGE=true` with `just worker noop N` queues test jobs.
 

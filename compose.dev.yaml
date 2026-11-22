@@ -1,4 +1,4 @@
-# Ollama alone, for `just dev` (dev-environment §5), which runs the API, the
+# Ollama alone, for `just dev` (dev-reference §2), which runs the API, the
 # worker and the Vite dev server natively. The service compose.yaml runs,
 # from docker/ollama.yaml, on localhost:11434.
 

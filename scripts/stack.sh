@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `just stack` (dev-environment §5): the production Compose stack (compose.yaml)
+# `just stack` (dev-reference §2): the production Compose stack (compose.yaml)
 # with an image built from this checkout, against a test folder, `.stack/`.
 #   scripts/stack.sh                    build the image, then `docker compose up`
 #   scripts/stack.sh COMPOSE_ARGS...    any other Compose command on the stack, e.g.

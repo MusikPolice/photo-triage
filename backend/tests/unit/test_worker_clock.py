@@ -1,4 +1,4 @@
-"""The worker's clocks (dev-environment §5: `FAKE_NOW`)."""
+"""The worker's clocks (dev-reference §2: `FAKE_NOW`)."""
 
 import datetime as dt
 

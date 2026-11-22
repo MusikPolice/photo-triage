@@ -1,4 +1,4 @@
-/** `just shot` (dev-environment §5): screenshots of a page at desktop and phone
+/** `just shot` (dev-reference §2): screenshots of a page at desktop and phone
  * widths, for looking at a layout without a browser at hand. Run with Node, which
  * strips the types. See `USAGE` in shot-options.ts. */
 
