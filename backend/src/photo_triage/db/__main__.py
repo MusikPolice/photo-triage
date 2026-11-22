@@ -8,7 +8,7 @@ from collections.abc import Sequence
 
 from photo_triage import logs
 from photo_triage.db.migrate import SchemaAheadError, migrate
-from photo_triage.settings import SettingsError, load_settings
+from photo_triage.settings import SettingsError, data_dir_error, load_settings
 
 # Named, since `__name__` is "__main__" when run with `python -m`.
 logger = logging.getLogger("photo_triage.db")
@@ -26,6 +26,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = load_settings()
     except SettingsError as e:
         print(e, file=sys.stderr)
+        return 2
+    if (error := data_dir_error(settings)) is not None:
+        print(error, file=sys.stderr)
         return 2
 
     logs.configure(settings, "migrate")

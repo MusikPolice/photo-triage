@@ -195,6 +195,41 @@ def trash_filesystem_warning(settings: Settings) -> str | None:
     )
 
 
+def data_dir_error(settings: Settings) -> str | None:
+    """Why this process can't write DATA_DIR, if it can't: every process writes its
+    log and the database there, so startup stops with this, in place of a traceback
+    from the first write."""
+    return _unwritable(settings.data_dir, "DATA_DIR")
+
+
+def photo_dir_warning(settings: Settings) -> str | None:
+    """Why trashing would fail, if it would: this process can't write PHOTO_DIR.
+    Startup logs this and carries on, since a dev setup may mount the library
+    read-only (dev-environment §1). Nothing for a library that isn't there: that's
+    not a question of who can write it."""
+    if not settings.photo_dir.is_dir():
+        return None
+    problem = _unwritable(settings.photo_dir, "PHOTO_DIR")
+    return None if problem is None else f"{problem} Trashing a file will fail."
+
+
+def _unwritable(path: Path, name: str) -> str | None:
+    """Why this process can't create files in `path` (or in its nearest existing
+    parent, if it doesn't exist yet), naming whose it is and who's asking."""
+    existing = path.resolve()
+    while not existing.exists():
+        existing = existing.parent
+    if os.access(existing, os.W_OK | os.X_OK):
+        return None
+    owner = existing.stat()
+    return (
+        f"{name} ({path}) isn't writable by this process, UID {os.getuid()} "
+        f"(GID {os.getgid()}). {existing} belongs to UID {owner.st_uid} "
+        f"(GID {owner.st_gid}). In the Compose stack, set APP_UID and APP_GID in .env "
+        "to the folder's owner (`ls -ln` shows the numbers)."
+    )
+
+
 def _device(path: Path) -> int:
     """The filesystem `path` is on, or would be created on: that of its nearest
     parent that exists."""

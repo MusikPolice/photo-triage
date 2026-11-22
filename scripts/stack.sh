@@ -33,9 +33,9 @@ if [[ ! -f "$stack/app.env" ]]; then
 WORKER_NOOP_STAGE=true
 EOF
 fi
-if [[ "$(id -u)" != 1000 ]]; then
-  echo "Note: the containers run as UID 1000, and you're UID $(id -u), so they may not be able to write to $stack" >&2
-fi
+# As you, so the containers can write .stack/ and you can remove what they wrote.
+APP_UID="$(id -u)" APP_GID="$(id -g)"
+export APP_UID APP_GID
 
 export COMPOSE_PROJECT_NAME=photo-triage-stack
 export PHOTO_TRIAGE_IMAGE="$image"

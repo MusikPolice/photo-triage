@@ -225,17 +225,20 @@ The server runs `compose.yaml`: a one-shot migrate service, then the app and the
 
 ```bash
 docker build $(scripts/image_pins.sh --build-arg) -f docker/Dockerfile -t photo-triage:dev .
-sudo mkdir -p /srv/photo-triage/data && sudo chown 1000:1000 /srv/photo-triage/data
+ls -ln /mnt                    # the library's owner: its UID and GID, as numbers
+sudo mkdir -p /srv/photo-triage/data && sudo chown 1026:100 /srv/photo-triage/data
 cat > .env <<'EOF'
 PHOTO_DIR=/mnt/pictures
 DATA_DIR=/srv/photo-triage/data
 MODELS_DIR=/srv/photo-triage/models
 APP_PORT=8000
+APP_UID=1026
+APP_GID=100
 EOF
 docker compose up -d
 ```
 
-The UI is then on port `APP_PORT`. `PHOTO_DIR` must be writable by UID 1000, the image's user, and the trash is a hidden folder inside it. `DATA_DIR` holds the database, its backups and the logs, so it's the folder to back up (its `derived/` folder can be skipped). `MODELS_DIR` holds the model weights: copy them from the dev machine with `just models DEST` there, then to `/srv/photo-triage/models`. To upgrade, build the new image and run `docker compose up -d` again: the migrate service backs the database up before migrating it. See dev-environment §5, "The Compose stack", for the other settings, the resource caps and the logs.
+The UI is then on port `APP_PORT`. The stack runs as `APP_UID`:`APP_GID`, which default to 1000, the image's user. Set them to the library's owner (1026 and 100 above stand in for a Synology account's), so the stack can write `PHOTO_DIR` and `DATA_DIR` without changing who owns your photos. The trash is a hidden folder inside `PHOTO_DIR`. If `DATA_DIR` isn't writable, every container stops at startup saying which UID it ran as and whose the folder is. `DATA_DIR` holds the database, its backups and the logs, so it's the folder to back up (its `derived/` folder can be skipped). `MODELS_DIR` holds the model weights: copy them from the dev machine with `just models DEST` there, then to `/srv/photo-triage/models`. To upgrade, build the new image and run `docker compose up -d` again: the migrate service backs the database up before migrating it. See dev-environment §5, "The Compose stack", for the other settings, the resource caps and the logs.
 
 ## Safety rules for contributors
 
