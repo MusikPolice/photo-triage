@@ -186,7 +186,7 @@ Tags are written **flat, mixed with existing keywords** (§6.10), and accumulate
 
 ### 6.7 Duplicate Detection
 
-Uses CLIP embeddings only. Pairs with cosine similarity ≥ `DUPLICATE_SIMILARITY_THRESHOLD` (default 0.95, to be calibrated) are linked; connected components (union-find) of size ≥ 2 become duplicate groups. Computed blockwise via matrix multiply (100k² similarity in chunks) — seconds to minutes, no LSH needed.
+Uses CLIP embeddings only. Pairs with cosine similarity ≥ `DUPLICATE_SIMILARITY_THRESHOLD` (default 0.98, calibrated on the real library in Phase 4, #157) are linked; connected components (union-find) of size ≥ 2 become duplicate groups. Computed blockwise via matrix multiply (100k² similarity in chunks) — seconds to minutes, no LSH needed.
 
 Within a group, items are ranked by quality score to recommend the best keeper.
 
@@ -403,7 +403,7 @@ Environment variables, documented in `.env.example`:
 | `MODELS_DIR` | `~/.cache/photo-triage/models` | Model weights: CLIP's ONNX export, InsightFace's and the aesthetic predictor's (in Docker: `/models`, bind-mounted read-only from a host folder) |
 | `QUALITY_THRESHOLD` | `0.35` | Composite quality score below which items are flagged |
 | `JUNK_THRESHOLD` | `0.7` | Junk probability above which items are flagged |
-| `DUPLICATE_SIMILARITY_THRESHOLD` | `0.95` | CLIP cosine similarity for duplicate linking |
+| `DUPLICATE_SIMILARITY_THRESHOLD` | `0.98` | CLIP cosine similarity for duplicate linking |
 | `FACE_MIN_SIZE` | `40` | Minimum face size in pixels |
 | `FACE_MATCH_THRESHOLD` | *(tbd)* | Recognition distance threshold |
 | `VIDEO_SAMPLE_FRAMES` | `5` | Frames sampled per video |
@@ -460,9 +460,10 @@ Ollama service, model evaluation (moondream vs. alternatives) on real photos for
 ## 12. Open Questions
 
 - **Tagging model:** moondream vs. Qwen2.5-VL 3B vs. Gemma 3 4B — needs an empirical bake-off on real family photos for caption quality vs. items/min.
-- **Threshold calibration:** duplicate similarity (0.95), quality/junk thresholds, face match distance, UMAP parameters (`n_neighbors`, `min_dist`), the search floor (0.24, CLIP text-to-picture; #116) — all need tuning against the real library.
+- **Threshold calibration:** quality/junk thresholds, face match distance, UMAP parameters (`n_neighbors`, `min_dist`), the search floor (0.24, CLIP text-to-picture; #116) — all need tuning against the real library. Duplicate similarity is answered below.
 - **Video aggregation details:** whether 5 frames is enough, how long videos should be sampled, and whether per-frame quality should flag only the worst segment.
 - **Layout churn:** "always re-fit" is the chosen behavior; if reshuffling after each scan proves disorienting, fall back to fitting once and placing new items with `umap.transform()`.
 - ~~**exiftool coverage:** confirm MWG regions and custom XMP namespaces write cleanly to HEIC and MP4/MOV.~~ Answered in Phase 2: they do. HEIC takes no IPTC and QuickTime keywords are one string, so the mapping in §6.10 differs by container.
 - ~~**Vector storage:** plain SQLite blobs + numpy vs. `sqlite-vec` — decide during Phase 2 based on memory footprint and query latency.~~ Answered in Phase 2 (#55): blobs + numpy. On 100k vectors it holds 211 MB in the API against sqlite-vec's 6 MB, but answers a top-100 query in 7 ms (sqlite-vec: 98 ms) and finds every pair at ≥ 0.95 in 45 s (sqlite-vec, one k-nearest query per vector: about 2.4 h). No native extension to ship. `tests/bench/test_vector_storage_bench.py` reproduces it.
+- ~~**Duplicate similarity:** the 0.95 default was a guess.~~ Answered in Phase 4 (#157): 0.98. Over the real library's 32,983 CLIP vectors, pairs at 0.99 and above are identical or near-identical copies, 0.97 to 0.99 are mostly burst shots of one moment, and 0.95 to 0.97 mostly the same subject in different shots. At 0.98, 2,317 groups cover 5,450 items, the largest 42; at 0.95 it was 3,897 groups covering 13,709 items (41% of the library), the largest 692, since groups chain through similar pairs.
 - ~~**Mobile map performance:** whether 100k points + atlases are smooth on the household's actual phones; fallback is dots-only on mobile.~~ Answered in Phase 3 (#119): thumbnails stay on phones. With 100k synthetic items and 24 atlas sheets (`just map-stack`), desktop Chrome holds 60 fps and the household's phone pans and zooms smoothly. The points download is 1.7 MB and each sheet about 5 MB.

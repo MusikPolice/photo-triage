@@ -119,7 +119,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.tz == ZoneInfo("UTC")
     assert settings.trash_retention_days == 30
     assert settings.video_sample_frames == 5
-    assert settings.duplicate_similarity_threshold == 0.95
+    assert settings.duplicate_similarity_threshold == 0.98
     assert settings.exif_writes_enabled is False
     assert settings.thumbnail_size == 400
     assert settings.models_dir == Path.home() / ".cache/photo-triage/models"
