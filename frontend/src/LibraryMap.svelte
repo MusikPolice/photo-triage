@@ -3,7 +3,8 @@
    * and zoomed in, as its thumbnail from the atlas sheets. It pans and zooms with the
    * mouse, the trackpad and touch, and reloads its points and atlas manifest when the
    * activity feed announces a new layout or set of sheets. A search highlights its
-   * matches in place: they keep their colour, with a ring, and the rest dim. */
+   * matches in place: they keep their colour, with a ring, and the rest dim. A
+   * narrowed date range dims what's outside it, stacking with a search. */
   import {
     Deck,
     LinearInterpolator,
@@ -46,6 +47,15 @@
     type Rgb,
     type Theme,
   } from "./lib/map-colours";
+  import DateRangeSlider from "./DateRangeSlider.svelte";
+  import {
+    dateMask,
+    formatMonth,
+    monthSpan,
+    narrowed,
+    shown as shownBy,
+    type MonthRange,
+  } from "./lib/date-filter";
   import { FrameMeter, wantsFrameRate, type FrameRate } from "./lib/frame-rate";
   import {
     highlight,
@@ -131,9 +141,31 @@
   /** Counts searches, so a slow answer to an earlier one is ignored. */
   let searchSeq = 0;
 
-  /** The matches among the points on the map, or null with no search. */
-  const highlighted = $derived(
+  /** The search's matches among the points on the map, or null with no search. */
+  const searchMatches = $derived(
     points !== null && results !== null ? highlight(points, results) : null,
+  );
+
+  /** The months the library's capture dates span, or null if none has a date. */
+  const span = $derived(points === null ? null : monthSpan(points.days));
+  /** The date range chosen, or null for every date. */
+  let dateRange = $state.raw<MonthRange | null>(null);
+  const datesNarrowed = $derived(narrowed(dateRange, span));
+
+  function chooseDates(range: MonthRange): void {
+    dateRange = range;
+  }
+  /** The range the slider shows: the chosen one within the span. */
+  const sliderRange = $derived.by((): MonthRange | null => {
+    if (span === null) return null;
+    if (dateRange === null) return span;
+    const from = Math.min(Math.max(dateRange.from, span.from), span.to);
+    return { from, to: Math.min(Math.max(dateRange.to, from), span.to) };
+  });
+
+  /** What's highlighted, from the search and the date range, or null with neither. */
+  const highlighted = $derived(
+    points === null ? null : shownBy(points, searchMatches, dateMask(points, sliderRange, span)),
   );
 
   async function runSearch(event: SubmitEvent): Promise<void> {
@@ -173,7 +205,7 @@
   }
 
   function flyToBest(): void {
-    const best = highlighted?.ids[0];
+    const best = highlighted?.matches === null ? undefined : highlighted?.ids[0];
     if (points !== null && best !== undefined) flyTo(points, best);
   }
 
@@ -375,9 +407,9 @@
     );
     dots = dotsLayer(shown, colours);
     matches =
-      found === null
+      found?.matches == null
         ? null
-        : matchesLayer(shown, found.indices, colours, cssColour(parent, "--fg"));
+        : matchesLayer(shown, found.matches, colours, cssColour(parent, "--fg"));
     if (deck === null) {
       const { width, height } = parent.getBoundingClientRect();
       view = fitView(shown.positions, width, height);
@@ -554,7 +586,7 @@
         <p class="search-status" role="status">Searching…</p>
       {:else if searchError !== null}
         <p class="search-status error" role="alert">{searchError}</p>
-      {:else if highlighted !== null}
+      {:else if results !== null && highlighted !== null}
         <p class="search-status" role="status">
           <span class="count">{matchCount(highlighted.ids.length)}</span>
           {#if highlighted.ids.length > 0}
@@ -562,6 +594,29 @@
           {/if}
           <button type="button" class="link" onclick={clearSearch}>Clear</button>
         </p>
+      {/if}
+      {#if span !== null && sliderRange !== null && span.to > span.from}
+        <div class="dates">
+          <p class="dates-row">
+            <span class="dates-label">Dates</span>
+            <span class="dates-range" aria-live="polite">
+              {formatMonth(sliderRange.from)} – {formatMonth(sliderRange.to)}
+              {#if datesNarrowed && highlighted !== null && results === null}
+                · {highlighted.ids.length.toLocaleString()} items
+              {/if}
+            </span>
+            {#if datesNarrowed}
+              <button
+                type="button"
+                class="link"
+                onclick={() => {
+                  dateRange = null;
+                }}>All dates</button
+              >
+            {/if}
+          </p>
+          <DateRangeSlider {span} range={sliderRange} onChange={chooseDates} />
+        </div>
       {/if}
       <fieldset class="colour-by">
         <legend>Colour</legend>
@@ -662,6 +717,22 @@
   .search button:disabled {
     opacity: 0.6;
     cursor: progress;
+  }
+
+  .dates-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 0.625rem;
+    margin: 0;
+  }
+
+  .dates-label {
+    color: var(--muted);
+  }
+
+  .dates-range {
+    font-variant-numeric: tabular-nums;
   }
 
   .search-status {
