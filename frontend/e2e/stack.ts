@@ -29,7 +29,7 @@ export async function waitUntilProcessed(request: APIRequestContext): Promise<Ac
   return activity(request);
 }
 
-/** The map's test hook (LibraryMap.svelte, dev-environment §6). */
+/** The map's test hook (LibraryMap.svelte, dev-reference §3). */
 export interface MapHook {
   version: number | null;
   zoom: number | null;

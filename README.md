@@ -3,7 +3,8 @@
 A self-hosted tool for exploring and cleaning up a family photo library: a zoomable similarity map, free-text search, near-duplicate and low-quality triage, face identification, and local-LLM tagging. It runs CPU-only on a home server alongside [elodie](https://github.com/jmathai/elodie). All permanent metadata is written back into the files.
 
 - [docs/plan.md](docs/plan.md): product spec and architecture
-- [docs/dev-environment.md](docs/dev-environment.md): toolchain, testing strategy, and build-time checks
+- [docs/dev-environment.md](docs/dev-environment.md): the decisions: toolchain, testing strategy, safety invariants, checks and workflow
+- [docs/dev-reference.md](docs/dev-reference.md): how things currently are: the layout, every recipe and dev switch, the tests at each layer
 
 > **Status:** the dev environment and its checks are in place; the Phase 1 app scaffold is next. Steps marked 🚧 depend on `just` recipes that the scaffold is still adding.
 
@@ -196,7 +197,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 |---|---|
 | `just dev` | Migrate, then the API, worker and Vite dev server (hot reload) against the sample library, and Ollama in Docker, together; Ctrl-C stops them all |
 | `just stack` | The production Docker Compose stack (migrate, app, worker, Ollama), on an image of your checkout, against a test folder `.stack/`, whose library starts as a copy of the tier-1 fixtures. `just stack exec worker python -m photo_triage.worker scan` scans it, and `… worker noop 50` queues jobs to watch |
-| `just map-stack` | The app on a synthetic 100k-item library, for trying the map's speed on a phone (dev-environment §5, "Trying the map on a phone"); add `?fps` to the URL for a frame-rate readout |
+| `just map-stack` | The app on a synthetic 100k-item library, for trying the map's speed on a phone (dev-reference §2, "Trying the map on a phone"); add `?fps` to the URL for a frame-rate readout |
 | `just test` | Unit, integration, and safety tests (fake ML models; fast). `just test PATH…` or `-k EXPR` runs a subset |
 | `just e2e` | End-to-end tests: Playwright against the Compose stack on the tier-1 fixtures (needs Docker) |
 | `just test-models` | Tests that run the real CLIP/InsightFace models (slow; cached weights) |
@@ -218,7 +219,7 @@ If you use the VS Code extension, open the repo through Remote-WSL (step 9) and 
 
 Available today: `dev`, `api`, `worker`, `image`, `stack`, `shot`, `preview`, `web`, `web-sync`, `web-fmt`, `web-check`, `api-types`, `contract`, `db-migrate`, `db-reset`, `doctor`, `fmt`, `lint`, `typecheck`, `test`, `test-models`, `models`, `bench`, `fixtures`, `audit`, `pre-commit`, `check`. Run `just` for the list.
 
-See [docs/dev-environment.md](docs/dev-environment.md) for the full testing strategy and the checks CI enforces.
+See [docs/dev-environment.md](docs/dev-environment.md) for the testing strategy and the checks CI enforces, and [docs/dev-reference.md](docs/dev-reference.md) §3 for what each layer covers.
 
 ## Running it on the server
 
@@ -239,7 +240,7 @@ EOF
 docker compose up -d
 ```
 
-The UI is then on port `APP_PORT`. The stack runs as `APP_UID`:`APP_GID`, which default to 1000, the image's user. Set them to the library's owner (1026 and 100 above stand in for a Synology account's), so the stack can write `PHOTO_DIR` and `DATA_DIR` without changing who owns your photos. The trash is a hidden folder inside `PHOTO_DIR`. If `DATA_DIR` isn't writable, every container stops at startup saying which UID it ran as and whose the folder is. `DATA_DIR` holds the database, its backups and the logs, so it's the folder to back up (its `derived/` folder can be skipped). `MODELS_DIR` holds the model weights: copy them from the dev machine with `just models DEST` there, then to `/srv/photo-triage/models`. To upgrade, build the new image and run `docker compose up -d` again: the migrate service backs the database up before migrating it. See dev-environment §5, "The Compose stack", for the other settings, the resource caps and the logs.
+The UI is then on port `APP_PORT`. The stack runs as `APP_UID`:`APP_GID`, which default to 1000, the image's user. Set them to the library's owner (1026 and 100 above stand in for a Synology account's), so the stack can write `PHOTO_DIR` and `DATA_DIR` without changing who owns your photos. The trash is a hidden folder inside `PHOTO_DIR`. If `DATA_DIR` isn't writable, every container stops at startup saying which UID it ran as and whose the folder is. `DATA_DIR` holds the database, its backups and the logs, so it's the folder to back up (its `derived/` folder can be skipped). `MODELS_DIR` holds the model weights: copy them from the dev machine with `just models DEST` there, then to `/srv/photo-triage/models`. To upgrade, build the new image and run `docker compose up -d` again: the migrate service backs the database up before migrating it. See dev-reference §2, "The Compose stack", for the other settings, the resource caps and the logs.
 
 ## Safety rules for contributors
 
@@ -252,5 +253,5 @@ The UI is then on port `APP_PORT`. The stack runs as `APP_UID`:`APP_GID`, which 
 - **`/mnt/pictures` is empty after a reboot:** the share wasn't reachable when WSL started. Run `sudo mount /mnt/pictures`.
 - **`mount error(13): Permission denied`:** check `/etc/smb-pictures.cred`. Some NAS setups also need `vers=3.0` added to the fstab options.
 - **`docker: command not found` in WSL:** enable WSL integration for Ubuntu-24.04 in Docker Desktop, then restart the terminal.
-- **Finding out why something failed:** each process logs to stderr and to `DATA_DIR/logs/<process>.log` (`./data/logs/api.log` in dev). Set `LOG_LEVEL=DEBUG` in `.env` for a line per request and per job. See dev-environment §5, "Logging".
+- **Finding out why something failed:** each process logs to stderr and to `DATA_DIR/logs/<process>.log` (`./data/logs/api.log` in dev). Set `LOG_LEVEL=DEBUG` in `.env` for a line per request and per job. See dev-reference §2, "Logging".
 - **Slow installs or tests:** make sure the repo is under `~/src`, not `/mnt/c/...`.

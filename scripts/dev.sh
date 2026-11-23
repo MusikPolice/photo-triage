@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `just dev` (dev-environment §5): the API, the worker, the Vite dev server and
+# `just dev` (dev-reference §2): the API, the worker, the Vite dev server and
 # Ollama in one terminal, after the migrate step on the dev database in DATA_DIR.
 #   scripts/dev.sh [--no-ollama] [VITE_ARGS...]     e.g. --host, to reach it from a phone
 # Before starting anything it checks that Docker answers, and says what to do if not.
@@ -53,7 +53,7 @@ if ((status == 1)); then
 If another branch migrated the dev database, either check out that branch and run
   uv run --project backend alembic -c backend/alembic.ini downgrade <a revision this branch has>
 or restore the backup the migrate step made before that branch's migration, from
-DATA_DIR/backups (dev-environment §5, `just db-migrate`). Or, since the dev
+DATA_DIR/backups (dev-reference §2, `just db-migrate`). Or, since the dev
 database holds only test data, delete photo-triage.db in DATA_DIR.
 EOF
 fi

@@ -1,4 +1,4 @@
-/** `just shot`'s command line, and where its screenshots go (dev-environment §5). */
+/** `just shot`'s command line, and where its screenshots go (dev-reference §2). */
 
 import { parseArgs } from "node:util";
 

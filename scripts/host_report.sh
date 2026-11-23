@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A read-only report on a host's hardware and existing load, for sizing the
-# Compose stack's CPU and memory caps to fit its headroom (dev-environment §5,
+# Compose stack's CPU and memory caps to fit its headroom (dev-reference §2,
 # "The Compose stack"). Run it on the server, not in dev:
 #   bash host_report.sh [MINUTES]      default 10
 # It changes nothing and needs no sudo; the container sections need the docker

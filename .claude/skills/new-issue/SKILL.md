@@ -19,7 +19,7 @@ only what the files can't answer:
   follow-ups, read that PR with `gh pr view N`.
 - The spec sections it touches in `docs/plan.md`, any open question in plan §12
   that bears on it, and `docs/dev-environment.md` §6 and §7 if it involves tests
-  or files.
+  or files. `docs/dev-reference.md` lists the recipes and tests that exist.
 - The current code in the area.
 - Existing issues, from `scripts/tracker.py status` and
   `gh issue list --state all --search "<keywords>"`. If an issue already covers

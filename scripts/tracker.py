@@ -91,7 +91,9 @@ LABELS = {
 # A PR that adds, changes, removes or renames anything under these paths is
 # merged by the user, not by `merge` (dev-environment §9). An entry ending in
 # "/" is a directory; anything else is one file. This file is on the list, so
-# changing the list itself needs review.
+# changing the list itself needs review. `docs/dev-reference.md` is left off on
+# purpose: it describes how things are, which nearly every PR updates, while the
+# decisions stay in dev-environment (#138).
 SENSITIVE_PATHS = (
     "docs/plan.md",
     "docs/dev-environment.md",

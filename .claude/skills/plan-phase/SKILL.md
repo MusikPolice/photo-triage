@@ -19,7 +19,8 @@ say which existing issues you're building on.
 
 - The phase paragraph in plan §11, then every section it relies on, in full.
   Phase paragraphs are summaries, and the requirements live in §5–§10.
-- `docs/dev-environment.md` §6 (testing strategy) and §7 (safety invariants).
+- `docs/dev-environment.md` §6 (testing strategy) and §7 (safety invariants),
+  and `docs/dev-reference.md` for the recipes and tests that exist.
   These apply to every issue that touches them.
 - plan §12 (open questions) for anything in this phase that's still undecided.
 - What already exists in the repo, so issues don't repeat finished work.

@@ -1,4 +1,4 @@
-# The production stack (plan §3, §4; dev-environment §5): the migrate step, the
+# The production stack (plan §3, §4; dev-reference §2): the migrate step, the
 # app, the worker and Ollama.
 #   docker compose up -d        from the folder holding this file and its .env
 #   just stack                  the same against a test folder, `.stack/`

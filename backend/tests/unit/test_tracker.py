@@ -421,6 +421,7 @@ def test_sensitive_paths_need_review(path: str) -> None:
         "README.md",
         "docs/plan.md.bak",
         "docs/other.md",
+        "docs/dev-reference.md",
         "scripts/tracker_helpers.py",
         "backend/src/photo_triage/filesystem.py",
         "backend/src/photo_triage/pipeline/scan.py",
