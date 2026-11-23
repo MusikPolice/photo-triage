@@ -18,7 +18,9 @@ With `layout_model`, it also queues a layout fit when one is due
 (`photo_triage.worker.layout_schedule`), after each job that leads to an embedding,
 whether it succeeded or failed, and after each reconcile. With `derived_dir`, it
 queues the atlases after each layout job and each reconcile, when the newest set
-isn't the current layout's (`photo_triage.worker.atlas_schedule`).
+isn't the current layout's (`photo_triage.worker.atlas_schedule`), and with
+`layout_model`, duplicate grouping after each layout job and each reconcile, when a
+fit has finished since the last grouping (`photo_triage.worker.duplicate_schedule`).
 """
 
 import datetime as dt
@@ -37,7 +39,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from photo_triage.db.models import JOB_IS_OPEN, Job, JobStatus
 from photo_triage.quiet_hours import UTC_ZONE, QuietHours
 from photo_triage.schedule import Schedule
-from photo_triage.worker import atlas_schedule, layout_schedule
+from photo_triage.worker import atlas_schedule, duplicate_schedule, layout_schedule
 from photo_triage.worker.clock import Clock, Timer, utc_now
 from photo_triage.worker.queue import JobQueue, Stage
 from photo_triage.worker.reconcile import chain, reconcile
@@ -125,14 +127,17 @@ class Worker:
         return len(jobs)
 
     def reconcile(self) -> dict[str, int]:
-        """Queue every item stage that's due, a layout fit if one is, and the atlases if
-        they're behind the layout. Returns how many jobs each stage got."""
+        """Queue every item stage that's due, a layout fit if one is, the atlases if
+        they're behind the layout, and duplicate grouping if a fit has finished since
+        the last. Returns how many jobs each stage got."""
         queued = reconcile(self._engine, self._item_stages, self._clock())
         with self._sessions.begin() as session:
             if self._queue_layout(session, check_growth=True):
                 queued[Stage.LAYOUT] = 1
             if self._queue_atlases(session):
                 queued[Stage.ATLASES] = 1
+            if self._queue_duplicates(session):
+                queued[Stage.DUPLICATES] = 1
         return queued
 
     def run_one(self) -> bool:
@@ -175,6 +180,8 @@ class Worker:
                     chained.append(Stage.LAYOUT)
                 if job.stage == Stage.LAYOUT and self._queue_atlases(session):
                     chained.append(Stage.ATLASES)
+                if job.stage == Stage.LAYOUT and self._queue_duplicates(session):
+                    chained.append(Stage.DUPLICATES)
             logger.debug("Finished %s in %.3f s", _describe(job), duration_s)
             if chained:
                 logger.debug("Queued %s after it", ", ".join(chained))
@@ -250,6 +257,15 @@ class Worker:
         )
         if queued:
             logger.info("Queued a layout fit: the embedded items have changed")
+        return queued
+
+    def _queue_duplicates(self, session: Session) -> bool:
+        """Queue a duplicate grouping if a layout fit has finished since the last."""
+        if self._layout_model is None:
+            return False
+        queued = duplicate_schedule.queue_if_due(session, self._queue)
+        if queued:
+            logger.info("Queued duplicate grouping: the embedded items have changed")
         return queued
 
     def _queue_atlases(self, session: Session) -> bool:

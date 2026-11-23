@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     video_sample_frames: Annotated[int, Field(ge=1)] = 5
     """Frames sampled from each video, which the stages after it read (plan §6.1)."""
 
+    duplicate_similarity_threshold: Annotated[float, Field(gt=0, le=1)] = 0.95
+    """CLIP cosine similarity at or above which two items are duplicates (plan §6.7)."""
+
     # Development only (dev-reference §2), so not in plan §9 or `.env.example`.
 
     worker_noop_stage: bool = False

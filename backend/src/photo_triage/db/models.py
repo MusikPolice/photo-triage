@@ -66,6 +66,14 @@ class TagSource(StrEnum):
     """Already in the file when it was scanned (plan §6.1)."""
 
 
+class GroupStatus(StrEnum):
+    PENDING = "pending"
+    """Waiting for review."""
+    RESOLVED = "resolved"
+    SKIPPED = "skipped"
+    """Looked at and left for later."""
+
+
 class JobStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
@@ -196,6 +204,47 @@ class Tag(Base):
     created_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
     actor: Mapped[str | None] = mapped_column(sa.String(255))
     """Who added it (plan §10), for `user` tags."""
+
+
+class DuplicateGroup(Base):
+    """Items whose CLIP embeddings are near enough to be the same picture (plan §6.7).
+
+    `photo_triage.pipeline.duplicates` finds them, and keeps a group's id and status
+    while its members stay the same, so a decision outlives a regrouping.
+    """
+
+    __tablename__ = "duplicate_groups"
+    __table_args__ = (
+        # The review lists pending groups, oldest first.
+        sa.Index("ix_duplicate_groups_status_id", "status", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[GroupStatus] = mapped_column(
+        _enum(GroupStatus, "group_status"), default=GroupStatus.PENDING
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    actor: Mapped[str | None] = mapped_column(sa.String(255))
+    """Who resolved or skipped it (plan §10)."""
+
+
+class DuplicateMember(Base):
+    """An item in a duplicate group, and its rank: 0 is the recommended keeper."""
+
+    __tablename__ = "duplicate_members"
+    __table_args__ = (
+        # An item's group, and removing an item's memberships.
+        sa.Index("ix_duplicate_members_item_id", "item_id"),
+    )
+
+    group_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("duplicate_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    item_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("items.id", ondelete="CASCADE"), primary_key=True
+    )
+    rank: Mapped[int]
 
 
 JOB_IS_OPEN = "status IN ('pending', 'error')"

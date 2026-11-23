@@ -175,6 +175,14 @@ def build_runners(
 
         layout.fit(sessions, settings.clip_model)
 
+    def run_duplicates(job: Job) -> None:
+        # Here, not at the top, like layout: it imports NumPy.
+        from photo_triage.pipeline import duplicates
+
+        duplicates.group(
+            sessions, settings.clip_model, settings.duplicate_similarity_threshold, clock()
+        )
+
     def run_atlases(job: Job) -> None:
         # Here, not at the top, like layout: it imports NumPy.
         from photo_triage.pipeline import atlases
@@ -190,6 +198,7 @@ def build_runners(
         Stage.CLIP: run_clip,
         Stage.LAYOUT: run_layout,
         Stage.ATLASES: run_atlases,
+        Stage.DUPLICATES: run_duplicates,
     }
     if settings.worker_noop_stage:
         runners[Stage.NOOP] = run_noop
