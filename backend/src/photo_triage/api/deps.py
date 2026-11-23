@@ -8,6 +8,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from photo_triage.api.similarity import Similarity
+from photo_triage.api.text_encoder import TextEncoder
 from photo_triage.settings import Settings
 from photo_triage.worker.clock import Clock
 
@@ -32,6 +33,11 @@ def get_session(engine: Annotated[Engine, Depends(get_engine)]) -> Iterator[Sess
 def get_similarity(request: Request) -> Similarity:
     """The CLIP vectors, for similarity (`photo_triage.api.similarity`)."""
     return cast(Similarity, request.app.state.similarity)
+
+
+def get_text_encoder(request: Request) -> TextEncoder:
+    """CLIP's text encoder, for search (`photo_triage.api.search`)."""
+    return cast(TextEncoder, request.app.state.text_encoder)
 
 
 def get_clock(request: Request) -> Clock:

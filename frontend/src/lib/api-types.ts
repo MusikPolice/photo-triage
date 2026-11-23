@@ -218,6 +218,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Search
+     * @description The items that match `q`, by CLIP similarity, best first (plan §6.5).
+     */
+    get: operations["search_api_search_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/worker/pause": {
     parameters: {
       query?: never;
@@ -357,6 +377,13 @@ export interface components {
       /** Width */
       width: number | null;
     };
+    /** Match */
+    Match: {
+      /** Id */
+      id: number;
+      /** Score */
+      score: number;
+    };
     /**
      * MediaType
      * @enum {string}
@@ -376,6 +403,15 @@ export interface components {
       embedded: boolean;
       /** Items */
       items: components["schemas"]["Neighbour"][];
+    };
+    /** SearchResults */
+    SearchResults: {
+      /** Floor */
+      floor: number;
+      /** Matches */
+      matches: components["schemas"]["Match"][];
+      /** Query */
+      query: string;
     };
     /**
      * Stage
@@ -828,6 +864,44 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["Activity"];
         };
+      };
+    };
+  };
+  search_api_search_get: {
+    parameters: {
+      query: {
+        q: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SearchResults"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description The CLIP model isn't in MODELS_DIR */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

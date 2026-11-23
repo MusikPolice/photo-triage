@@ -12,10 +12,11 @@ from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.types import Scope
 
-from photo_triage.api import activity, atlases, events, health, items, map_points
+from photo_triage.api import activity, atlases, events, health, items, map_points, search
 from photo_triage.api.errors import LogUnhandledErrors
 from photo_triage.api.feed import POLL_S, Feed
 from photo_triage.api.similarity import Similarity
+from photo_triage.api.text_encoder import TextEncoder
 from photo_triage.db.engine import open_database
 from photo_triage.settings import Settings, load_settings
 from photo_triage.worker.clock import Clock, running_from, utc_now
@@ -46,6 +47,7 @@ def create_app(
     reader = activity.ActivityReader(engine, settings, clock, real_clock)
     feed = Feed(reader, poll_s)
     similarity = Similarity(engine, settings.clip_model)
+    text_encoder = TextEncoder(settings)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
@@ -74,11 +76,13 @@ def create_app(
     app.state.real_clock = real_clock
     app.state.feed = feed
     app.state.similarity = similarity
+    app.state.text_encoder = text_encoder
     app.add_middleware(LogUnhandledErrors)
     app.include_router(health.router, prefix="/api")
     app.include_router(activity.router, prefix="/api")
     app.include_router(events.router, prefix="/api")
     app.include_router(items.router, prefix="/api")
+    app.include_router(search.router, prefix="/api")
     app.include_router(map_points.router, prefix="/api")
     app.include_router(atlases.router, prefix="/api")
     # Last, since it matches every path.

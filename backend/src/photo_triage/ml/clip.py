@@ -48,6 +48,21 @@ class ClipEmbedder(Protocol):
         """One vector per text, in order."""
         ...
 
+    @property
+    def search_floor(self) -> float:
+        """The similarity between a text and a picture above which the picture
+        matches it in search (plan §6.5 step 4)."""
+        ...
+
+
+SEARCH_FLOOR = 0.24
+"""CLIP's floor for a text matching a picture, chosen on ViT-B-32 over the whole
+library's 32,983 vectors (#116). Its text-to-picture scores are low and narrow: the
+median is 0.19, and the best match to a query scores 0.26 to 0.31. At 0.24 and above,
+"a cat", "the beach" and "a baby" were nearly all right; at 0.23 other pictures
+crept in, and 0.22 was mostly noise. A query for something the library hardly has
+("a dog") still matches its nearest likeness (cats)."""
+
 
 class ModelMissingError(Exception):
     """The exported model isn't where `MODELS_DIR` says."""
@@ -84,8 +99,9 @@ def model_dir(models_dir: Path, model: str) -> Path:
 
 class OnnxClip:
     """`model`'s exported encoders in `models_dir/clip/<model>`. Each ONNX Runtime
-    session uses `threads` threads (`WORKER_THREADS`, plan §6.11). The text model is
-    loaded on first use, since only search needs it."""
+    session uses `threads` threads (`WORKER_THREADS`, plan §6.11). Each encoder is
+    loaded on first use: the worker embeds only pictures, and the API, for search,
+    only text, so neither holds the other's (the picture model is 350 MB)."""
 
     def __init__(self, models_dir: Path, model: str, threads: int) -> None:
         folder = model_dir(models_dir, model)
@@ -97,7 +113,7 @@ class OnnxClip:
         self._folder = folder
         self._threads = threads
         self.config = ClipConfig.read(folder / "clip.json")
-        self._image = self._session("image.onnx")
+        self._image: ort.InferenceSession | None = None
         self._text: ort.InferenceSession | None = None
         self._tokenizer: Tokenizer | None = None
 
@@ -117,6 +133,8 @@ class OnnxClip:
         if not images:
             return np.zeros((0, self.dim), np.float32)
         pixels = np.stack([preprocess(image, self.config) for image in images])
+        if self._image is None:
+            self._image = self._session("image.onnx")
         return _normalised(self._run(self._image, "pixels", pixels))
 
     def embed_texts(self, texts: Sequence[str]) -> Vectors:
@@ -126,6 +144,10 @@ class OnnxClip:
             self._text = self._session("text.onnx")
             self._tokenizer = Tokenizer(self._folder / VOCAB_FILE, self.config.context_length)
         return _normalised(self._run(self._text, "tokens", self._tokenizer(texts)))
+
+    @property
+    def search_floor(self) -> float:
+        return SEARCH_FLOOR
 
     def _session(self, file: str) -> ort.InferenceSession:
         options: Any = ort.SessionOptions()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
@@ -195,6 +217,12 @@ class FakeClip:
 
     def embed_texts(self, texts: Sequence[str]) -> Vectors:
         return self._vectors([hashlib.sha256(t.encode()).digest() for t in texts])
+
+    @property
+    def search_floor(self) -> float:
+        """Its vectors are random, so a text is as near any picture as not: at 0,
+        about half of them match, which is enough to see search at work."""
+        return 0.0
 
     def _vectors(self, digests: list[bytes]) -> Vectors:
         rows = [
