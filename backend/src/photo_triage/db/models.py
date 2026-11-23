@@ -247,6 +247,35 @@ class DuplicateMember(Base):
     rank: Mapped[int]
 
 
+class TrashEntry(Base):
+    """An item in the trash (plan §6.8): where its file was, and where it is now.
+
+    `photo_triage.api.trash` moves files in and out through `photo_triage.files`. A
+    restore deletes the row, so there's one per trashed item.
+    """
+
+    __tablename__ = "trash"
+    __table_args__ = (
+        # The purge finds the entries past their date.
+        sa.Index("ix_trash_purge_after", "purge_after"),
+        # The trash page lists the newest first.
+        sa.Index("ix_trash_trashed_at", "trashed_at"),
+    )
+
+    item_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("items.id", ondelete="CASCADE"), primary_key=True
+    )
+    original_path: Mapped[str]
+    """Relative to `PHOTO_DIR`, as `items.path` was."""
+    trash_path: Mapped[str]
+    """Relative to `TRASH_DIR`. The same as `original_path`."""
+    trashed_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
+    actor: Mapped[str] = mapped_column(sa.String(255))
+    """Who trashed it (plan §10)."""
+    purge_after: Mapped[dt.datetime] = mapped_column(UTCDateTime)
+    """`trashed_at` plus `TRASH_RETENTION_DAYS`."""
+
+
 JOB_IS_OPEN = "status IN ('pending', 'error')"
 """SQL for a job that may still run: never tried, or failed and waiting to retry.
 
