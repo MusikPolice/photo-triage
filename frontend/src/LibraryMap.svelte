@@ -2,7 +2,8 @@
   /* The map of the library (plan §6.4): every laid-out item as a dot, with deck.gl,
    * and zoomed in, as its thumbnail from the atlas sheets. It pans and zooms with the
    * mouse, the trackpad and touch, and reloads its points and atlas manifest when the
-   * activity feed announces a new layout or set of sheets. */
+   * activity feed announces a new layout or set of sheets. A search highlights its
+   * matches in place: they keep their colour, with a ring, and the rest dim. */
   import {
     Deck,
     LinearInterpolator,
@@ -46,6 +47,14 @@
     type Theme,
   } from "./lib/map-colours";
   import { FrameMeter, wantsFrameRate, type FrameRate } from "./lib/frame-rate";
+  import {
+    highlight,
+    matchCount,
+    searchItems,
+    shade,
+    thumbnailTint,
+    type SearchResults,
+  } from "./lib/search";
   import { ROUTE_HREF } from "./lib/route";
 
   interface Props {
@@ -113,6 +122,61 @@
 
   const shownLegend = $derived(legend(points, colourBy, theme));
 
+  /** What's typed in the search box. */
+  let query = $state("");
+  /** The last search's results, or null with no search. */
+  let results = $state.raw<SearchResults | null>(null);
+  let searching = $state(false);
+  let searchError = $state<string | null>(null);
+  /** Counts searches, so a slow answer to an earlier one is ignored. */
+  let searchSeq = 0;
+
+  /** The matches among the points on the map, or null with no search. */
+  const highlighted = $derived(
+    points !== null && results !== null ? highlight(points, results) : null,
+  );
+
+  async function runSearch(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    const text = query.trim();
+    if (text === "") {
+      clearSearch();
+      return;
+    }
+    const seq = ++searchSeq;
+    searching = true;
+    searchError = null;
+    try {
+      const found = await searchItems(text);
+      if (seq === searchSeq) results = found;
+    } catch (error) {
+      if (seq === searchSeq) {
+        results = null;
+        searchError = error instanceof Error ? error.message : String(error);
+      }
+    } finally {
+      if (seq === searchSeq) searching = false;
+    }
+  }
+
+  function clearSearch(): void {
+    searchSeq++;
+    query = "";
+    results = null;
+    searching = false;
+    searchError = null;
+  }
+
+  function onQueryInput(): void {
+    // The box's own clear button, or Escape, empties it: that ends the search.
+    if (query.trim() === "" && (results !== null || searchError !== null)) clearSearch();
+  }
+
+  function flyToBest(): void {
+    const best = highlighted?.ids[0];
+    if (points !== null && best !== undefined) flyTo(points, best);
+  }
+
   /** `?fps`: a frame-rate readout, for trying the map on a phone (#119). */
   const showFrameRate = wantsFrameRate(location.search);
   let frameRate = $state<FrameRate | null>(null);
@@ -132,6 +196,8 @@
   });
 
   const DOT_RADIUS_PX = 2.5;
+  /** A match's ring, around its dot. */
+  const RING_PX = 1.5;
   /** How near a tap or click must be to an item to open it: a dot is far smaller
    * than a fingertip. */
   const PICKING_RADIUS_PX = 10;
@@ -222,9 +288,9 @@
     });
   });
 
-  /** The plain dots' colour, `--map-dot`, which follows the theme. */
-  function plainColour(element: Element): Rgb {
-    const css = getComputedStyle(element).getPropertyValue("--map-dot").trim();
+  /** A colour from the theme: `--map-dot` for the plain dots, `--fg` for rings. */
+  function cssColour(element: Element, property: string): Rgb {
+    const css = getComputedStyle(element).getPropertyValue(property).trim();
     const hex = /^#([0-9a-f]{6})$/i.exec(css)?.[1] ?? "3b82f6";
     return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16)) as unknown as Rgb;
   }
@@ -236,7 +302,7 @@
         length: shown.count,
         attributes: {
           getPosition: { value: shown.positions, size: 2 },
-          getFillColor: { value: colours, size: 3, normalized: true },
+          getFillColor: { value: colours, size: 4, normalized: true },
         },
       },
       radiusUnits: "pixels",
@@ -245,8 +311,31 @@
     });
   }
 
-  /** One sheet's thumbnails, over the dots: an item with no thumbnail stays a dot. */
-  function sheetLayer(shown: MapPoints, version: number, group: SheetGroup) {
+  /** The matches again, over the dimmed dots, each in its colour with a ring. */
+  function matchesLayer(shown: MapPoints, indices: number[], colours: Uint8Array, ring: Rgb) {
+    return new ScatterplotLayer<number>({
+      id: "matches",
+      data: indices,
+      getPosition: (i) => [shown.positions[2 * i] ?? 0, shown.positions[2 * i + 1] ?? 0],
+      getFillColor: (i) => [colours[4 * i] ?? 0, colours[4 * i + 1] ?? 0, colours[4 * i + 2] ?? 0],
+      getLineColor: ring,
+      radiusUnits: "pixels",
+      getRadius: DOT_RADIUS_PX + RING_PX,
+      stroked: true,
+      lineWidthUnits: "pixels",
+      getLineWidth: RING_PX,
+      pickable: true,
+    });
+  }
+
+  /** One sheet's thumbnails, over the dots: an item with no thumbnail stays a dot.
+   * With a search, those that don't match are dimmed. */
+  function sheetLayer(
+    shown: MapPoints,
+    version: number,
+    group: SheetGroup,
+    mask: Uint8Array | null,
+  ) {
     return new IconLayer<number>({
       // A new set gets new layers, and so new textures.
       id: `thumbnails-${String(version)}-${String(group.sheet)}`,
@@ -260,6 +349,8 @@
         return rect === undefined ? 0 : thumbnailSize(rect);
       },
       sizeUnits: "pixels",
+      getColor: (i) => thumbnailTint(mask, i),
+      updateTriggers: { getColor: mask },
       pickable: true,
     });
   }
@@ -269,14 +360,24 @@
 
   /** The dots' layer, rebuilt only when the points or their colours change. */
   let dots: ScatterplotLayer | null = null;
+  /** The matches' layer, with a search. */
+  let matches: ScatterplotLayer<number> | null = null;
 
   $effect(() => {
     const parent = container;
     const shown = points;
     if (parent === null || shown === null || shown.count === 0) return;
-    // Read here, so a change of either redraws the dots.
-    const colours = pointColours(shown, colourBy, theme, plainColour(parent));
+    // Read here, so a change of any redraws the dots.
+    const found = highlighted;
+    const colours = shade(
+      pointColours(shown, colourBy, theme, cssColour(parent, "--map-dot")),
+      found?.mask ?? null,
+    );
     dots = dotsLayer(shown, colours);
+    matches =
+      found === null
+        ? null
+        : matchesLayer(shown, found.indices, colours, cssColour(parent, "--fg"));
     if (deck === null) {
       const { width, height } = parent.getBoundingClientRect();
       view = fitView(shown.positions, width, height);
@@ -349,10 +450,12 @@
     const shown = points;
     if (deck === null || dots === null || shown === null) return;
     const layers: Layer[] = [dots];
+    if (matches !== null) layers.push(matches);
     if (mode === "thumbnails" && current !== null) {
+      const mask = untrack(() => highlighted?.mask ?? null);
       for (const sheet of shownSheets) {
         const group = current.bySheet.get(sheet);
-        if (group !== undefined) layers.push(sheetLayer(shown, current.atlas.version, group));
+        if (group !== undefined) layers.push(sheetLayer(shown, current.atlas.version, group, mask));
       }
     }
     drawn = layers;
@@ -375,6 +478,10 @@
       },
       get colourBy() {
         return colourBy;
+      },
+      /** The items a search highlights, best first: none without a search. */
+      highlightedIds(): number[] {
+        return highlighted?.ids ?? [];
       },
       get zoom() {
         return view?.zoom ?? null;
@@ -430,6 +537,32 @@
     </div>
   {:else if points !== null}
     <div class="panel">
+      <form class="search" role="search" onsubmit={runSearch}>
+        <input
+          type="search"
+          name="q"
+          placeholder="Search, e.g. “the beach”"
+          aria-label="Search the library"
+          enterkeyhint="search"
+          autocomplete="off"
+          bind:value={query}
+          oninput={onQueryInput}
+        />
+        <button type="submit" disabled={searching}>Search</button>
+      </form>
+      {#if searching}
+        <p class="search-status" role="status">Searching…</p>
+      {:else if searchError !== null}
+        <p class="search-status error" role="alert">{searchError}</p>
+      {:else if highlighted !== null}
+        <p class="search-status" role="status">
+          <span class="count">{matchCount(highlighted.ids.length)}</span>
+          {#if highlighted.ids.length > 0}
+            <button type="button" class="link" onclick={flyToBest}>Fly to best match</button>
+          {/if}
+          <button type="button" class="link" onclick={clearSearch}>Clear</button>
+        </p>
+      {/if}
       <fieldset class="colour-by">
         <legend>Colour</legend>
         {#each COLOUR_BY as by (by)}
@@ -498,6 +631,64 @@
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  }
+
+  .search {
+    display: flex;
+    gap: 0.375rem;
+  }
+
+  .search input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.375rem 0.625rem;
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+  }
+
+  .search button {
+    padding: 0.375rem 0.75rem;
+    font: inherit;
+    color: var(--bg);
+    background: var(--fg);
+    border: 1px solid var(--fg);
+    border-radius: 0.375rem;
+    cursor: pointer;
+  }
+
+  .search button:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+
+  .search-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 0.75rem;
+    margin: 0;
+  }
+
+  .search-status .count {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .search-status.error {
+    color: var(--alert);
+  }
+
+  .link {
+    padding: 0;
+    font: inherit;
+    color: var(--fg);
+    text-decoration: underline;
+    background: none;
+    border: 0;
+    cursor: pointer;
   }
 
   .frame-rate {

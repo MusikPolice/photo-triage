@@ -38,7 +38,24 @@ export interface MapHook {
   sheets: number[];
   loaded: boolean;
   visibleIds(): number[];
+  highlightedIds(): number[];
   pagePosition(itemId: number): [number, number] | null;
+}
+
+/** The items a search highlights on the map, best first. */
+export async function highlightedIds(page: Page): Promise<number[]> {
+  return page.evaluate(() => {
+    const hook = (window as unknown as { __photoTriageMap?: MapHook }).__photoTriageMap;
+    return hook === undefined ? [] : hook.highlightedIds();
+  });
+}
+
+/** Where an item is on the page, or null if it isn't on the map. */
+export async function pagePosition(page: Page, itemId: number): Promise<[number, number] | null> {
+  return page.evaluate(
+    (id) => (window as unknown as { __photoTriageMap: MapHook }).__photoTriageMap.pagePosition(id),
+    itemId,
+  );
 }
 
 /** How the map is drawn: dots or thumbnails, from which atlas sheets, and whether

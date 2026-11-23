@@ -7,21 +7,17 @@ as the endpoint calls it: the check for new embeddings, the matrix product, the
 ranking and the check that the neighbours are still in the library.
 """
 
-import datetime as dt
 import statistics
 import time
 import tracemalloc
 
 import numpy as np
 import pytest
-import sqlalchemy as sa
+from embedded import insert_embedded
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from photo_triage.api.similarity import Similarity
-from photo_triage.db.models import Embedding, Item, Job, JobStatus, MediaType
-from photo_triage.pipeline.embed import to_blob
-from photo_triage.worker.queue import PRIORITY, Stage
 
 pytestmark = pytest.mark.bench
 
@@ -31,7 +27,6 @@ LIMIT = 12
 QUERIES = 50
 TARGET_S = 0.050
 MODEL = "ViT-B-32"
-NOW = dt.datetime(2026, 11, 21, tzinfo=dt.UTC)
 
 
 def test_neighbours_on_100k_items(migrated: Engine) -> None:
@@ -39,47 +34,7 @@ def test_neighbours_on_100k_items(migrated: Engine) -> None:
     rng = np.random.default_rng(115)
     vectors = rng.standard_normal((ITEMS, DIM), dtype=np.float32)
     vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
-    with Session(engine) as session, session.begin():
-        session.execute(
-            sa.insert(Item),
-            [
-                {
-                    "id": i + 1,
-                    "content_hash": f"{i:064x}",
-                    "path": f"photos/{i}.jpg",
-                    "media_type": MediaType.PHOTO,
-                    "status": "active",
-                    "file_size_bytes": 1,
-                    "file_mtime_ns": 0,
-                    "first_seen_at": NOW,
-                    "last_seen_at": NOW,
-                    "damaged": False,
-                }
-                for i in range(ITEMS)
-            ],
-        )
-        session.execute(
-            sa.insert(Embedding),
-            [
-                {"item_id": i + 1, "model": MODEL, "vector": to_blob(vectors[i])}
-                for i in range(ITEMS)
-            ],
-        )
-        session.execute(
-            sa.insert(Job),
-            [
-                {
-                    "item_id": i + 1,
-                    "stage": Stage.CLIP,
-                    "priority": PRIORITY[Stage.CLIP],
-                    "status": JobStatus.DONE,
-                    "attempts": 0,
-                    "enqueued_at": NOW,
-                    "finished_at": NOW,
-                }
-                for i in range(ITEMS)
-            ],
-        )
+    insert_embedded(engine, vectors, MODEL)
 
     similarity = Similarity(engine, MODEL)
     with Session(engine) as session:

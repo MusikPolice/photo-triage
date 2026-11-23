@@ -1,5 +1,5 @@
 """Every active item's CLIP vector in memory, for its nearest neighbours (plan §6.3,
-§6.4 "Lightbox & similarity walk").
+§6.4 "Lightbox & similarity walk") and for search (plan §6.5).
 
 The API process holds the vectors embedded with `CLIP_MODEL` as one float32 matrix,
 a row per item, loaded on first use. The vectors are of unit length, so a matrix
@@ -37,6 +37,9 @@ LOAD_BATCH = 2048
 """Rows read from SQLite at a time while loading."""
 SPARE_CANDIDATES = 16
 """Neighbours ranked beyond the limit, in case some have left the library."""
+ACTIVE_CHUNK = 10_000
+"""Item ids per query when checking which are still active: under SQLite's limit on
+variables in a statement."""
 
 
 class Similarity:
@@ -91,12 +94,22 @@ class Similarity:
             return []
         top = np.argpartition(-similarity, wanted - 1)[:wanted]
         ranked = [int(ids[i]) for i in top[np.argsort(-similarity[top], kind="stable")]]
-        active = set(
-            session.scalars(
-                sa.select(Item.id).where(Item.id.in_(ranked), Item.status == ItemStatus.ACTIVE)
-            )
-        )
+        active = _active(session, ranked)
         return [i for i in ranked if i in active][:limit]
+
+    def matches(
+        self, session: Session, vector: NDArray[np.float32], floor: float
+    ) -> list[tuple[int, float]]:
+        """Every active item whose similarity to `vector` is at least `floor`, with
+        it, best first; items with equal scores by id."""
+        ids, matrix = self._current(session)
+        if len(ids) == 0 or matrix.shape[1] != len(vector):
+            return []
+        scores = matrix @ vector
+        above = np.flatnonzero(scores >= floor)
+        ranked = above[np.argsort(-scores[above], kind="stable")]
+        active = _active(session, [int(ids[i]) for i in ranked])
+        return [(int(ids[i]), float(scores[i])) for i in ranked if int(ids[i]) in active]
 
     def _current(self, session: Session) -> tuple[NDArray[np.int64], NDArray[np.float32]]:
         """The matrix, read again first if the worker has embedded since it was.
@@ -156,3 +169,17 @@ class Similarity:
             self.nbytes / 1e6,
             time.monotonic() - started_s,
         )
+
+
+def _active(session: Session, item_ids: list[int]) -> set[int]:
+    """Those of `item_ids` still active: neither trashed nor missing since the load.
+    By primary key, so the cost follows the number asked about, not the library."""
+    active: set[int] = set()
+    for start in range(0, len(item_ids), ACTIVE_CHUNK):
+        chunk = item_ids[start : start + ACTIVE_CHUNK]
+        active.update(
+            session.scalars(
+                sa.select(Item.id).where(Item.id.in_(chunk), Item.status == ItemStatus.ACTIVE)
+            )
+        )
+    return active
