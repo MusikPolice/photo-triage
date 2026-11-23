@@ -49,7 +49,8 @@ logger = logging.getLogger(__name__)
 
 pillow_heif.register_heif_opener()  # pyright: ignore[reportUnknownMemberType]
 
-KEYWORD_TAGS = ("IPTC:Keywords", "XMP-dc:Subject", "QuickTime:Keywords")
+QUICKTIME_KEYWORDS = "QuickTime:Keywords"
+KEYWORD_TAGS = ("IPTC:Keywords", "XMP-dc:Subject", QUICKTIME_KEYWORDS)
 PHOTO_DATE_TAGS = (
     "EXIF:DateTimeOriginal",
     "XMP:DateTimeOriginal",
@@ -180,16 +181,23 @@ def month_folder(path: PurePath) -> tuple[int, int] | None:
 
 def keywords(tags: Mapping[str, Any]) -> tuple[str, ...]:
     """Every keyword in the `KEYWORD_TAGS`, in order, once each. Blank ones are
-    dropped and whitespace around them trimmed."""
+    dropped and whitespace around them trimmed.
+
+    QuickTime's keywords are one string, which the write-back joins with ", " (plan
+    §6.10). `XMP-dc:Subject` holds the same tags as a list, so a file that has it is
+    read from that, and QuickTime's string is read, split on commas, only without."""
     found: dict[str, None] = {}
     for spec in KEYWORD_TAGS:
-        for value in _values(tags, spec):
+        if spec == QUICKTIME_KEYWORDS and values(tags, "XMP-dc:Subject"):
+            continue
+        for value in values(tags, spec):
             items: list[Any] = value if isinstance(value, list) else [value]  # pyright: ignore[reportUnknownVariableType]
             for keyword in items:
                 # exiftool gives a keyword that looks like a number as one.
-                text = str(keyword).strip()
-                if text:
-                    found[text] = None
+                parts = str(keyword).split(",") if spec == QUICKTIME_KEYWORDS else [str(keyword)]
+                for part in parts:
+                    if text := part.strip():
+                        found[text] = None
     return tuple(found)
 
 
@@ -254,7 +262,7 @@ def _replace_imported_tags(
     return have != want
 
 
-def _values(tags: Mapping[str, Any], spec: str) -> list[Any]:
+def values(tags: Mapping[str, Any], spec: str) -> list[Any]:
     """The values of the tag `spec` names (`Name`, or `Group:Name` in either group
     family), in the order exiftool gave them. A `-G0:1` key is `Family0:Family1:Name`,
     or `Family0:Name` when the two families agree."""
@@ -270,7 +278,7 @@ def _values(tags: Mapping[str, Any], spec: str) -> list[Any]:
 def _first_date(tags: Mapping[str, Any], spec: str) -> dt.datetime | None:
     """The first valid date in the tag `spec` names. An offset or fractional seconds
     after the time are dropped, so it's the wall-clock time as written."""
-    for value in _values(tags, spec):
+    for value in values(tags, spec):
         try:
             return dt.datetime.strptime(str(value)[:19], _EXIF_DATE_FORMAT)
         except ValueError:

@@ -132,6 +132,9 @@ class Settings(BaseSettings):
 
     trash_retention_days: Annotated[int, Field(ge=1)] = 30
     """Days a trashed file stays in the trash before it's purged (plan §6.8)."""
+    exif_writes_enabled: bool = False
+    """Apply queued metadata writes to the files. Off, they're logged as a dry run
+    and the files are left alone (plan §6.10)."""
 
     # Development only (dev-reference §2), so not in plan §9 or `.env.example`.
 

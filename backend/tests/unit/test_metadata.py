@@ -248,18 +248,28 @@ def test_an_undated_file_with_neither_uses_its_mtime(path: str) -> None:
 
 
 def test_keywords_from_every_field_are_kept_once_each_in_order() -> None:
-    tags = {
-        "IPTC:Keywords": ["beach", "sunset"],
-        "XMP:XMP-dc:Subject": ["sunset", "café"],
-        "QuickTime:Keys:Keywords": "dog",
-        "QuickTime:ItemList:Keywords": "beach",
-    }
-    assert metadata.keywords(tags) == ("beach", "sunset", "café", "dog")
+    tags = {"IPTC:Keywords": ["beach", "sunset"], "XMP:XMP-dc:Subject": ["sunset", "café"]}
+    assert metadata.keywords(tags) == ("beach", "sunset", "café")
+    video = {"QuickTime:Keys:Keywords": "dog", "QuickTime:ItemList:Keywords": "beach, dog"}
+    assert metadata.keywords(video) == ("dog", "beach")
 
 
 def test_keywords_are_trimmed_blank_ones_dropped_and_numbers_kept_as_text() -> None:
     tags = {"IPTC:Keywords": [" 2024 ", "", "  "], "XMP:XMP-dc:Subject": 1999}
     assert metadata.keywords(tags) == ("2024", "1999")
+
+
+def test_quicktime_keywords_are_split_on_commas() -> None:
+    tags = {"QuickTime:Keys:Keywords": "dog, crème,Ada Lovelace"}
+    assert metadata.keywords(tags) == ("dog", "crème", "Ada Lovelace")
+
+
+def test_with_xmp_subject_quicktime_s_joined_keywords_are_left_out() -> None:
+    tags = {
+        "XMP:XMP-dc:Subject": ["Smith, Ada", "dog"],
+        "QuickTime:Keys:Keywords": "Smith, Ada, dog",
+    }
+    assert metadata.keywords(tags) == ("Smith, Ada", "dog")
 
 
 def test_other_fields_with_the_same_names_are_not_keywords() -> None:

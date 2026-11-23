@@ -19,8 +19,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 from photo_triage.db.models import Job, MediaType
-from photo_triage.files import MetadataReader
-from photo_triage.pipeline import frames, metadata, scan, thumbnails
+from photo_triage.files import MetadataWriter
+from photo_triage.pipeline import frames, metadata, scan, thumbnails, writeback
 from photo_triage.settings import Settings
 from photo_triage.worker.clock import Clock
 from photo_triage.worker.queue import JobQueue, Stage
@@ -111,12 +111,13 @@ def build_runners(
     engine: Engine,
     queue: JobQueue,
     clock: Clock,
-    metadata_reader: MetadataReader,
+    exiftool: MetadataWriter,
     *,
     clip: "ClipEmbedder | None" = None,
 ) -> Mapping[str, Runner]:
     """The stages this worker runs. Jobs for any other stage stay in the queue.
-    The caller owns `metadata_reader`, and closes it once the worker stops.
+    The caller owns `exiftool`, which reads and writes metadata, and closes it once
+    the worker stops.
 
     `clip` embeds for the `clip` stage. By default it's `CLIP_MODEL` from
     `MODELS_DIR`, loaded by the first `clip` job, so a worker with no models still
@@ -141,8 +142,16 @@ def build_runners(
         return scan.scan(sessions, queue, job, settings.photo_dir, clock())
 
     def run_metadata_read(job: Job) -> bool:
-        return metadata.record(
-            sessions, job, metadata_reader, settings.photo_dir, settings.tz, clock()
+        return metadata.record(sessions, job, exiftool, settings.photo_dir, settings.tz, clock())
+
+    def run_metadata_write(job: Job) -> None:
+        writeback.apply(
+            sessions,
+            job,
+            exiftool,
+            settings.photo_dir,
+            enabled=settings.exif_writes_enabled,
+            now=clock(),
         )
 
     def run_frames(job: Job) -> bool | None:
@@ -190,6 +199,7 @@ def build_runners(
         atlases.build(sessions, settings.derived_dir)
 
     runners: dict[str, Runner] = {
+        Stage.METADATA_WRITE: run_metadata_write,
         Stage.WALK: run_walk,
         Stage.SCAN: run_scan,
         Stage.METADATA_READ: run_metadata_read,

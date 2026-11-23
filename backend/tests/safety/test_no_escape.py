@@ -8,8 +8,8 @@ temp root holds `PHOTO_DIR`, `TRASH_DIR` and `DATA_DIR`, plus a home folder, a t
 folder and a bystander folder, so a write to `~`, to `$TMPDIR` or next to the
 library shows up in the snapshot as well.
 
-There's no `EXIF_WRITES_ENABLED` yet: nothing writes metadata until Phase 4, which
-runs these with writes off and adds the write-back cases.
+`EXIF_WRITES_ENABLED` is unset, and nothing queues a metadata write here:
+`test_write_back.py` has the write-back cases.
 """
 
 import hashlib
