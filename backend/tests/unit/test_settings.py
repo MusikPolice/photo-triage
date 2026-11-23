@@ -39,6 +39,7 @@ PUBLIC_SETTINGS = {
     "tz",
     "thumbnail_size",
     "video_sample_frames",
+    "duplicate_similarity_threshold",
     "worker_noop_stage",
     "worker_fake_clip",
     "fake_now",
@@ -115,6 +116,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.worker_quiet_hours is None
     assert settings.tz == ZoneInfo("UTC")
     assert settings.video_sample_frames == 5
+    assert settings.duplicate_similarity_threshold == 0.95
     assert settings.thumbnail_size == 400
     assert settings.models_dir == Path.home() / ".cache/photo-triage/models"
     assert settings.clip_model == "ViT-B-32"
