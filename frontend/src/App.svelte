@@ -2,6 +2,7 @@
   import Activity from "./Activity.svelte";
   import Home from "./Home.svelte";
   import StatusIndicator from "./StatusIndicator.svelte";
+  import WriteLog from "./WriteLog.svelte";
   import { ActivityFeed } from "./lib/activity.svelte";
   import { itemFromSearch, withItem } from "./lib/item";
   import { inAppPath, parseRoute, ROUTE_HREF } from "./lib/route";
@@ -77,6 +78,8 @@
 <main class:full={route === "home"}>
   {#if route === "activity"}
     <Activity {feed} />
+  {:else if route === "writes"}
+    <WriteLog />
   {:else if route === "home"}
     <Home {feed} {openItem} onOpen={openLightbox} onClose={closeLightbox} />
   {:else}
