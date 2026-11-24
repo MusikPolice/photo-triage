@@ -154,3 +154,37 @@ test("opening a similar item moves the lightbox and the map to it", async ({ pag
     })
     .toBeLessThan(1);
 });
+
+test("the lightbox lists the item's tags, from the file and added since", async ({
+  page,
+  request,
+}) => {
+  await waitUntilProcessed(request);
+  await page.goto("/");
+  await expect.poll(async () => (await mapState(page)).visible.length).toBeGreaterThan(0);
+  let target: ItemDetails | null = null;
+  for (const id of (await mapState(page)).visible) {
+    const item = (await (await request.get(`/api/items/${String(id)}`)).json()) as ItemDetails;
+    if (item.path === "metadata/keywords.jpg") {
+      target = item;
+      break;
+    }
+  }
+  if (target === null) throw new Error("metadata/keywords.jpg isn't on the map");
+  expect(target.tags.length).toBeGreaterThan(0);
+  const id = target.id;
+  const change = (action: "add" | "remove") =>
+    request.post("/api/tags", { data: { item_ids: [id], tag: "e2e tag", action } });
+
+  await page.goto(`/?item=${String(id)}`);
+  const tags = page.getByRole("dialog").getByRole("region", { name: "Tags" });
+  await expect(tags.getByRole("listitem")).toHaveText(target.tags);
+
+  expect((await change("add")).ok()).toBe(true);
+  try {
+    await page.reload();
+    await expect(tags.getByRole("listitem").filter({ hasText: "e2e tag" })).toBeVisible();
+  } finally {
+    expect((await change("remove")).ok()).toBe(true);
+  }
+});

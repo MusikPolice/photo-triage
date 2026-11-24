@@ -19,12 +19,13 @@ import anyio
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from starlette.responses import FileResponse, Response, StreamingResponse
 from starlette.types import Receive, Scope, Send
 
 from photo_triage.api.deps import DbSession, get_settings, get_similarity
 from photo_triage.api.similarity import Similarity
-from photo_triage.db.models import Item, ItemStatus, MediaType, Tag, TagSource
+from photo_triage.db.models import Item, ItemStatus, MediaType, Tag
 from photo_triage.pipeline import viewing
 from photo_triage.pipeline.thumbnails import MAP_SIZE, Thumbnail, thumbnail_path
 from photo_triage.settings import Settings
@@ -84,8 +85,21 @@ class ItemDetails(BaseModel):
     file_size_bytes: int
     damaged: bool
     """A photo cut short: only the top of its picture is there."""
-    keywords: list[str]
-    """The keywords in the file, alphabetically, ignoring case."""
+    tags: list[str]
+    """Its tags from every source, imported from the file, added by people or by the
+    LLM: each once, alphabetically, ignoring case."""
+
+
+def item_tags(session: Session, item_id: int) -> list[str]:
+    """The item's tags from every source, each once, alphabetically, ignoring case."""
+    return list(
+        session.scalars(
+            sa.select(Tag.tag)
+            .where(Tag.item_id == item_id)
+            .distinct()
+            .order_by(sa.func.lower(Tag.tag), Tag.tag)
+        )
+    )
 
 
 def _active(session: DbSession, item_id: int) -> Item:
@@ -99,11 +113,7 @@ def _active(session: DbSession, item_id: int) -> Item:
 def details(item_id: int, session: DbSession) -> ItemDetails:
     """What the lightbox shows about an item."""
     item = _active(session, item_id)
-    keywords = session.scalars(
-        sa.select(Tag.tag)
-        .where(Tag.item_id == item_id, Tag.source == TagSource.IMPORTED)
-        .order_by(sa.func.lower(Tag.tag), Tag.tag)
-    ).all()
+    tags = item_tags(session, item_id)
     return ItemDetails(
         id=item.id,
         path=item.path,
@@ -114,7 +124,7 @@ def details(item_id: int, session: DbSession) -> ItemDetails:
         duration_s=item.duration_s,
         file_size_bytes=item.file_size_bytes,
         damaged=item.damaged,
-        keywords=list(keywords),
+        tags=tags,
     )
 
 

@@ -113,7 +113,7 @@ async def test_details_say_what_the_lightbox_shows(
         "duration_s": None,
         "file_size_bytes": (Path("photos/metadata/keywords.jpg")).stat().st_size,
         "damaged": False,
-        "keywords": ["apple", "Tofino", "zebra"],
+        "tags": ["apple", "Tofino", "zebra"],
     }
 
 

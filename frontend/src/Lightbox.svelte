@@ -174,13 +174,15 @@
       {#if item.damaged}
         <p class="note">The file is cut short: only the top of the picture is there.</p>
       {/if}
-      {#if item.keywords.length > 0}
-        <h3>Keywords</h3>
-        <ul class="keywords">
-          {#each item.keywords as keyword (keyword)}
-            <li>{keyword}</li>
-          {/each}
-        </ul>
+      {#if item.tags.length > 0}
+        <section aria-label="Tags">
+          <h3>Tags</h3>
+          <ul class="tags">
+            {#each item.tags as tag (tag)}
+              <li>{tag}</li>
+            {/each}
+          </ul>
+        </section>
       {/if}
     {:else if failure === null}
       <p class="note">Loading…</p>
@@ -306,7 +308,7 @@
     color: var(--muted);
   }
 
-  .keywords {
+  .tags {
     display: flex;
     flex-wrap: wrap;
     gap: 0.375rem;
@@ -360,7 +362,7 @@
     object-fit: cover;
   }
 
-  .keywords li {
+  .tags li {
     padding: 0.125rem 0.625rem;
     font-size: 0.8125rem;
     border: 1px solid var(--border);

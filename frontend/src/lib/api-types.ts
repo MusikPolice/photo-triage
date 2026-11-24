@@ -238,6 +238,27 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/tags": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change Tags
+     * @description Add a tag to items, or remove one, and queue writing each changed item's tags
+     *     to its file.
+     */
+    post: operations["change_tags_api_tags_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/trash": {
     parameters: {
       query?: never;
@@ -413,11 +434,11 @@ export interface components {
       height: number | null;
       /** Id */
       id: number;
-      /** Keywords */
-      keywords: string[];
       media_type: components["schemas"]["MediaType"];
       /** Path */
       path: string;
+      /** Tags */
+      tags: string[];
       /** Taken At Local */
       taken_at_local: string | null;
       /** Width */
@@ -541,6 +562,28 @@ export interface components {
       throughput_per_min?: number | null;
       /** Total */
       total: number;
+    };
+    /**
+     * TagAction
+     * @enum {string}
+     */
+    TagAction: "add" | "remove";
+    /** TagChange */
+    TagChange: {
+      action: components["schemas"]["TagAction"];
+      /** Item Ids */
+      item_ids: number[];
+      /** Tag */
+      tag: string;
+    };
+    /** TagsChanged */
+    TagsChanged: {
+      /** Changed */
+      changed: number[];
+      /** Skipped */
+      skipped: components["schemas"]["Skipped"][];
+      /** Unchanged */
+      unchanged: number[];
     };
     /** TrashPage */
     TrashPage: {
@@ -997,6 +1040,39 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  change_tags_api_tags_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TagChange"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TagsChanged"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };
