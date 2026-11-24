@@ -198,6 +198,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/metadata-writes": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Write Log
+     * @description The write log, newest first, optionally only writes with `status`.
+     */
+    get: operations["write_log_api_metadata_writes_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/scan": {
     parameters: {
       query?: never;
@@ -449,6 +469,37 @@ export interface components {
       /** Item Ids */
       item_ids: number[];
     };
+    /** LoggedWrite */
+    LoggedWrite: {
+      /** Actor */
+      actor: string | null;
+      /** After */
+      after: {
+        [key: string]: unknown;
+      } | null;
+      /** Applied At */
+      applied_at: string | null;
+      /** Before */
+      before: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Fields */
+      fields: {
+        [key: string]: unknown;
+      };
+      /** Id */
+      id: number;
+      /** Item Id */
+      item_id: number;
+      /** Path */
+      path: string;
+      status: components["schemas"]["WriteStatus"];
+    };
     /** Match */
     Match: {
       /** Id */
@@ -640,6 +691,20 @@ export interface components {
      * @enum {string}
      */
     WorkerStatus: "running" | "paused" | "quiet" | "stopped";
+    /** WriteLog */
+    WriteLog: {
+      /** Items */
+      items: components["schemas"]["LoggedWrite"][];
+      /** Total */
+      total: number;
+      /** Writes Enabled */
+      writes_enabled: boolean;
+    };
+    /**
+     * WriteStatus
+     * @enum {string}
+     */
+    WriteStatus: "queued" | "applied" | "dry_run" | "error";
   };
   responses: never;
   parameters: never;
@@ -982,6 +1047,39 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  write_log_api_metadata_writes_get: {
+    parameters: {
+      query?: {
+        status?: components["schemas"]["WriteStatus"] | null;
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WriteLog"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };

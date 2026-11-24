@@ -2,6 +2,7 @@
   import StageButtons from "./StageButtons.svelte";
   import type { ActivityFeed } from "./lib/activity.svelte";
   import { thumbnailUrl, type Stage, type StageActivity } from "./lib/api";
+  import { ROUTE_HREF } from "./lib/route";
   import {
     barTone,
     doneOfTotal,
@@ -141,6 +142,9 @@
             </div>
           {/if}
           {#if runs !== null}<p class="runs muted">{runs}</p>{/if}
+          {#if stage.stage === "metadata_write"}
+            <p class="runs"><a href={ROUTE_HREF.writes}>Write log</a></p>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -167,6 +171,9 @@
             />
           </div>
           {#if runs !== null}<p class="runs muted">{runs}</p>{/if}
+          {#if stage.stage === "metadata_write"}
+            <p class="runs"><a href={ROUTE_HREF.writes}>Write log</a></p>
+          {/if}
         </li>
       {/each}
     </ul>
