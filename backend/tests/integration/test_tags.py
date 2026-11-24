@@ -77,7 +77,7 @@ async def test_adding_a_tag_records_who_and_queues_each_item_s_whole_list(
     assert queued(migrated) == {a: [{"tags": ["beach", "dog"]}], b: [{"tags": ["dog", "Zoo"]}]}
     with Session(migrated) as session:
         jobs = session.scalars(sa.select(Job.item_id).where(Job.stage == Stage.METADATA_WRITE))
-        assert sorted(jobs) == [a, b]
+        assert sorted(j or 0 for j in jobs) == [a, b]
         write = session.scalars(sa.select(MetadataWrite)).first()
         assert write is not None and (write.actor, write.created_at) == ("anonymous", AT)
 
