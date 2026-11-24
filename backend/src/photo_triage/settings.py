@@ -127,8 +127,10 @@ class Settings(BaseSettings):
     video_sample_frames: Annotated[int, Field(ge=1)] = 5
     """Frames sampled from each video, which the stages after it read (plan §6.1)."""
 
-    duplicate_similarity_threshold: Annotated[float, Field(gt=0, le=1)] = 0.95
-    """CLIP cosine similarity at or above which two items are duplicates (plan §6.7)."""
+    duplicate_similarity_threshold: Annotated[float, Field(gt=0, le=1)] = 0.98
+    """CLIP cosine similarity at or above which two items are duplicates (plan §6.7).
+    Calibrated on the real library (#157): from 0.97 up, pairs are mostly burst shots
+    of one moment; below, mostly the same subject in different shots."""
 
     trash_retention_days: Annotated[int, Field(ge=1)] = 30
     """Days a trashed file stays in the trash before it's purged (plan §6.8)."""
