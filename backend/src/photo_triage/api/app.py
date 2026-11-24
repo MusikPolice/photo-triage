@@ -20,6 +20,7 @@ from photo_triage.api import (
     items,
     map_points,
     search,
+    tags,
     trash,
 )
 from photo_triage.api.errors import LogUnhandledErrors
@@ -95,6 +96,7 @@ def create_app(
     app.include_router(map_points.router, prefix="/api")
     app.include_router(atlases.router, prefix="/api")
     app.include_router(trash.router, prefix="/api")
+    app.include_router(tags.router, prefix="/api")
     # Last, since it matches every path.
     if frontend_dir is not None:
         app.mount("/", SinglePageApp(directory=frontend_dir, html=True), name="frontend")
