@@ -52,6 +52,7 @@ STAGES_IN_ORDER = [
     "recognize",
     "layout",
     "duplicates",
+    "purge",
     "atlases",
     "llm_tag",
 ]
@@ -492,6 +493,31 @@ async def test_layout_atlases_and_grouping_show_their_last_run_and_no_schedule(
 
     assert row["last_finished_at"] == "2026-10-05T11:30:00Z"
     assert (row["last_actor"], row["next_scheduled_at"]) == (None, None)
+
+
+async def test_the_purge_shows_its_last_run_and_the_next_a_day_later(
+    client: AsyncClient, migrated: Engine
+) -> None:
+    row = _stages((await client.get("/api/activity")).json())[Stage.PURGE]
+    assert (row["last_finished_at"], row["next_scheduled_at"]) == (None, None)
+
+    finished_at = START - dt.timedelta(hours=3)
+    with Session(migrated) as session, session.begin():
+        session.add(
+            Job(
+                stage=Stage.PURGE,
+                priority=PRIORITY[Stage.PURGE],
+                status=JobStatus.DONE,
+                attempts=0,
+                enqueued_at=finished_at,
+                finished_at=finished_at,
+            )
+        )
+
+    row = _stages((await client.get("/api/activity")).json())[Stage.PURGE]
+
+    assert row["last_finished_at"] == "2026-10-05T09:00:00Z"
+    assert row["next_scheduled_at"] == "2026-10-06T09:00:00Z"
 
 
 async def test_the_current_layout_version_is_reported(

@@ -107,21 +107,23 @@ def worker_env(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> Settings:
 
 @pytest.fixture
 def recently_walked(migrated: Engine) -> None:
-    """A walk that finished just now, so the worker's `SCAN_SCHEDULE` has nothing due
-    when `main` starts it. Without one, a new database gets a walk at startup
-    (`test_scan_schedule.py`)."""
+    """A walk and a purge that finished just now, so neither the worker's
+    `SCAN_SCHEDULE` nor its daily purge has anything due when `main` starts it.
+    Without them, a new database gets both at startup (`test_scan_schedule.py`,
+    `test_purge.py`)."""
     now = dt.datetime.now(dt.UTC)
     with Session(migrated) as session, session.begin():
-        session.add(
-            Job(
-                stage=Stage.WALK,
-                priority=PRIORITY[Stage.WALK],
-                status=JobStatus.DONE,
-                attempts=0,
-                enqueued_at=now,
-                finished_at=now,
+        for stage in (Stage.WALK, Stage.PURGE):
+            session.add(
+                Job(
+                    stage=stage,
+                    priority=PRIORITY[stage],
+                    status=JobStatus.DONE,
+                    attempts=0,
+                    enqueued_at=now,
+                    finished_at=now,
+                )
             )
-        )
 
 
 @pytest.fixture
@@ -166,9 +168,12 @@ def _enqueue(engine: Engine, *jobs: tuple[Stage, int | None]) -> list[int]:
 
 
 def _statuses(engine: Engine) -> dict[int, JobStatus]:
-    """Every job's status, leaving out walks: `recently_walked`'s isn't the test's."""
+    """Every job's status, leaving out walks and purges: `recently_walked`'s aren't
+    the test's."""
     with Session(engine) as session:
-        rows = session.execute(sa.select(Job.id, Job.status).where(Job.stage != Stage.WALK))
+        rows = session.execute(
+            sa.select(Job.id, Job.status).where(Job.stage.not_in([Stage.WALK, Stage.PURGE]))
+        )
         return {job_id: status for job_id, status in rows}
 
 

@@ -570,6 +570,7 @@ export interface components {
       | "recognize"
       | "layout"
       | "duplicates"
+      | "purge"
       | "atlases"
       | "llm_tag"
       | "noop";

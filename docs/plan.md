@@ -208,7 +208,7 @@ A composite score (weights configurable) plus junk probability decide entry into
 
 **Review UI.** One item at a time, worst-first, phone-friendly. Keep / Skip / Delete. Keep writes a reviewed marker to the file (§6.10) so it's never re-queued, even after a DB rebuild.
 
-**Deletion = move to trash.** All deletes (quality, duplicates, lasso, the lightbox's Move to trash) move the file to `TRASH_DIR`, preserving its relative path. The trash view lists trashed items with restore. Items are permanently purged after `TRASH_RETENTION_DAYS` (default 30).
+**Deletion = move to trash.** All deletes (quality, duplicates, lasso, the lightbox's Move to trash) move the file to `TRASH_DIR`, preserving its relative path. The trash view lists trashed items with restore. Items are permanently purged after `TRASH_RETENTION_DAYS` (default 30), by a daily purge job. While `EXIF_WRITES_ENABLED` is off, the purge is a dry run too: it logs each file it would delete and deletes nothing, so nothing irreversible happens to a library file until writes are enabled. Moving to the trash isn't blocked, since a restore undoes it.
 
 **Trash location.** `TRASH_DIR` defaults to `PHOTO_DIR/.photo-triage-trash`, a hidden folder on the same filesystem as the library, so moving a file to or from the trash is a rename. A move is always a rename: if the trash is on another filesystem, the move fails rather than falling back to copy and delete, which would be slow for large videos and could be left half-done. Startup warns when the trash is on another filesystem, and refuses a `TRASH_DIR` that is `PHOTO_DIR` or contains it. A trash inside the library is safe because the scanner skips it (§6.1) and elodie only imports new files, never walking the existing library.
 
@@ -230,7 +230,7 @@ Naming writes to the file: `XMP-iptcExt:PersonInImage`, the person's name as a k
 All file metadata writes go through a **write queue** in SQLite, applied by the worker:
 
 - `exiftool -overwrite_original_in_place` (no `_original` backup files littering the library; preserves inode/permissions), file mtime preserved. exiftool's `-P` keeps the mtime only to the whole second, so the worker restores the exact `file_mtime_ns` itself after each write.
-- `EXIF_WRITES_ENABLED=false` dry-run mode: writes are queued and logged but not applied — for early testing against the real library.
+- `EXIF_WRITES_ENABLED=false` dry-run mode: writes are queued and logged but not applied, and the trash isn't purged — for early testing against the real library.
 - A **write log** records before/after values for every field changed, enabling audit and revert.
 - Writes to the same file are coalesced.
 
@@ -409,7 +409,7 @@ Environment variables, documented in `.env.example`:
 | `VIDEO_SAMPLE_FRAMES` | `5` | Frames sampled per video |
 | `THUMBNAIL_SIZE` | `400` | Long-edge thumbnail size |
 | `TRASH_RETENTION_DAYS` | `30` | Days before trashed files are purged |
-| `EXIF_WRITES_ENABLED` | `false` | Apply queued metadata writes (off = dry run) |
+| `EXIF_WRITES_ENABLED` | `false` | Apply queued metadata writes and purge the trash (off = dry run: both are logged, not done) |
 | `AUTH_MODE` | `none` | `none` or `forward_auth` (§10) |
 | `AUTH_USER_HEADER` | `X-Forwarded-Email` | Identity header when `AUTH_MODE=forward_auth` |
 | `NOTIFY_WEBHOOK_URL` | *(unset)* | Optional milestone/error notifications |

@@ -29,7 +29,7 @@ from photo_triage.db.models import Item, Job, JobStats, JobStatus
 from photo_triage.eta import finish_at
 from photo_triage.pipeline.thumbnails import Thumbnail, thumbnail_path
 from photo_triage.settings import Settings
-from photo_triage.worker import controls, heartbeat
+from photo_triage.worker import controls, heartbeat, purge_schedule
 from photo_triage.worker.atlas_schedule import current_set
 from photo_triage.worker.clock import Clock
 from photo_triage.worker.layout_schedule import latest_version
@@ -83,7 +83,8 @@ class StageActivity(BaseModel):
     """Batch stages: who asked for the latest finished run. None when the schedule
     or the pipeline queued it."""
     next_scheduled_at: AwareDatetime | None = None
-    """When the schedule queues the stage next: the walk, on `SCAN_SCHEDULE`."""
+    """When the schedule queues the stage next: the walk, on `SCAN_SCHEDULE`, and
+    the purge, a day after its last run."""
     throughput_per_min: float | None = None
     """Item stages (and noop): items done per minute of the worker's time on them, over the
     last `THROUGHPUT_WINDOW`. None with no work in that time."""
@@ -332,14 +333,16 @@ def _with_eta(
 def _with_runs(
     settings: Settings, now: dt.datetime, last_runs: LastRuns, row: StageActivity
 ) -> StageActivity:
-    """Add a batch stage's last run, and the walk's next scheduled one. The other
-    batch stages have no schedule: the pipeline queues them."""
+    """Add a batch stage's last run, and the next scheduled one of the walk and the
+    daily purge. The other batch stages have no schedule: the pipeline queues them."""
     if row.kind != "batch":
         return row
     last = last_runs.get(row.stage, LastRun())
     update: dict[str, object] = {"last_finished_at": last.finished_at, "last_actor": last.actor}
     if row.stage == Stage.WALK:
         update["next_scheduled_at"] = settings.scan_schedule.next_at(now, settings.tz)
+    elif row.stage == Stage.PURGE:
+        update["next_scheduled_at"] = purge_schedule.next_at(last.finished_at)
     return row.model_copy(update=update)
 
 

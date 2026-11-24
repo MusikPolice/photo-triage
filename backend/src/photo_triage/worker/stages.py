@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 
 from photo_triage.db.models import Job, MediaType
 from photo_triage.files import MetadataWriter
-from photo_triage.pipeline import frames, metadata, scan, thumbnails, writeback
+from photo_triage.pipeline import frames, metadata, purge, scan, thumbnails, writeback
 from photo_triage.settings import Settings
 from photo_triage.worker.clock import Clock
 from photo_triage.worker.queue import JobQueue, Stage
@@ -192,6 +192,21 @@ def build_runners(
             sessions, settings.clip_model, settings.duplicate_similarity_threshold, clock()
         )
 
+    def run_purge(job: Job) -> None:
+        result = purge.purge(
+            sessions,
+            settings.trash_dir,
+            settings.derived_dir,
+            enabled=settings.exif_writes_enabled,
+            now=clock(),
+        )
+        if result.purged or result.missing:
+            logger.info(
+                "Purged %d trashed items past retention (%d already gone from the trash)",
+                result.purged + result.missing,
+                result.missing,
+            )
+
     def run_atlases(job: Job) -> None:
         # Here, not at the top, like layout: it imports NumPy.
         from photo_triage.pipeline import atlases
@@ -209,6 +224,7 @@ def build_runners(
         Stage.LAYOUT: run_layout,
         Stage.ATLASES: run_atlases,
         Stage.DUPLICATES: run_duplicates,
+        Stage.PURGE: run_purge,
     }
     if settings.worker_noop_stage:
         runners[Stage.NOOP] = run_noop

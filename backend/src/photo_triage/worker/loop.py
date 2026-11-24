@@ -8,7 +8,8 @@ job stays `running` until `recover` puts it back at the next start.
 Before each claim the worker checks whether it's paused (`controls`) or in quiet
 hours, so a job that's running when either starts is finished first. Before that,
 it queues a walk if `SCAN_SCHEDULE` says one is due, even when paused or quiet
-(`photo_triage.worker.scan_schedule`).
+(`photo_triage.worker.scan_schedule`), and with `purge_daily`, the daily purge of
+the trash (`photo_triage.worker.purge_schedule`).
 
 When an item stage's job finishes, it queues the stages after it that are now due
 for the item (`reconcile.chain`), so new items flow straight through. After each
@@ -39,7 +40,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from photo_triage.db.models import JOB_IS_OPEN, Job, JobStatus
 from photo_triage.quiet_hours import UTC_ZONE, QuietHours
 from photo_triage.schedule import Schedule
-from photo_triage.worker import atlas_schedule, duplicate_schedule, layout_schedule
+from photo_triage.worker import (
+    atlas_schedule,
+    duplicate_schedule,
+    layout_schedule,
+    purge_schedule,
+)
 from photo_triage.worker.clock import Clock, Timer, utc_now
 from photo_triage.worker.queue import JobQueue, Stage
 from photo_triage.worker.reconcile import chain, reconcile
@@ -51,6 +57,9 @@ logger = logging.getLogger(__name__)
 
 SUMMARY_INTERVAL_S = 300.0
 """How often a progress summary is logged at INFO while jobs are running."""
+
+PURGE_RECHECK = dt.timedelta(minutes=1)
+"""How soon to look again for the next purge while one is open."""
 
 IDLE_POLL_S = 2.0
 """How long the worker waits before looking again when there's nothing to run."""
@@ -72,13 +81,15 @@ class Worker:
         scan_schedule: Schedule | None = None,
         layout_model: str | None = None,
         derived_dir: Path | None = None,
+        purge_daily: bool = False,
     ) -> None:
         """`clock` should be the queue's clock. `zone` is the one quiet hours and
         `scan_schedule` are in. `item_stages` are the stages to reconcile, whose
         versions jobs record. Without `scan_schedule`, walks are queued only by hand.
         `layout_model` is `CLIP_MODEL`, whose embeddings are laid out; without it,
         layout fits are queued only by hand. `derived_dir` holds the atlases;
-        without it, they're queued only by hand."""
+        without it, they're queued only by hand. With `purge_daily`, the trash is
+        purged daily; without it, only by hand."""
         self._engine = engine
         self._sessions = sessionmaker(engine, expire_on_commit=False)
         self._runners = dict(runners)
@@ -97,6 +108,9 @@ class Worker:
         self._layout_model = layout_model
         self._derived_dir = derived_dir
         self._growth_checked_s: float | None = None
+        self._purge_daily = purge_daily
+        self._purge_checked_to: dt.datetime | None = None
+        """No purge is due before this, unless a purge job is deleted."""
 
     @property
     def state(self) -> WorkerState:
@@ -145,6 +159,7 @@ class Worker:
         result. Returns False if there was nothing to run, or the worker is paused or
         in quiet hours."""
         self._queue_scheduled_walk()
+        self._queue_purge()
         with self._sessions.begin() as session:
             state = read_state(session, self._quiet_hours, self._zone, self._clock())
             job = None
@@ -228,6 +243,20 @@ class Worker:
                 f"{due_at.astimezone(self._zone):%a %Y-%m-%d %H:%M %Z}",
             )
         self._schedule_checked_to = self._scan_schedule.next_at(now, self._zone)
+
+    def _queue_purge(self) -> None:
+        """Queue the daily purge if it's due. Looks in the database only once it
+        might be: a minute after the last look while a purge is open."""
+        if not self._purge_daily:
+            return
+        now = self._clock()
+        if self._purge_checked_to is not None and now < self._purge_checked_to:
+            return
+        with self._sessions.begin() as session:
+            next_at = purge_schedule.queue_if_due(session, self._queue, now)
+        self._purge_checked_to = next_at or now + PURGE_RECHECK
+        if next_at is None:
+            logger.debug("Purge queued or still open; looking again at %s", self._purge_checked_to)
 
     def _chain(self, session: Session, job: Job) -> list[str]:
         """Queue the item stages that `job`, just done, makes due for its item."""
