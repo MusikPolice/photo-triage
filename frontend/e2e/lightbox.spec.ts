@@ -128,7 +128,7 @@ test("opening a similar item moves the lightbox and the map to it", async ({ pag
   ).json()) as Neighbours;
   const [next] = neighbours.items;
   if (next === undefined) throw new Error(`Item ${String(first)} has no neighbours`);
-  await strip.getByRole("button", { name: `Similar ${next.media_type} 1` }).click();
+  await strip.getByRole("button", { name: `Similar ${next.media_type} 1`, exact: true }).click();
 
   // The lightbox shows it, at its own URL.
   await expect.poll(() => itemFromSearch(new URL(page.url()).search)).toBe(next.id);

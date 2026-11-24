@@ -154,6 +154,8 @@ def test_logs_the_backup_and_each_migration_at_info(
         "or pipeline did)",
         "Applied migration 0014: items: damaged, for a photo that decodes only partly",
         "Applied migration 0015: layout: each item's place on the map",
+        "Applied migration 0016: duplicate_groups and duplicate_members: near-identical "
+        "items, for review",
         f"The database is at revision {head_revision()}",
     ]
 

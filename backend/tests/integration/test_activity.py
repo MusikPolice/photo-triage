@@ -471,8 +471,8 @@ async def test_the_walk_shows_its_last_finished_run_and_who_asked(
     assert walk["last_actor"] == "alice@example.com"
 
 
-@pytest.mark.parametrize("stage", [Stage.LAYOUT, Stage.ATLASES])
-async def test_layout_and_atlases_show_their_last_run_and_no_schedule(
+@pytest.mark.parametrize("stage", [Stage.LAYOUT, Stage.ATLASES, Stage.DUPLICATES])
+async def test_layout_atlases_and_grouping_show_their_last_run_and_no_schedule(
     client: AsyncClient, migrated: Engine, stage: Stage
 ) -> None:
     finished_at = START - dt.timedelta(minutes=30)
