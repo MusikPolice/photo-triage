@@ -460,9 +460,9 @@ Ollama service, model evaluation (moondream vs. alternatives) on real photos for
 ## 12. Open Questions
 
 - **Tagging model:** moondream vs. Qwen2.5-VL 3B vs. Gemma 3 4B — needs an empirical bake-off on real family photos for caption quality vs. items/min.
-- **Threshold calibration:** duplicate similarity (0.95), quality/junk thresholds, face match distance, UMAP parameters (`n_neighbors`, `min_dist`) — all need tuning against the real library.
+- **Threshold calibration:** duplicate similarity (0.95), quality/junk thresholds, face match distance, UMAP parameters (`n_neighbors`, `min_dist`), the search floor (0.24, CLIP text-to-picture; #116) — all need tuning against the real library.
 - **Video aggregation details:** whether 5 frames is enough, how long videos should be sampled, and whether per-frame quality should flag only the worst segment.
 - **Layout churn:** "always re-fit" is the chosen behavior; if reshuffling after each scan proves disorienting, fall back to fitting once and placing new items with `umap.transform()`.
 - ~~**exiftool coverage:** confirm MWG regions and custom XMP namespaces write cleanly to HEIC and MP4/MOV.~~ Answered in Phase 2: they do. HEIC takes no IPTC and QuickTime keywords are one string, so the mapping in §6.10 differs by container.
 - ~~**Vector storage:** plain SQLite blobs + numpy vs. `sqlite-vec` — decide during Phase 2 based on memory footprint and query latency.~~ Answered in Phase 2 (#55): blobs + numpy. On 100k vectors it holds 211 MB in the API against sqlite-vec's 6 MB, but answers a top-100 query in 7 ms (sqlite-vec: 98 ms) and finds every pair at ≥ 0.95 in 45 s (sqlite-vec, one k-nearest query per vector: about 2.4 h). No native extension to ship. `tests/bench/test_vector_storage_bench.py` reproduces it.
-- **Mobile map performance:** whether 100k points + atlases are smooth on the household's actual phones; fallback is dots-only on mobile.
+- ~~**Mobile map performance:** whether 100k points + atlases are smooth on the household's actual phones; fallback is dots-only on mobile.~~ Answered in Phase 3 (#119): thumbnails stay on phones. With 100k synthetic items and 24 atlas sheets (`just map-stack`), desktop Chrome holds 60 fps and the household's phone pans and zooms smoothly. The points download is 1.7 MB and each sheet about 5 MB.
