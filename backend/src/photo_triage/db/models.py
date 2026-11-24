@@ -11,6 +11,7 @@ raw timestamps carry their unit in the name (`file_size_bytes`, `duration_s`,
 
 import datetime as dt
 from enum import StrEnum
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -72,6 +73,15 @@ class GroupStatus(StrEnum):
     RESOLVED = "resolved"
     SKIPPED = "skipped"
     """Looked at and left for later."""
+
+
+class WriteStatus(StrEnum):
+    QUEUED = "queued"
+    APPLIED = "applied"
+    DRY_RUN = "dry_run"
+    """Logged with `EXIF_WRITES_ENABLED` off, and not made."""
+    ERROR = "error"
+    """Failed; queued again while its job retries."""
 
 
 class JobStatus(StrEnum):
@@ -274,6 +284,38 @@ class TrashEntry(Base):
     """Who trashed it (plan §10)."""
     purge_after: Mapped[dt.datetime] = mapped_column(UTCDateTime)
     """`trashed_at` plus `TRASH_RETENTION_DAYS`."""
+
+
+class MetadataWrite(Base):
+    """A change to an item's file metadata, queued and then applied or logged by the
+    `metadata_write` stage (plan §6.10): the write queue and the write log in one.
+
+    `fields` holds the values asked for, by field (`photo_triage.pipeline.writeback`
+    names them: `tags`, `reviewed`). `before` and `after` hold the values of those
+    that changed, read from the file before the write and as written.
+    """
+
+    __tablename__ = "metadata_writes"
+    __table_args__ = (
+        # The stage reads an item's writes still to make.
+        sa.Index("ix_metadata_writes_item_id_status", "item_id", "status"),
+        # The write log lists the newest first, by status or all.
+        sa.Index("ix_metadata_writes_status_id", "status", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(sa.ForeignKey("items.id", ondelete="CASCADE"))
+    fields: Mapped[dict[str, Any]] = mapped_column(sa.JSON)
+    before: Mapped[dict[str, Any] | None] = mapped_column(sa.JSON)
+    after: Mapped[dict[str, Any] | None] = mapped_column(sa.JSON)
+    status: Mapped[WriteStatus] = mapped_column(
+        _enum(WriteStatus, "write_status"), default=WriteStatus.QUEUED
+    )
+    actor: Mapped[str | None] = mapped_column(sa.String(255))
+    """Who asked for it (plan §10). None when the pipeline did."""
+    created_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
+    applied_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    """When it was written, or logged as a dry run."""
 
 
 JOB_IS_OPEN = "status IN ('pending', 'error')"

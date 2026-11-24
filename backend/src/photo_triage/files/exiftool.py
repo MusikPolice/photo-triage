@@ -1,9 +1,9 @@
-"""One persistent exiftool process (`-stay_open`), which the worker reads metadata
-through (plan §5).
+"""One persistent exiftool process (`-stay_open`), which the worker reads and writes
+metadata through (plan §5, §6.10).
 
-It only reads for now, but Phase 4's writes will go through the same process, and
-the file-mutation check bans naming the executable outside this package
-(dev-environment §7). Other packages see it as a `MetadataReader`.
+The file-mutation check bans naming the executable outside this package
+(dev-environment §7). Other packages see it as a `MetadataReader`, and the
+metadata write stage as a `MetadataWriter` too.
 
 Starting exiftool costs a Perl interpreter and its modules, about a tenth of a
 second, so one process serves every read. It starts on the first read, is started
@@ -49,9 +49,17 @@ class MetadataReader(Protocol):
         ...
 
 
+class MetadataWriter(MetadataReader, Protocol):
+    def write(self, path: Path, args: Sequence[str]) -> None:
+        """Write exiftool assignments such as `-XMP-dc:Subject=dog` to `path`, in
+        place, keeping its inode, permissions and exact mtime (plan §6.10). Raises
+        `MetadataError` if it isn't written."""
+        ...
+
+
 class ExifTool:
-    """A `MetadataReader` backed by one `exiftool -stay_open` process. Safe to share
-    between threads: reads take turns."""
+    """A `MetadataWriter` backed by one `exiftool -stay_open` process. Safe to share
+    between threads: requests take turns."""
 
     def __init__(self, timeout_s: float = READ_TIMEOUT_S) -> None:
         self._timeout_s = timeout_s
@@ -81,11 +89,7 @@ class ExifTool:
     def read(self, path: Path, tags: Sequence[str]) -> dict[str, Any]:
         args = ["-json", "-G0:1", "-a", "-n", "-charset", "filename=utf8"]
         args += [f"-{tag}" for tag in tags]
-        # The -@ arguments are one per line, and one starting with "-" is an option.
-        name = os.path.abspath(path)
-        if "\n" in name or "\r" in name:
-            raise MetadataError(f"can't pass a file name with a line break to exiftool: {name!r}")
-        args.append(name)
+        args.append(_name(path))
         with self._lock:
             output, messages = self._execute(args)
         results: list[dict[str, Any]] = []
@@ -99,6 +103,25 @@ class ExifTool:
         result: dict[str, Any] = results[0]
         result.pop("SourceFile", None)
         return result
+
+    def write(self, path: Path, args: Sequence[str]) -> None:
+        # In place, so no `_original` copies are left in the library and the inode
+        # stays. -P keeps the mtime to the second; the nanoseconds are put back after.
+        request = ["-overwrite_original_in_place", "-P", "-charset", "filename=utf8"]
+        for arg in args:
+            if "\n" in arg or "\r" in arg:
+                raise MetadataError(f"can't pass a value with a line break to exiftool: {arg!r}")
+            request.append(arg)
+        request.append(_name(path))
+        before = os.stat(path)
+        try:
+            with self._lock:
+                output, messages = self._execute(request)
+        finally:
+            if os.stat(path).st_mtime_ns != before.st_mtime_ns:
+                os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        if "1 image files updated" not in output and "1 image files unchanged" not in output:
+            raise MetadataError(f"exiftool didn't write {path.name}: {messages or output.strip()}")
 
     def close(self) -> None:
         """Stop the process, waiting a few seconds for it to exit cleanly."""
@@ -214,3 +237,12 @@ class ExifTool:
         for pipe in (process.stdin, process.stdout, process.stderr):
             if pipe is not None:
                 pipe.close()
+
+
+def _name(path: Path) -> str:
+    # The -@ arguments are one per line, and one starting with "-" is an option, so
+    # the name is absolute.
+    name = os.path.abspath(path)
+    if "\n" in name or "\r" in name:
+        raise MetadataError(f"can't pass a file name with a line break to exiftool: {name!r}")
+    return name

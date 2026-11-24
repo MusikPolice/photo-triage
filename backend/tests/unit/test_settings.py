@@ -41,6 +41,7 @@ PUBLIC_SETTINGS = {
     "video_sample_frames",
     "duplicate_similarity_threshold",
     "trash_retention_days",
+    "exif_writes_enabled",
     "worker_noop_stage",
     "worker_fake_clip",
     "fake_now",
@@ -119,6 +120,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.trash_retention_days == 30
     assert settings.video_sample_frames == 5
     assert settings.duplicate_similarity_threshold == 0.95
+    assert settings.exif_writes_enabled is False
     assert settings.thumbnail_size == 400
     assert settings.models_dir == Path.home() / ".cache/photo-triage/models"
     assert settings.clip_model == "ViT-B-32"

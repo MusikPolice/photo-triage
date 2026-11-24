@@ -157,6 +157,7 @@ def test_logs_the_backup_and_each_migration_at_info(
         "Applied migration 0016: duplicate_groups and duplicate_members: near-identical "
         "items, for review",
         "Applied migration 0017: trash: where each trashed item's file was and is",
+        "Applied migration 0018: metadata_writes: the write queue and write log",
         f"The database is at revision {head_revision()}",
     ]
 
