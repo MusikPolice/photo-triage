@@ -156,3 +156,31 @@ export function grown(bounds: Bounds, fraction: number): Bounds {
     maxY: bounds.maxY + dy,
   };
 }
+
+/** `points` without the items in `hidden`: those moved to the trash since the
+ * points were loaded. The same object if none of them is there. */
+export function withoutIds(points: MapPoints, hidden: ReadonlySet<number>): MapPoints {
+  if (hidden.size === 0) return points;
+  const kept: number[] = [];
+  for (let i = 0; i < points.count; i++) {
+    if (!hidden.has(points.ids[i] ?? 0)) kept.push(i);
+  }
+  if (kept.length === points.count) return points;
+  const count = kept.length;
+  const out: MapPoints = {
+    version: points.version,
+    count,
+    ids: new Uint32Array(count),
+    positions: new Float32Array(2 * count),
+    days: new Int32Array(count),
+    kinds: new Uint8Array(count),
+  };
+  kept.forEach((from, to) => {
+    out.ids[to] = points.ids[from] ?? 0;
+    out.positions[2 * to] = points.positions[2 * from] ?? 0;
+    out.positions[2 * to + 1] = points.positions[2 * from + 1] ?? 0;
+    out.days[to] = points.days[from] ?? 0;
+    out.kinds[to] = points.kinds[from] ?? 0;
+  });
+  return out;
+}

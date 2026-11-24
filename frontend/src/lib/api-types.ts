@@ -657,6 +657,8 @@ export interface components {
        * Format: date-time
        */
       purge_after: string;
+      /** Thumbnail Url */
+      thumbnail_url: string;
       /**
        * Trashed At
        * Format: date-time

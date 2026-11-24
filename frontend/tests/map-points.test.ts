@@ -10,6 +10,7 @@ import {
   PointsFormatError,
   POINTS_URL,
   viewBounds,
+  withoutIds,
 } from "../src/lib/map-points";
 
 interface Point {
@@ -156,5 +157,29 @@ describe("viewBounds", () => {
       minY: 0.25,
       maxY: 0.75,
     });
+  });
+});
+
+describe("withoutIds", () => {
+  const points = decodePoints(encode(4, POINTS));
+
+  it("leaves out the hidden items, keeping each column in step", () => {
+    const shown = withoutIds(points, new Set([7]));
+
+    expect(shown.version).toBe(4);
+    expect(shown.count).toBe(2);
+    expect([...shown.ids]).toEqual([3, 12]);
+    expect([...shown.positions]).toEqual([0, 0.25, 0.5, 0.75]);
+    expect([...shown.days]).toEqual([17_971, -1]);
+    expect([...shown.kinds]).toEqual([0, 0]);
+  });
+
+  it("is the same points when nothing hidden is on the map", () => {
+    expect(withoutIds(points, new Set())).toBe(points);
+    expect(withoutIds(points, new Set([99]))).toBe(points);
+  });
+
+  it("can leave none", () => {
+    expect(withoutIds(points, new Set([3, 7, 12])).count).toBe(0);
   });
 });

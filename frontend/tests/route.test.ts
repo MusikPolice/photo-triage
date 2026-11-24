@@ -10,6 +10,7 @@ it.each([
   ["/activity", "activity"],
   ["/activity/", "activity"],
   ["/writes", "writes"],
+  ["/trash", "trash"],
   ["/nowhere", "missing"],
 ])("%j is %s", (pathname, route) => {
   expect(parseRoute(pathname)).toBe(route);
@@ -18,6 +19,7 @@ it.each([
 it("parses its own links", () => {
   expect(parseRoute(ROUTE_HREF.activity)).toBe("activity");
   expect(parseRoute(ROUTE_HREF.writes)).toBe("writes");
+  expect(parseRoute(ROUTE_HREF.trash)).toBe("trash");
   expect(parseRoute(ROUTE_HREF.home)).toBe("home");
 });
 

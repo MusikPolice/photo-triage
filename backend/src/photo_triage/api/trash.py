@@ -65,6 +65,8 @@ class TrashedItem(BaseModel):
     """Who trashed it."""
     purge_after: dt.datetime
     """When the purge deletes it for good."""
+    thumbnail_url: str
+    """Its large thumbnail (`THUMBNAIL_SIZE`), kept while it's in the trash."""
 
 
 class TrashPage(BaseModel):
@@ -156,6 +158,7 @@ def restore(
 @router.get("/trash")
 def trashed(
     session: DbSession,
+    settings: Annotated[Settings, Depends(get_settings)],
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = PAGE_SIZE,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> TrashPage:
@@ -177,6 +180,9 @@ def trashed(
                 trashed_at=entry.trashed_at,
                 actor=entry.actor,
                 purge_after=entry.purge_after,
+                thumbnail_url=(
+                    f"/api/items/{entry.item_id}/thumbnail?size={settings.thumbnail_size}"
+                ),
             )
             for entry, media_type in rows
         ],

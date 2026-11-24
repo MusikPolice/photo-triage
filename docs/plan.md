@@ -154,7 +154,7 @@ The app's home screen: every item as a point in a 2D layout produced by UMAP ove
 
 **Color-by overlays.** Year, person, quality score, duplicate group, pipeline status (e.g. "not yet tagged"), media type.
 
-**Lightbox & similarity walk.** Opening an item shows it full-size with metadata, tags, people, and a strip of its nearest CLIP neighbors. Clicking a neighbor opens it and re-centers the map on it — a way to wander through the library.
+**Lightbox & similarity walk.** Opening an item shows it full-size with metadata, tags, people, and a strip of its nearest CLIP neighbors. Clicking a neighbor opens it and re-centers the map on it — a way to wander through the library. A **Move to trash** button trashes the open item (§6.8), closing the lightbox with an undo, so a phone can trash one item at a time.
 
 **Lasso select → bulk actions** (desktop only). Draw around a region to select items, then: move to trash, add/remove a tag, assign to a person, or send to the quality review queue.
 
@@ -208,7 +208,7 @@ A composite score (weights configurable) plus junk probability decide entry into
 
 **Review UI.** One item at a time, worst-first, phone-friendly. Keep / Skip / Delete. Keep writes a reviewed marker to the file (§6.10) so it's never re-queued, even after a DB rebuild.
 
-**Deletion = move to trash.** All deletes (quality, duplicates, lasso) move the file to `TRASH_DIR`, preserving its relative path. The trash view lists trashed items with restore. Items are permanently purged after `TRASH_RETENTION_DAYS` (default 30).
+**Deletion = move to trash.** All deletes (quality, duplicates, lasso, the lightbox's Move to trash) move the file to `TRASH_DIR`, preserving its relative path. The trash view lists trashed items with restore. Items are permanently purged after `TRASH_RETENTION_DAYS` (default 30).
 
 **Trash location.** `TRASH_DIR` defaults to `PHOTO_DIR/.photo-triage-trash`, a hidden folder on the same filesystem as the library, so moving a file to or from the trash is a rename. A move is always a rename: if the trash is on another filesystem, the move fails rather than falling back to copy and delete, which would be slow for large videos and could be left half-done. Startup warns when the trash is on another filesystem, and refuses a `TRASH_DIR` that is `PHOTO_DIR` or contains it. A trash inside the library is safe because the scanner skips it (§6.1) and elodie only imports new files, never walking the existing library.
 

@@ -2,12 +2,13 @@
  * `/api` with `index.html`, and links within the app change the page without a
  * reload, through the History API. */
 
-export type Route = "home" | "activity" | "writes" | "missing";
+export type Route = "home" | "activity" | "writes" | "trash" | "missing";
 
 export const ROUTE_HREF = {
   home: "/",
   activity: "/activity",
   writes: "/writes",
+  trash: "/trash",
 } as const satisfies Partial<Record<Route, string>>;
 
 export function parseRoute(pathname: string): Route {
@@ -18,6 +19,8 @@ export function parseRoute(pathname: string): Route {
       return "activity";
     case "/writes":
       return "writes";
+    case "/trash":
+      return "trash";
     default:
       return "missing";
   }

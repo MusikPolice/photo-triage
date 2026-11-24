@@ -209,6 +209,8 @@ async def test_the_trash_lists_the_newest_first(
     assert newest["media_type"] == "photo"
     assert newest["original_path"] == f"photos/{ids[2]}.jpg"
     assert newest["actor"] == "anonymous"
+    thumbnail = f"/api/items/{ids[2]}/thumbnail?size={settings.thumbnail_size}"
+    assert newest["thumbnail_url"] == thumbnail
     assert dt.datetime.fromisoformat(newest["purge_after"]) - dt.datetime.fromisoformat(
         newest["trashed_at"]
     ) == dt.timedelta(days=30)
