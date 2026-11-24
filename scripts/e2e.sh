@@ -25,6 +25,11 @@ cp -r backend/tests/fixtures/synthetic/. "$scratch/photos/"
 # Its scan fails and waits minutes to retry, so the scan stage would never show
 # done; the backend's tests cover how it's handled.
 rm "$scratch/photos/broken/truncated.jpg"
+# Copies, so there are duplicate groups to review: the fake embedder gives the same
+# vector only for the same pixels. One group for each Playwright project.
+mkdir "$scratch/photos/copies"
+cp backend/tests/fixtures/synthetic/scenes/scene-01.jpg "$scratch/photos/copies/scene-01.jpg"
+cp backend/tests/fixtures/synthetic/burst/burst-01.jpg "$scratch/photos/copies/burst-01.jpg"
 cat >"$scratch/app.env" <<'EOF'
 # Settings for `just e2e`'s containers, in place of `.env`.
 WORKER_FAKE_CLIP=true

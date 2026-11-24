@@ -158,6 +158,7 @@ def test_logs_the_backup_and_each_migration_at_info(
         "items, for review",
         "Applied migration 0017: trash: where each trashed item's file was and is",
         "Applied migration 0018: metadata_writes: the write queue and write log",
+        "Applied migration 0019: reviews, duplicate group leases, and items' reviewed markers",
         f"The database is at revision {head_revision()}",
     ]
 

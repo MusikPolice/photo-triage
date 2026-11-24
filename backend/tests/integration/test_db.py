@@ -34,6 +34,7 @@ PHASE_1_COLUMNS = {
         "last_seen_at",
         "missing_since",
         "status",
+        "reviewed",
     },
     "jobs": {
         "id",

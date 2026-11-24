@@ -51,6 +51,8 @@ pillow_heif.register_heif_opener()  # pyright: ignore[reportUnknownMemberType]
 
 QUICKTIME_KEYWORDS = "QuickTime:Keywords"
 KEYWORD_TAGS = ("IPTC:Keywords", "XMP-dc:Subject", QUICKTIME_KEYWORDS)
+REVIEWED_TAG = "XMP-phototriage:Reviewed"
+"""The review kinds a file has been through, comma-separated (plan §6.10)."""
 PHOTO_DATE_TAGS = (
     "EXIF:DateTimeOriginal",
     "XMP:DateTimeOriginal",
@@ -96,6 +98,7 @@ class FileMetadata:
     orientation: int | None
     taken_at_local: dt.datetime
     keywords: tuple[str, ...]
+    reviewed: tuple[str, ...] = ()
 
 
 def read(
@@ -106,7 +109,7 @@ def read(
     date_tags = (
         PHOTO_DATE_TAGS if kind == MediaType.PHOTO else (VIDEO_LOCAL_DATE_TAG, VIDEO_UTC_DATE_TAG)
     )
-    tags = reader.read(path, [*date_tags, *KEYWORD_TAGS])
+    tags = reader.read(path, [*date_tags, *KEYWORD_TAGS, REVIEWED_TAG])
     if kind == MediaType.PHOTO:
         width, height, orientation = _photo_size(path)
         duration_s = None
@@ -124,7 +127,19 @@ def read(
         orientation=orientation,
         taken_at_local=taken_at_local(tags, kind, zone, mtime_ns, path),
         keywords=keywords(tags),
+        reviewed=reviewed_kinds(tags),
     )
+
+
+def reviewed_kinds(tags: Mapping[str, Any]) -> tuple[str, ...]:
+    """The review kinds in exiftool's `tags`, from `REVIEWED_TAG`, each once."""
+    kinds = [
+        part.strip()
+        for value in values(tags, REVIEWED_TAG)
+        for part in str(value).split(",")
+        if part.strip()
+    ]
+    return tuple(dict.fromkeys(kinds))
 
 
 def taken_at_local(
@@ -237,6 +252,7 @@ def record(
             "duration_s": found.duration_s,
             "orientation": found.orientation,
             "taken_at_local": found.taken_at_local,
+            "reviewed": list(found.reviewed),
         }
         changed = any(getattr(item, name) != value for name, value in fields.items())
         for name, value in fields.items():

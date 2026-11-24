@@ -15,6 +15,7 @@ from starlette.types import Scope
 from photo_triage.api import (
     activity,
     atlases,
+    duplicates,
     events,
     health,
     items,
@@ -99,6 +100,7 @@ def create_app(
     app.include_router(trash.router, prefix="/api")
     app.include_router(tags.router, prefix="/api")
     app.include_router(metadata_writes.router, prefix="/api")
+    app.include_router(duplicates.router, prefix="/api")
     # Last, since it matches every path.
     if frontend_dir is not None:
         app.mount("/", SinglePageApp(directory=frontend_dir, html=True), name="frontend")

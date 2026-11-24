@@ -32,12 +32,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from photo_triage.db.models import Item, ItemStatus, Job, MetadataWrite, WriteStatus
 from photo_triage.files import MetadataWriter
 from photo_triage.pipeline.identity import VIDEO_SUFFIXES
-from photo_triage.pipeline.metadata import KEYWORD_TAGS, keywords, values
+from photo_triage.pipeline.metadata import KEYWORD_TAGS, REVIEWED_TAG, keywords, reviewed_kinds
 from photo_triage.worker.queue import JobQueue, Stage
 
 logger = logging.getLogger(__name__)
-
-REVIEWED_TAG = "XMP-phototriage:Reviewed"
 
 
 class Field(StrEnum):
@@ -111,13 +109,7 @@ def _list_args(tag: str, items: Sequence[str]) -> list[str]:
 def read_fields(writer: MetadataWriter, path: Path) -> dict[Field, list[str]]:
     """The file's current values of every field."""
     tags = writer.read(path, [*KEYWORD_TAGS, REVIEWED_TAG])
-    reviewed = [
-        part.strip()
-        for value in values(tags, REVIEWED_TAG)
-        for part in str(value).split(",")
-        if part.strip()
-    ]
-    return {Field.TAGS: list(keywords(tags)), Field.REVIEWED: reviewed}
+    return {Field.TAGS: list(keywords(tags)), Field.REVIEWED: list(reviewed_kinds(tags))}
 
 
 def apply(

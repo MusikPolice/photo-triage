@@ -16,6 +16,10 @@ skipped, while the component brings it no new member; one that does reopens it a
 pending. Other groups the component absorbs are deleted. A pending or skipped group
 that no component touches any more is deleted; a resolved one is kept as it was, as
 the record of the decision.
+
+A new group whose members all carry the `duplicates` reviewed marker in their files
+(`REVIEWED_MARKER`, read by `photo_triage.pipeline.metadata`) starts resolved: they
+were kept together before, and the marker outlived the database that said so.
 """
 
 import datetime as dt
@@ -33,6 +37,9 @@ from photo_triage.pipeline.embed import from_blob
 from photo_triage.worker.layout_schedule import embedded_items
 
 logger = logging.getLogger(__name__)
+
+REVIEWED_MARKER = "duplicates"
+"""The review kind a duplicate review's "Keep all" marks each member's file with."""
 
 BLOCK_ROWS = 256
 """Rows of the similarity matrix computed at once: 100 MB against 100k items."""
@@ -164,7 +171,11 @@ def _store(session: Session, found: list[list[int]], now: dt.datetime) -> Groupi
             else:
                 _rerank(session, group.id, component, items)
         else:
-            group = DuplicateGroup(status=GroupStatus.PENDING, created_at=now)
+            kept_before = all(REVIEWED_MARKER in (items[i].reviewed or []) for i in component)
+            status = GroupStatus.RESOLVED if kept_before else GroupStatus.PENDING
+            group = DuplicateGroup(
+                status=status, created_at=now, resolved_at=now if kept_before else None
+            )
             session.add(group)
             session.flush()
             existing[group.id] = group
