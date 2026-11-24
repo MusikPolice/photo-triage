@@ -11,6 +11,13 @@ from photo_triage.files.derived import DerivedPathError, remove_derived, replace
 from photo_triage.files.exiftool import ExifTool, MetadataError, MetadataReader
 from photo_triage.files.lock import LockHeldError, exclusive_lock
 from photo_triage.files.logs import LogPathError, RotatingLogHandler
+from photo_triage.files.trash import (
+    TrashError,
+    TrashPathError,
+    move_to_trash,
+    restore_from_trash,
+    same_filesystem,
+)
 
 __all__ = [
     "DerivedPathError",
@@ -20,8 +27,13 @@ __all__ = [
     "MetadataError",
     "MetadataReader",
     "RotatingLogHandler",
+    "TrashError",
+    "TrashPathError",
     "exclusive_lock",
+    "move_to_trash",
     "prune_backups",
     "remove_derived",
     "replace_derived",
+    "restore_from_trash",
+    "same_filesystem",
 ]

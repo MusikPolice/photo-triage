@@ -238,6 +238,52 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/trash": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Trashed
+     * @description What's in the trash, the most recently trashed first.
+     */
+    get: operations["trashed_api_trash_get"];
+    put?: never;
+    /**
+     * Trash
+     * @description Move items to the trash. An item already in the trash, or not in the library,
+     *     or whose file has gone, is skipped with the reason.
+     */
+    post: operations["trash_api_trash_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/trash/restore": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore
+     * @description Move items back from the trash to where they were. One that isn't in the trash,
+     *     or whose place in the library is taken, is skipped with the reason.
+     */
+    post: operations["restore_api_trash_restore_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/worker/pause": {
     parameters: {
       query?: never;
@@ -377,6 +423,11 @@ export interface components {
       /** Width */
       width: number | null;
     };
+    /** ItemIds */
+    ItemIds: {
+      /** Item Ids */
+      item_ids: number[];
+    };
     /** Match */
     Match: {
       /** Id */
@@ -389,6 +440,16 @@ export interface components {
      * @enum {string}
      */
     MediaType: "photo" | "video";
+    /**
+     * Moved
+     * @description What a trash or restore request did, item by item.
+     */
+    Moved: {
+      /** Moved */
+      moved: number[];
+      /** Skipped */
+      skipped: components["schemas"]["Skipped"][];
+    };
     /** Neighbour */
     Neighbour: {
       /** Id */
@@ -412,6 +473,13 @@ export interface components {
       matches: components["schemas"]["Match"][];
       /** Query */
       query: string;
+    };
+    /** Skipped */
+    Skipped: {
+      /** Id */
+      id: number;
+      /** Reason */
+      reason: string;
     };
     /**
      * Stage
@@ -473,6 +541,33 @@ export interface components {
       throughput_per_min?: number | null;
       /** Total */
       total: number;
+    };
+    /** TrashPage */
+    TrashPage: {
+      /** Items */
+      items: components["schemas"]["TrashedItem"][];
+      /** Total */
+      total: number;
+    };
+    /** TrashedItem */
+    TrashedItem: {
+      /** Actor */
+      actor: string;
+      /** Id */
+      id: number;
+      media_type: components["schemas"]["MediaType"];
+      /** Original Path */
+      original_path: string;
+      /**
+       * Purge After
+       * Format: date-time
+       */
+      purge_after: string;
+      /**
+       * Trashed At
+       * Format: date-time
+       */
+      trashed_at: string;
     };
     /** ValidationError */
     ValidationError: {
@@ -902,6 +997,104 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  trashed_api_trash_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TrashPage"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  trash_api_trash_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ItemIds"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Moved"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  restore_api_trash_restore_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ItemIds"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Moved"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
       };
     };
   };

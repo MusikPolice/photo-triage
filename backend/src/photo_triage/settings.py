@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     duplicate_similarity_threshold: Annotated[float, Field(gt=0, le=1)] = 0.95
     """CLIP cosine similarity at or above which two items are duplicates (plan §6.7)."""
 
+    trash_retention_days: Annotated[int, Field(ge=1)] = 30
+    """Days a trashed file stays in the trash before it's purged (plan §6.8)."""
+
     # Development only (dev-reference §2), so not in plan §9 or `.env.example`.
 
     worker_noop_stage: bool = False

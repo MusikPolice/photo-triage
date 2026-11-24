@@ -40,6 +40,7 @@ PUBLIC_SETTINGS = {
     "thumbnail_size",
     "video_sample_frames",
     "duplicate_similarity_threshold",
+    "trash_retention_days",
     "worker_noop_stage",
     "worker_fake_clip",
     "fake_now",
@@ -115,6 +116,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.worker_threads == 4
     assert settings.worker_quiet_hours is None
     assert settings.tz == ZoneInfo("UTC")
+    assert settings.trash_retention_days == 30
     assert settings.video_sample_frames == 5
     assert settings.duplicate_similarity_threshold == 0.95
     assert settings.thumbnail_size == 400
