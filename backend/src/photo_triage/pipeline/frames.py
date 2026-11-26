@@ -68,7 +68,7 @@ def sample_times(found: video.VideoProbe, count: int) -> list[float]:
 
 def frame_path(derived_dir: Path, item_id: int, frame_index: int) -> Path:
     """Where frame `frame_index` of the item is, once sampled."""
-    return _item_dir(derived_dir, item_id) / f"{frame_index}.jpg"
+    return frames_dir(derived_dir, item_id) / f"{frame_index}.jpg"
 
 
 def sample(
@@ -120,7 +120,7 @@ def sample(
         with sessions.begin() as session:
             if session.get(Item, item_id) is None:
                 return False
-            replace_derived(derived_dir, staged, _item_dir(derived_dir, item_id))
+            replace_derived(derived_dir, staged, frames_dir(derived_dir, item_id))
             session.execute(sa.delete(ItemFrame).where(ItemFrame.item_id == item_id))
             session.add_all(
                 ItemFrame(item_id=item_id, frame_index=index, timestamp_s=at_s)
@@ -131,7 +131,8 @@ def sample(
     return None
 
 
-def _item_dir(derived_dir: Path, item_id: int) -> Path:
+def frames_dir(derived_dir: Path, item_id: int) -> Path:
+    """The folder holding the item's frames."""
     return derived_dir / FRAMES_FOLDER / str(item_id)
 
 

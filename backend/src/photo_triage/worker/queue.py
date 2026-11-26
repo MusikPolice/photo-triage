@@ -51,6 +51,8 @@ class Stage(StrEnum):
     RECOGNIZE = "recognize"
     LAYOUT = "layout"
     DUPLICATES = "duplicates"
+    PURGE = "purge"
+    """Deletes trashed files past retention, daily (`photo_triage.worker.purge_schedule`)."""
     ATLASES = "atlases"
     LLM_TAG = "llm_tag"
     NOOP = "noop"
@@ -73,16 +75,19 @@ PRIORITY: dict[Stage, int] = {
     Stage.LAYOUT: 2,
     Stage.ATLASES: 2,
     Stage.DUPLICATES: 6,  # batch
+    Stage.PURGE: 6,  # batch, daily
     Stage.LLM_TAG: 7,
     Stage.NOOP: 8,
 }
 """Lower runs first: metadata writes > scan and reading metadata > thumbnails, layout
-and atlases > CLIP > quality > faces > duplicate grouping > LLM tagging, so the map
+and atlases > CLIP > quality > faces > duplicate grouping and the purge > LLM tagging, so the map
 and search become usable first, and the map grows while CLIP works through a
 backfill. A layout fit is queued only when one is due
 (`photo_triage.worker.layout_schedule`), so it costs CLIP little time."""
 
-BATCH_STAGES = frozenset({Stage.WALK, Stage.LAYOUT, Stage.DUPLICATES, Stage.ATLASES, Stage.NOOP})
+BATCH_STAGES = frozenset(
+    {Stage.WALK, Stage.LAYOUT, Stage.DUPLICATES, Stage.PURGE, Stage.ATLASES, Stage.NOOP}
+)
 """Stages whose jobs cover the whole library rather than one item."""
 
 LAST_ERROR_MAX_CHARS = 4096

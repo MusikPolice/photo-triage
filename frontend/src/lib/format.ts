@@ -22,6 +22,7 @@ const STAGE_NAMES: Record<Stage, string> = {
   recognize: "Recognition",
   layout: "Layout re-fit",
   duplicates: "Duplicate grouping",
+  purge: "Trash purge",
   atlases: "Atlases",
   llm_tag: "LLM tagging",
   noop: "Noop (dev)",

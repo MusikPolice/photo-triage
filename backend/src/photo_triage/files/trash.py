@@ -1,5 +1,5 @@
-"""Moving library files to the trash and back (plan §6.8). Both are renames, so they
-live here (dev-environment §7).
+"""Moving library files to the trash and back, and deleting them from it for good
+(plan §6.8). These change library files, so they live here (dev-environment §7).
 
 A file keeps its path relative to the library, under `TRASH_DIR`. A move is always
 a rename on one filesystem: across two it fails, rather than copying and deleting,
@@ -43,6 +43,26 @@ def restore_from_trash(photo_dir: Path, trash_dir: Path, trash_path: str, origin
     target = _inside(photo_dir, original, outside=trash_dir)
     _move(source, target, photo_dir)
     _remove_empty_folders(source.parent, trash_dir)
+
+
+def purge_from_trash(trash_dir: Path, trash_path: str, original: str) -> bool:
+    """Delete the file at `trash_path` in the trash for good, and the trash folders
+    it leaves empty. Returns False if it had already gone.
+
+    Raises `TrashPathError` for a path that leads out of the trash, or isn't the
+    entry's: a trashed file keeps its `original` relative path. Raises `TrashError`
+    for a link or a folder, which is left alone."""
+    if trash_path != original:
+        raise TrashPathError(f"{trash_path!r} isn't where {original!r} was trashed")
+    path = _inside(trash_dir, trash_path)
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise TrashError(f"{path} isn't a file")
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    _remove_empty_folders(path.parent, trash_dir)
+    return True
 
 
 def _move(source: Path, target: Path, target_root: Path) -> None:

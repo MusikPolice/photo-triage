@@ -15,6 +15,7 @@ from photo_triage.files.trash import (
     TrashError,
     TrashPathError,
     move_to_trash,
+    purge_from_trash,
     restore_from_trash,
     same_filesystem,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "exclusive_lock",
     "move_to_trash",
     "prune_backups",
+    "purge_from_trash",
     "remove_derived",
     "replace_derived",
     "restore_from_trash",

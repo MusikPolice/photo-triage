@@ -87,6 +87,8 @@ test *args:
         uv run --no-sync pytest --cov=photo_triage
         # ≥ 90% branch coverage on identity and move detection (dev-environment §8)
         uv run --no-sync coverage report --fail-under=90 --include='src/photo_triage/pipeline/identity.py,src/photo_triage/pipeline/scan.py'
+        # ≥ 90% branch coverage on the purge, and the file deletes it makes (dev-environment §8)
+        uv run --no-sync coverage report --fail-under=90 --include='src/photo_triage/pipeline/purge.py,src/photo_triage/worker/purge_schedule.py,src/photo_triage/files/trash.py'
         exit
     fi
     selected=()
