@@ -1,5 +1,5 @@
 /* Helpers for the end-to-end tests: the stack's API, read as the page reads it. */
-import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 import type { Activity } from "../src/lib/api";
 
@@ -18,8 +18,11 @@ export function processed(current: Activity): boolean {
   return idle && current.layout_version !== null;
 }
 
-/** Wait until the worker has processed the library, and return the activity then. */
+/** Wait until the worker has processed the library, and return the activity then.
+ * Whichever spec runs first on a fresh stack waits for all of it, so the wait is
+ * added to that test's time limit. */
 export async function waitUntilProcessed(request: APIRequestContext): Promise<Activity> {
+  test.setTimeout(test.info().timeout + PROCESSED_TIMEOUT_MS);
   await expect
     .poll(async () => processed(await activity(request)), {
       timeout: PROCESSED_TIMEOUT_MS,

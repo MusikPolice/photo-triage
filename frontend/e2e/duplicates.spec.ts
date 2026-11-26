@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import type { components } from "../src/lib/api-types";
-import { PROCESSED_TIMEOUT_MS, waitUntilProcessed } from "./stack";
+import { waitUntilProcessed } from "./stack";
 
 /** The stack has two pairs of identical copies (scripts/e2e.sh), so two groups: each
  * project resolves one, and restores what it trashed for the specs after it. */
@@ -10,7 +10,6 @@ test("a group resolved with Keep selected sends the others to the trash", async 
   request,
   isMobile,
 }) => {
-  test.setTimeout(PROCESSED_TIMEOUT_MS + 60_000);
   await waitUntilProcessed(request);
   await page.goto("/");
   await page.getByRole("link", { name: "Duplicates" }).click();

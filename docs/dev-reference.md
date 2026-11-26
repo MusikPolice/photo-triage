@@ -169,6 +169,7 @@ Running tests: `just test` runs the default suite (everything but `models` and `
 - The copy leaves out `broken/truncated.jpg`, whose failed scan waits minutes to retry, so its stage would never show done.
 - The stack copies two fixtures into `copies/`, so there are duplicate groups: the fake embedder only matches identical pixels.
 - Each test restores what it trashes, so later specs see the whole library.
+- `waitUntilProcessed` (in `e2e/stack.ts`) adds its wait, `PROCESSED_TIMEOUT_MS`, to the calling test's time limit. Whichever spec runs first on a fresh stack waits for the worker, so no spec sets its own.
 
 What the specs check, at both widths:
 

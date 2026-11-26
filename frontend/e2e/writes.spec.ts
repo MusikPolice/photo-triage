@@ -1,14 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 import type { ItemDetails } from "../src/lib/item";
-import { mapState, PROCESSED_TIMEOUT_MS, waitUntilProcessed } from "./stack";
+import { mapState, waitUntilProcessed } from "./stack";
 
 test("a queued tag change shows in the write log as a dry run, before and after", async ({
   page,
   request,
 }) => {
-  // The first spec on a fresh stack waits for the worker to process the library.
-  test.setTimeout(PROCESSED_TIMEOUT_MS + 60_000);
   await waitUntilProcessed(request);
   await page.goto("/");
   await expect.poll(async () => (await mapState(page)).visible.length).toBeGreaterThan(0);
