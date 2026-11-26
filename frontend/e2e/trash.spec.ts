@@ -57,6 +57,8 @@ test("an item trashed from the lightbox leaves the map, and a restore brings it 
 
   // Back on the map.
   await page.locator("header").getByRole("link", { name: "photo-triage" }).click();
+  // The map mounts again first: its hook isn't there until it has.
+  await expect.poll(async () => (await mapState(page)).visible.length).toBeGreaterThan(0);
   await expect.poll(() => pagePosition(page, item.id)).not.toBeNull();
 });
 
