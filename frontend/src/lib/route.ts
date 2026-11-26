@@ -2,31 +2,29 @@
  * `/api` with `index.html`, and links within the app change the page without a
  * reload, through the History API. */
 
-export type Route = "home" | "activity" | "writes" | "trash" | "duplicates" | "missing";
-
+/** Each page's path. Alphabetical after `home`, so PRs adding different pages
+ * edit different lines. */
 export const ROUTE_HREF = {
   home: "/",
   activity: "/activity",
-  writes: "/writes",
-  trash: "/trash",
   duplicates: "/duplicates",
-} as const satisfies Partial<Record<Route, string>>;
+  trash: "/trash",
+  writes: "/writes",
+} as const;
+
+/** The app's pages, and `missing` for any other path. */
+export type Route = keyof typeof ROUTE_HREF | "missing";
+
+function withoutTrailingSlash(pathname: string): string {
+  return pathname.replace(/\/+$/, "");
+}
+
+const ROUTE_BY_PATH: ReadonlyMap<string, Route> = new Map(
+  Object.entries(ROUTE_HREF).map(([route, href]) => [withoutTrailingSlash(href), route as Route]),
+);
 
 export function parseRoute(pathname: string): Route {
-  switch (pathname.replace(/\/+$/, "")) {
-    case "":
-      return "home";
-    case "/activity":
-      return "activity";
-    case "/writes":
-      return "writes";
-    case "/trash":
-      return "trash";
-    case "/duplicates":
-      return "duplicates";
-    default:
-      return "missing";
-  }
+  return ROUTE_BY_PATH.get(withoutTrailingSlash(pathname)) ?? "missing";
 }
 
 /** What's needed of a click on a link. */

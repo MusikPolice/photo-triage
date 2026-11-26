@@ -88,16 +88,17 @@
 </header>
 
 <main class:full={route === "home"}>
-  {#if route === "activity"}
+  <!-- Alphabetical after home, so PRs adding different pages edit different lines. -->
+  {#if route === "home"}
+    <Home {feed} {openItem} onOpen={openLightbox} onClose={closeLightbox} />
+  {:else if route === "activity"}
     <Activity {feed} />
-  {:else if route === "writes"}
-    <WriteLog />
-  {:else if route === "trash"}
-    <Trash />
   {:else if route === "duplicates"}
     <Duplicates />
-  {:else if route === "home"}
-    <Home {feed} {openItem} onOpen={openLightbox} onClose={closeLightbox} />
+  {:else if route === "trash"}
+    <Trash />
+  {:else if route === "writes"}
+    <WriteLog />
   {:else}
     <h1>No page here</h1>
     <p><a href={ROUTE_HREF.home}>Back to your library</a></p>

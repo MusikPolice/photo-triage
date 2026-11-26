@@ -9,20 +9,14 @@ it.each([
   ["", "home"],
   ["/activity", "activity"],
   ["/activity/", "activity"],
-  ["/writes", "writes"],
-  ["/trash", "trash"],
-  ["/duplicates", "duplicates"],
   ["/nowhere", "missing"],
+  ["/activity/more", "missing"],
 ])("%j is %s", (pathname, route) => {
   expect(parseRoute(pathname)).toBe(route);
 });
 
-it("parses its own links", () => {
-  expect(parseRoute(ROUTE_HREF.activity)).toBe("activity");
-  expect(parseRoute(ROUTE_HREF.writes)).toBe("writes");
-  expect(parseRoute(ROUTE_HREF.trash)).toBe("trash");
-  expect(parseRoute(ROUTE_HREF.duplicates)).toBe("duplicates");
-  expect(parseRoute(ROUTE_HREF.home)).toBe("home");
+it.each(Object.entries(ROUTE_HREF))("parses its own link for %s", (route, href) => {
+  expect(parseRoute(href)).toBe(route);
 });
 
 describe("inAppPath", () => {
