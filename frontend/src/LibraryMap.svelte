@@ -35,6 +35,7 @@
     idsWithin,
     indicesWithin,
     viewBounds,
+    withoutIds,
     type MapPoints,
     type MapView,
   } from "./lib/map-points";
@@ -78,12 +79,16 @@
     focusItem: number | null;
     /** Opens an item, tapped or clicked on the map, in the lightbox. */
     onOpen: (itemId: number) => void;
+    /** Items moved to the trash since the points loaded, left off the map. */
+    hidden?: ReadonlySet<number>;
   }
 
-  const { layoutVersion, atlasVersion, focusItem, onOpen }: Props = $props();
+  const { layoutVersion, atlasVersion, focusItem, onOpen, hidden = new Set() }: Props = $props();
 
   let container = $state<HTMLDivElement | null>(null);
-  let points = $state.raw<MapPoints | null>(null);
+  let loadedPoints = $state.raw<MapPoints | null>(null);
+  /** The points on the map: those loaded, less any trashed since. */
+  const points = $derived(loadedPoints === null ? null : withoutIds(loadedPoints, hidden));
   let failure = $state<string | null>(null);
   let loading: Promise<void> | null = null;
   let atlas = $state.raw<Atlas | null>(null);
@@ -243,7 +248,7 @@
     loading ??= fetchPoints()
       .then(
         (loaded) => {
-          points = loaded;
+          loadedPoints = loaded;
           failure = null;
         },
         (error: unknown) => {
@@ -257,7 +262,8 @@
 
   // The first load, and again whenever a newer layout is announced.
   $effect(() => {
-    if (points === null || (layoutVersion != null && layoutVersion !== points.version)) load();
+    const current = loadedPoints;
+    if (current === null || (layoutVersion != null && layoutVersion !== current.version)) load();
   });
 
   function loadAtlas(): void {

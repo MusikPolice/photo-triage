@@ -32,11 +32,19 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: Method, path: string, fetchFn: typeof fetch): Promise<T> {
-  const response = await fetchFn(`/api${path}`, {
-    method,
-    headers: { Accept: "application/json" },
-  });
+async function request<T>(
+  method: Method,
+  path: string,
+  fetchFn: typeof fetch,
+  body?: unknown,
+): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const init: RequestInit = { method, headers };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetchFn(`/api${path}`, init);
   if (!response.ok) throw new ApiError(method, path, response.status);
   return (await response.json()) as T;
 }
@@ -45,8 +53,13 @@ export function getJson<T>(path: string, fetchFn: typeof fetch = fetch): Promise
   return request<T>("GET", path, fetchFn);
 }
 
-export function postJson<T>(path: string, fetchFn: typeof fetch = fetch): Promise<T> {
-  return request<T>("POST", path, fetchFn);
+/** POST, with `body` as JSON if it's given. */
+export function postJson<T>(
+  path: string,
+  fetchFn: typeof fetch = fetch,
+  body?: unknown,
+): Promise<T> {
+  return request<T>("POST", path, fetchFn, body);
 }
 
 export function getHealth(fetchFn: typeof fetch = fetch): Promise<Health> {

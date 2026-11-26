@@ -2,6 +2,7 @@
   import Activity from "./Activity.svelte";
   import Home from "./Home.svelte";
   import StatusIndicator from "./StatusIndicator.svelte";
+  import Trash from "./Trash.svelte";
   import WriteLog from "./WriteLog.svelte";
   import { ActivityFeed } from "./lib/activity.svelte";
   import { itemFromSearch, withItem } from "./lib/item";
@@ -72,7 +73,12 @@
 
 <header>
   <a class="name" href={ROUTE_HREF.home}>photo-triage</a>
-  <StatusIndicator {feed} />
+  <nav>
+    <a class="link" href={ROUTE_HREF.trash} aria-current={route === "trash" ? "page" : undefined}
+      >Trash</a
+    >
+    <StatusIndicator {feed} />
+  </nav>
 </header>
 
 <main class:full={route === "home"}>
@@ -80,6 +86,8 @@
     <Activity {feed} />
   {:else if route === "writes"}
     <WriteLog />
+  {:else if route === "trash"}
+    <Trash />
   {:else if route === "home"}
     <Home {feed} {openItem} onOpen={openLightbox} onClose={closeLightbox} />
   {:else}
@@ -103,6 +111,24 @@
     color: inherit;
     font-weight: 600;
     text-decoration: none;
+  }
+
+  nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .link {
+    color: inherit;
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+
+  .link:hover,
+  .link[aria-current="page"] {
+    text-decoration: underline;
+    text-underline-offset: 0.25em;
   }
 
   main {

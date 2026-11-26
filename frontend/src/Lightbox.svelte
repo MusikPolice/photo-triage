@@ -15,15 +15,35 @@
     type ItemDetails,
     type Neighbours,
   } from "./lib/item";
+  import { trashItems } from "./lib/trash";
 
   interface Props {
     itemId: number;
     /** Opens another item in the lightbox: a similar one, from the strip. */
     onOpen: (itemId: number) => void;
     onClose: () => void;
+    /** Called once the item has been moved to the trash. */
+    onTrashed: (itemId: number) => void;
   }
 
-  const { itemId, onOpen, onClose }: Props = $props();
+  const { itemId, onOpen, onClose, onTrashed }: Props = $props();
+
+  let trashing = $state(false);
+  let trashFailure = $state<string | null>(null);
+
+  async function moveToTrash(id: number): Promise<void> {
+    trashing = true;
+    trashFailure = null;
+    try {
+      const result = await trashItems([id]);
+      if (result.moved.includes(id)) onTrashed(id);
+      else trashFailure = result.skipped[0]?.reason ?? "It wasn't moved";
+    } catch (error) {
+      trashFailure = error instanceof Error ? error.message : String(error);
+    } finally {
+      trashing = false;
+    }
+  }
 
   let dialog = $state<HTMLDialogElement | null>(null);
   let item = $state.raw<ItemDetails | null>(null);
@@ -39,6 +59,7 @@
     mediaFailed = false;
     neighbours = null;
     neighboursFailed = false;
+    trashFailure = null;
     let current = true;
     getNeighbours(id).then(
       (loaded) => {
@@ -122,9 +143,27 @@
 
   <section class="details" aria-label="Details">
     {#if item !== null}
-      <h2>
-        {item.taken_at_local === null ? "Unknown date" : formatTakenAt(item.taken_at_local)}
-      </h2>
+      <div class="heading">
+        <h2>
+          {item.taken_at_local === null ? "Unknown date" : formatTakenAt(item.taken_at_local)}
+        </h2>
+        <button type="button" class="trash" disabled={trashing} onclick={() => moveToTrash(itemId)}>
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path
+              d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          {trashing ? "Moving…" : "Move to trash"}
+        </button>
+      </div>
+      {#if trashFailure !== null}
+        <p class="failure" role="alert">Couldn't move it to the trash: {trashFailure}</p>
+      {/if}
       <section class="similar" aria-label="Similar">
         <h3>Similar</h3>
         {#if neighboursFailed}
@@ -269,10 +308,50 @@
     border-left: 1px solid var(--border);
   }
 
-  h2 {
+  .heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
     margin: 0 0 1rem;
+  }
+
+  h2 {
+    margin: 0;
     font-size: 1.125rem;
     font-weight: 600;
+  }
+
+  .trash {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.3rem 0.7rem;
+    color: inherit;
+    font: inherit;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    background: var(--header-bg);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    cursor: pointer;
+  }
+
+  .trash:hover {
+    border-color: var(--alert);
+    color: var(--alert);
+  }
+
+  .trash:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  .failure {
+    margin: -0.5rem 0 1rem;
+    font-size: 0.875rem;
+    color: var(--alert);
   }
 
   h3 {
