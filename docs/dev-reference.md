@@ -156,7 +156,7 @@ The layers and the rules they follow are in dev-environment §6, and the coverag
 | API | pytest + httpx `AsyncClient` | Endpoint behaviour, `current_actor` in both `AUTH_MODE`s, SSE progress stream. The in-process client waits for a whole response, so the event stream is read from uvicorn running in a thread (`test_events.py`). |
 | Performance | pytest `-m bench` (`just bench`) | `tests/bench/`: time hot paths on large synthetic data built in a temp dir, and fail above a target, e.g. `read_activity` over 1M jobs in ≤ 50 ms (#24), a reconcile that finds nothing due over 100k processed items in ≤ 5 s (#48), and an item's neighbours among 100k vectors in ≤ 50 ms, printing the matrix's memory (#115), and a search over 100k vectors, text encoding included, in ≤ 300 ms, skipped without the exported model (#116), and duplicate grouping of 100k items in ≤ 2 min (#155; 34 s on the dev machine). `test_vector_storage_bench.py` compares blobs + numpy with sqlite-vec (#55) and has no target. It needs `uv run --no-sync --with sqlite-vec`, and skips without it, since sqlite-vec isn't a dependency. Timings depend on the machine, so they aren't in the default suite or CI; run them on the dev machine when changing the code they time, and put the before and after numbers in the PR. |
 | Safety invariants | pytest `tests/safety/` | See dev-environment §7 — these are the most important tests in the repo. |
-| Frontend logic | Vitest | LOD thresholds, atlas UV math, search/filter state, ETA/progress formatting, API client. |
+| Frontend logic | Vitest | LOD thresholds, atlas UV math, search/filter state, lasso selection (point in polygon), ETA/progress formatting, API client. |
 | Frontend types | svelte-check | Strict TypeScript across `.svelte` and `.ts`. |
 | End-to-end | Playwright (Chromium; desktop + Pixel-class viewport) | `just e2e`, against the production Compose stack. See "End-to-end tests" below. |
 
@@ -183,6 +183,7 @@ What the specs check, at both widths:
 - A tag change reached from the Activity page's link shows in the Write log as a dry run, with the file's tags before and after (#154).
 - An item trashed from the lightbox leaves the map's points, is on the Trash page with its thumbnail, and its restore there (or Undo in the toast) brings it back to the map (#150).
 - The Duplicates page shows a group of two, keeps the recommended one and sends the other to the trash, swiping between members on the phone, then restores it (#156).
+- On desktop, a lasso round the map below its panel, with a notch cut in it, selects what the hook's positions put inside; Move to trash takes them off the map and Undo brings them back; Add tag queues a write for exactly those items, and Remove tag takes it off again. The phone has no lasso (#158).
 - To come: quality review keep/delete, Activity page progress.
 
 The map is asserted through a test-only hook, `window.__photoTriageMap`, that exposes deck.gl layer state rather than pixels:
@@ -191,6 +192,7 @@ The map is asserted through a test-only hook, `window.__photoTriageMap`, that ex
 - `atlasVersion`, `detail` (`"dots"` or `"thumbnails"`) and `sheets`, the atlas sheets drawn (#113).
 - `pagePosition(id)`, where to tap an item, and `loaded`, whether every layer has its image: a sheet loads after its layer is made (#114).
 - `highlightedIds()`, a search's matches on the map, best first (#116).
+- `lassoAvailable`, whether the lasso is offered (desktop only), and `selectedIds()`, the selection, by id (#158).
 
 ## 4. Next steps
 
