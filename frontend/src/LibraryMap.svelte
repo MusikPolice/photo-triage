@@ -4,7 +4,9 @@
    * mouse, the trackpad and touch, and reloads its points and atlas manifest when the
    * activity feed announces a new layout or set of sheets. A search highlights its
    * matches in place: they keep their colour, with a ring, and the rest dim. A
-   * narrowed date range dims what's outside it, stacking with a search. */
+   * narrowed date range dims what's outside it, stacking with a search. On desktop,
+   * the lasso selects what's inside an outline, and the action bar trashes or tags
+   * it. */
   import {
     Deck,
     LinearInterpolator,
@@ -66,6 +68,21 @@
     thumbnailTint,
     type SearchResults,
   } from "./lib/search";
+  import {
+    changeTag,
+    lassoed,
+    onMap,
+    outlinePath,
+    selectedCount,
+    selectedIndices,
+    selectionAfter,
+    tagProblem,
+    tagSummary,
+    trashAll,
+    trashSummary,
+    type TagAction,
+    type Vertex,
+  } from "./lib/lasso";
   import { ROUTE_HREF } from "./lib/route";
 
   interface Props {
@@ -81,9 +98,18 @@
     onOpen: (itemId: number) => void;
     /** Items moved to the trash since the points loaded, left off the map. */
     hidden?: ReadonlySet<number>;
+    /** The selection was moved to the trash: these items, and what to say. */
+    onTrashed?: (itemIds: number[], text: string) => void;
   }
 
-  const { layoutVersion, atlasVersion, focusItem, onOpen, hidden = new Set() }: Props = $props();
+  const {
+    layoutVersion,
+    atlasVersion,
+    focusItem,
+    onOpen,
+    hidden = new Set(),
+    onTrashed = () => {},
+  }: Props = $props();
 
   let container = $state<HTMLDivElement | null>(null);
   let loadedPoints = $state.raw<MapPoints | null>(null);
@@ -136,6 +162,123 @@
   });
 
   const shownLegend = $derived(legend(points, colourBy, theme));
+
+  /** The lasso and bulk actions are for desktop: a mouse or trackpad (plan §6.4). */
+  const desktopQuery = matchMedia("(hover: hover) and (pointer: fine)");
+  let canLasso = $state(desktopQuery.matches);
+  $effect(() => {
+    const follow = (event: MediaQueryListEvent) => {
+      canLasso = event.matches;
+    };
+    desktopQuery.addEventListener("change", follow);
+    return () => {
+      desktopQuery.removeEventListener("change", follow);
+    };
+  });
+
+  /** Whether the lasso is the tool: a drag draws an outline rather than panning. */
+  let lassoOn = $state(false);
+  /** The outline being drawn, in pixels from the map's top left. */
+  let outline = $state.raw<Vertex[]>([]);
+  let drawing = false;
+  /** How far the pointer moves before the outline gets another point. */
+  const OUTLINE_STEP_PX = 3;
+  let selection = $state.raw<ReadonlySet<number>>(new Set());
+  /** What's selected, of what's on the map: a trashed item drops out. */
+  const selected = $derived(points === null ? selection : onMap(selection, points));
+  /** The tag typed in the action bar. */
+  let tag = $state("");
+  let acting = $state(false);
+  /** What the last bulk action did, or why it couldn't. */
+  let actionStatus = $state<string | null>(null);
+
+  function pixelAt(event: PointerEvent): Vertex {
+    const box = container?.getBoundingClientRect();
+    return [event.clientX - (box?.left ?? 0), event.clientY - (box?.top ?? 0)];
+  }
+
+  function startOutline(event: PointerEvent): void {
+    if (event.button !== 0) return;
+    (event.currentTarget as Element).setPointerCapture(event.pointerId);
+    drawing = true;
+    outline = [pixelAt(event)];
+  }
+
+  function extendOutline(event: PointerEvent): void {
+    if (!drawing) return;
+    const next = pixelAt(event);
+    const last = outline.at(-1);
+    if (last !== undefined && Math.hypot(next[0] - last[0], next[1] - last[1]) < OUTLINE_STEP_PX) {
+      return;
+    }
+    outline = [...outline, next];
+  }
+
+  function finishOutline(event: PointerEvent): void {
+    if (!drawing) return;
+    drawing = false;
+    const drawn = [...outline, pixelAt(event)];
+    outline = [];
+    if (points === null || view === null || container === null) return;
+    const { clientWidth: width, clientHeight: height } = container;
+    const ids = lassoed(points, drawn, view, width, height, highlighted?.mask ?? null);
+    selection = selectionAfter(selected, ids, event.shiftKey);
+    actionStatus = null;
+  }
+
+  function cancelOutline(): void {
+    drawing = false;
+    outline = [];
+  }
+
+  function onKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Escape" || !lassoOn || focusItem !== null) return;
+    if (drawing) cancelOutline();
+    else lassoOn = false;
+  }
+
+  function clearSelection(): void {
+    selection = new Set();
+    actionStatus = null;
+  }
+
+  function failed(what: string, error: unknown): string {
+    return `Couldn't ${what}: ${error instanceof Error ? error.message : String(error)}`;
+  }
+
+  async function trashSelected(): Promise<void> {
+    const ids = [...selected];
+    acting = true;
+    actionStatus = null;
+    try {
+      const result = await trashAll(ids);
+      const moved = new Set(result.moved);
+      selection = new Set(ids.filter((id) => !moved.has(id)));
+      onTrashed(result.moved, trashSummary(result));
+    } catch (error) {
+      actionStatus = failed("move them to the trash", error);
+    } finally {
+      acting = false;
+    }
+  }
+
+  async function changeSelectedTag(action: TagAction): Promise<void> {
+    const problem = tagProblem(tag);
+    if (problem !== null) {
+      actionStatus = problem;
+      return;
+    }
+    const text = tag.trim();
+    acting = true;
+    actionStatus = null;
+    try {
+      actionStatus = tagSummary(action, text, await changeTag([...selected], text, action));
+    } catch (error) {
+      actionStatus = failed("change the tag", error);
+    } finally {
+      acting = false;
+    }
+  }
 
   /** What's typed in the search box. */
   let query = $state("");
@@ -235,6 +378,8 @@
   const DOT_RADIUS_PX = 2.5;
   /** A match's ring, around its dot. */
   const RING_PX = 1.5;
+  /** A selected item's ring, outside a match's. */
+  const SELECTED_RING_PX = 2;
   /** How near a tap or click must be to an item to open it: a dot is far smaller
    * than a fingertip. */
   const PICKING_RADIUS_PX = 10;
@@ -366,6 +511,22 @@
     });
   }
 
+  /** A ring round each selected item, over everything else. */
+  function selectedLayer(shown: MapPoints, indices: number[], ring: Rgb) {
+    return new ScatterplotLayer<number>({
+      id: "selected",
+      data: indices,
+      getPosition: (i) => [shown.positions[2 * i] ?? 0, shown.positions[2 * i + 1] ?? 0],
+      getLineColor: ring,
+      radiusUnits: "pixels",
+      getRadius: DOT_RADIUS_PX + RING_PX + SELECTED_RING_PX,
+      filled: false,
+      stroked: true,
+      lineWidthUnits: "pixels",
+      getLineWidth: SELECTED_RING_PX,
+    });
+  }
+
   /** One sheet's thumbnails, over the dots: an item with no thumbnail stays a dot.
    * With a search, those that don't match are dimmed. */
   function sheetLayer(
@@ -400,6 +561,27 @@
   let dots: ScatterplotLayer | null = null;
   /** The matches' layer, with a search. */
   let matches: ScatterplotLayer<number> | null = null;
+  /** The selection's rings, with a selection. */
+  let selectedRings: ScatterplotLayer<number> | null = null;
+  /** `--map-selected`, read once per theme rather than on every lasso. */
+  const ringByTheme: Partial<Record<Theme, Rgb>> = {};
+
+  function selectedRing(element: Element, current: Theme): Rgb {
+    return (ringByTheme[current] ??= cssColour(element, "--map-selected"));
+  }
+
+  $effect(() => {
+    const parent = container;
+    const shown = points;
+    const indices = shown === null ? [] : selectedIndices(shown, selected);
+    selectedRings =
+      parent === null || shown === null || indices.length === 0
+        ? null
+        : selectedLayer(shown, indices, selectedRing(parent, theme));
+    untrack(() => {
+      draw(detail, sheets, groups);
+    });
+  });
 
   $effect(() => {
     const parent = container;
@@ -496,6 +678,7 @@
         if (group !== undefined) layers.push(sheetLayer(shown, current.atlas.version, group, mask));
       }
     }
+    if (selectedRings !== null) layers.push(selectedRings);
     drawn = layers;
     deck.setProps({ layers });
   }
@@ -516,6 +699,14 @@
       },
       get colourBy() {
         return colourBy;
+      },
+      /** Whether the lasso is offered: on desktop, not on a phone. */
+      get lassoAvailable() {
+        return canLasso;
+      },
+      /** The selected items, by id. */
+      selectedIds(): number[] {
+        return [...selected].sort((a, b) => a - b);
       },
       /** The items a search highlights, best first: none without a search. */
       highlightedIds(): number[] {
@@ -564,6 +755,8 @@
     };
   });
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <div class="map" bind:this={container}>
   {#if failure !== null}
@@ -657,6 +850,56 @@
       {/if}
     </div>
   {/if}
+  {#if canLasso && points !== null && points.count > 0}
+    {#if lassoOn}
+      <svg
+        class="lasso"
+        role="presentation"
+        onpointerdown={startOutline}
+        onpointermove={extendOutline}
+        onpointerup={finishOutline}
+        onpointercancel={cancelOutline}
+      >
+        {#if outline.length > 1}
+          <path d={outlinePath(outline)} />
+        {/if}
+      </svg>
+    {/if}
+    <div class="tools">
+      <button
+        type="button"
+        class="tool"
+        aria-pressed={lassoOn}
+        title="Draw round items to select them. Shift adds to the selection; Escape stops."
+        onclick={() => {
+          lassoOn = !lassoOn;
+        }}>Lasso</button
+      >
+      {#if selected.size > 0}
+        <div class="actions" role="toolbar" aria-label="Selection">
+          <span class="count">{selectedCount(selected.size)}</span>
+          <button type="button" disabled={acting} onclick={trashSelected}>Move to trash</button>
+          <form
+            class="tag"
+            onsubmit={(event) => {
+              event.preventDefault();
+              void changeSelectedTag("add");
+            }}
+          >
+            <input type="text" aria-label="Tag" placeholder="Tag" bind:value={tag} />
+            <button type="submit" disabled={acting}>Add tag</button>
+            <button type="button" disabled={acting} onclick={() => changeSelectedTag("remove")}
+              >Remove tag</button
+            >
+          </form>
+          <button type="button" class="link" onclick={clearSelection}>Clear</button>
+          {#if actionStatus !== null}
+            <p class="action-status" role="status">{actionStatus}</p>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
   {#if showFrameRate}
     <output class="frame-rate" aria-label="Frame rate">
       {frameRate === null
@@ -677,12 +920,13 @@
     overflow: hidden;
   }
 
-  /* Above deck.gl's canvas, which it adds to .map after this. */
+  /* Above deck.gl's canvas, which it adds to .map after this,
+   * and the lasso's outline. */
   .panel {
     position: absolute;
     top: 0.75rem;
     left: 0.75rem;
-    z-index: 1;
+    z-index: 2;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -864,6 +1108,102 @@
     min-width: 6rem;
     height: 0.625rem;
     border-radius: 999px;
+  }
+
+  /* Over the canvas, under the panels: while the lasso is on, a drag draws. */
+  .lasso {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+  }
+
+  .lasso path {
+    fill: color-mix(in srgb, var(--map-selected) 12%, transparent);
+    stroke: var(--map-selected);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 3;
+  }
+
+  .tools {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+    max-width: 26rem;
+    font-size: 0.875rem;
+  }
+
+  .tools button,
+  .tag input {
+    padding: 0.375rem 0.75rem;
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    cursor: pointer;
+  }
+
+  .tools button:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+
+  .tool {
+    box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  }
+
+  .tool[aria-pressed="true"] {
+    color: var(--bg);
+    background: var(--fg);
+    border-color: var(--fg);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.625rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  }
+
+  .actions .count {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tag {
+    display: flex;
+    gap: 0.375rem;
+  }
+
+  .tag input {
+    width: 8rem;
+    cursor: text;
+  }
+
+  .tools .link {
+    padding: 0;
+    border: 0;
+    text-decoration: underline;
+    background: none;
+  }
+
+  .action-status {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--muted);
   }
 
   .note {

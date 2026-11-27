@@ -42,6 +42,8 @@ export interface MapHook {
   loaded: boolean;
   visibleIds(): number[];
   highlightedIds(): number[];
+  lassoAvailable: boolean;
+  selectedIds(): number[];
   pagePosition(itemId: number): [number, number] | null;
 }
 

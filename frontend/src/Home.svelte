@@ -2,7 +2,8 @@
   import Lightbox from "./Lightbox.svelte";
   import type { ActivityFeed } from "./lib/activity.svelte";
   import { ROUTE_HREF } from "./lib/route";
-  import { restoreItems } from "./lib/trash";
+  import { restoreAll } from "./lib/lasso";
+  import { movedSummary } from "./lib/trash";
 
   interface Props {
     feed: ActivityFeed;
@@ -17,21 +18,21 @@
   // deck.gl is most of the app's code, so it loads only with the map.
   const LibraryMap = import("./LibraryMap.svelte").then((module) => module.default);
 
-  /** Items trashed from the lightbox since the map loaded its points: it leaves
-   * them out. The next load of the points leaves them out anyway. */
+  /** Items trashed from the lightbox or the map since it loaded its points: it
+   * leaves them out. The next load of the points leaves them out anyway. */
   let hidden = $state.raw<ReadonlySet<number>>(new Set());
 
   /** How long the toast offers to undo a trash. */
   const TOAST_MS = 10_000;
 
-  /** The toast after a trash: the item it can undo, or just a message. */
-  let toast = $state<{ itemId: number | null; text: string } | null>(null);
+  /** The toast after a trash: the items it can undo, or just a message. */
+  let toast = $state<{ itemIds: number[]; text: string } | null>(null);
   let undoing = $state(false);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function showToast(itemId: number | null, text: string): void {
+  function showToast(itemIds: number[], text: string): void {
     clearTimeout(toastTimer);
-    toast = { itemId, text };
+    toast = { itemIds, text };
     toastTimer = setTimeout(() => (toast = null), TOAST_MS);
   }
 
@@ -42,23 +43,31 @@
   });
 
   function trashed(itemId: number): void {
-    hidden = new Set([...hidden, itemId]);
     onClose();
-    showToast(itemId, "Moved to the trash.");
+    hide([itemId], "Moved to the trash.");
   }
 
-  async function undo(itemId: number): Promise<void> {
+  /** Items the map's selection moved to the trash, or the lightbox's one. */
+  function hide(itemIds: number[], text: string): void {
+    if (itemIds.length > 0) hidden = new Set([...hidden, ...itemIds]);
+    showToast(itemIds, text);
+  }
+
+  async function undo(itemIds: number[]): Promise<void> {
     undoing = true;
     try {
-      const result = await restoreItems([itemId]);
-      if (result.moved.includes(itemId)) {
-        hidden = new Set([...hidden].filter((id) => id !== itemId));
-        showToast(null, "Restored.");
+      const result = await restoreAll(itemIds);
+      const restored = new Set(result.moved);
+      hidden = new Set([...hidden].filter((id) => !restored.has(id)));
+      if (itemIds.length === 1 && result.skipped.length === 0) {
+        showToast([], "Restored.");
+      } else if (itemIds.length === 1) {
+        showToast([], `Couldn't restore it: ${result.skipped[0]?.reason ?? "unknown"}.`);
       } else {
-        showToast(null, `Couldn't restore it: ${result.skipped[0]?.reason ?? "unknown"}.`);
+        showToast([], movedSummary("Restored", result));
       }
     } catch (error) {
-      showToast(null, `Couldn't restore it: ${error instanceof Error ? error.message : ""}`);
+      showToast([], `Couldn't restore: ${error instanceof Error ? error.message : ""}`);
     } finally {
       undoing = false;
     }
@@ -72,6 +81,7 @@
     focusItem={openItem}
     {onOpen}
     {hidden}
+    onTrashed={hide}
   />
 {:catch error}
   <p class="note">
@@ -86,9 +96,9 @@
 {#if toast !== null}
   <div class="toast" role="status">
     <span>{toast.text}</span>
-    {#if toast.itemId !== null}
-      {@const itemId = toast.itemId}
-      <button type="button" disabled={undoing} onclick={() => undo(itemId)}>Undo</button>
+    {#if toast.itemIds.length > 0}
+      {@const itemIds = toast.itemIds}
+      <button type="button" disabled={undoing} onclick={() => undo(itemIds)}>Undo</button>
       <a href={ROUTE_HREF.trash}>Trash</a>
     {/if}
   </div>

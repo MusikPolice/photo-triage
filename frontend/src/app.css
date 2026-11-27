@@ -9,6 +9,8 @@
   --idle: #d08700;
   --alert: #d63939;
   --map-dot: #2f6fdb;
+  /* A selected item's ring: apart from every colour-by hue, and from --fg's ring. */
+  --map-selected: #c2255c;
   font-family: system-ui, sans-serif;
   line-height: 1.5;
 }
@@ -24,6 +26,7 @@
     --idle: #fab005;
     --alert: #ff6b6b;
     --map-dot: #6ea8ff;
+    --map-selected: #f783ac;
   }
 }
 
