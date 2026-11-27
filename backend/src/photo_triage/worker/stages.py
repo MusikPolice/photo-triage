@@ -1,8 +1,8 @@
 """The runner for each stage the worker can run, and the item stages that reconcile
 keeps current (plan §6.11).
 
-`walk`, `scan`, `metadata_read`, `frames`, `thumbnail`, `clip`, `layout` and `atlases`
-always run. `noop`
+`walk`, `scan`, `metadata_read`, `frames`, `thumbnail`, `clip`, `quality`, `layout`
+and `atlases` always run. `noop`
 exists only when `WORKER_NOOP_STAGE` is on.
 
 Nothing here imports NumPy or ONNX Runtime until a job needs them, so the worker can
@@ -96,6 +96,12 @@ def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
             upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES, Stage.THUMBNAIL),
             settings_fingerprint=settings.clip_model,
         ),
+        # The photo or a video's frames, and its size from the metadata. After CLIP
+        # (plan §6.11), whose embedding the aesthetic and junk signals will read.
+        Stage.QUALITY: ItemStage(
+            code_version=1,
+            upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES, Stage.CLIP),
+        ),
     }
 
 
@@ -179,6 +185,12 @@ def build_runners(
             embedder = OnnxClip(settings.models_dir, settings.clip_model, settings.worker_threads)
         return embed.embed(sessions, job, embedder, settings.photo_dir, settings.derived_dir)
 
+    def run_quality(job: Job) -> bool:
+        # Here, not at the top: see the module docstring.
+        from photo_triage.pipeline import quality
+
+        return quality.score(sessions, job, settings.photo_dir, settings.derived_dir)
+
     def run_layout(job: Job) -> None:
         # Here, not at the top: see the module docstring.
         from photo_triage.pipeline import layout
@@ -222,6 +234,7 @@ def build_runners(
         Stage.FRAMES: run_frames,
         Stage.THUMBNAIL: run_thumbnail,
         Stage.CLIP: run_clip,
+        Stage.QUALITY: run_quality,
         Stage.LAYOUT: run_layout,
         Stage.ATLASES: run_atlases,
         Stage.DUPLICATES: run_duplicates,

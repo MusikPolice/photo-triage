@@ -213,6 +213,38 @@ class Layout(Base):
     y: Mapped[float] = mapped_column(sa.Float)
 
 
+class Quality(Base):
+    """An item's quality signals (plan §6.8), each in [0, 1] with 1 the best, from
+    `photo_triage.pipeline.quality`. A video's are the medians of its frames'.
+
+    The composite score and flag reasons are worked out from these when read, so
+    changing their weights or thresholds needs no re-run. The aesthetic and junk
+    signals stay null until their stages fill them in.
+    """
+
+    __tablename__ = "quality"
+
+    item_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("items.id", ondelete="CASCADE"), primary_key=True
+    )
+    blur: Mapped[float] = mapped_column(sa.Float)
+    """`tanh(variance / 200)` of the grayscale Laplacian: low is blurry."""
+    exposure: Mapped[float] = mapped_column(sa.Float)
+    """Low for pixels clipped beyond 2% at either end, or a picture too dark or too
+    bright overall."""
+    dark_clipped_fraction: Mapped[float] = mapped_column(sa.Float)
+    """The fraction of pixels clipped to black, which says an exposure is under."""
+    bright_clipped_fraction: Mapped[float] = mapped_column(sa.Float)
+    """The fraction of pixels clipped to white, which says an exposure is over."""
+    mean_brightness: Mapped[float] = mapped_column(sa.Float)
+    """The picture's mean brightness, 0 for black to 1 for white."""
+    resolution: Mapped[float] = mapped_column(sa.Float)
+    """A logistic curve in megapixels, 0.5 at 2 MP."""
+    aesthetic: Mapped[float | None] = mapped_column(sa.Float)
+    junk_label: Mapped[str | None] = mapped_column(sa.String(32))
+    junk_score: Mapped[float | None] = mapped_column(sa.Float)
+
+
 class Tag(Base):
     """A keyword on an item, and where it came from (plan §8).
 
