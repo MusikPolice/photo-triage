@@ -199,7 +199,7 @@ Within a group, items are ranked by quality score to recommend the best keeper.
 | Signal | Method |
 |---|---|
 | Blur | Laplacian variance on grayscale, `tanh(variance / 200)` |
-| Exposure | Fraction of pixels clipped at 0 or 255; penalty beyond 2% either end |
+| Exposure | Fraction of pixels clipped at 0 or 255; penalty beyond 2% either end. Also a penalty for a mean brightness that is very low or very high, since a dark photo often isn't clipped: sensor noise keeps its shadows off black |
 | Resolution | Megapixels, logistic curve centered at 2 MP |
 | Aesthetic | LAION aesthetic predictor (small MLP on CLIP embeddings) |
 | Junk | CLIP zero-shot vs. prompts: screenshot, receipt, document, whiteboard, accidental/pocket shot, blank frame |
