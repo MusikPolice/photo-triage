@@ -313,6 +313,7 @@ items
   taken_at_local, first_seen_at, last_seen_at, missing_since
   damaged                     -- a photo that decodes only partly (file cut short)
   status (active | trashed | purged | missing)
+  reviewed (json)             -- review kinds the file is marked with (§6.10), as read
 
 item_frames                       -- videos only
   id, item_id, frame_index, timestamp_s
@@ -332,7 +333,8 @@ reviews                            -- quality + duplicate decisions
   actor, decided_at
 
 duplicate_groups
-  id, status (pending | resolved | skipped), created_at, resolved_at, actor
+  id, status (pending | resolved | skipped), created_at, resolved_at, actor,
+  leased_to, lease_expires_at     -- the reviewer looking at it (§10)
 duplicate_members
   group_id, item_id, rank
 

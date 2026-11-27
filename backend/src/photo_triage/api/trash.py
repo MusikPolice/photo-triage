@@ -86,7 +86,14 @@ def trash(
 ) -> Moved:
     """Move items to the trash. An item already in the trash, or not in the library,
     or whose file has gone, is skipped with the reason."""
-    now = clock()
+    return trash_items(session, settings, body.item_ids, actor=actor, now=clock())
+
+
+def trash_items(
+    session: Session, settings: Settings, item_ids: list[int], *, actor: str, now: dt.datetime
+) -> Moved:
+    """Move items to the trash in one transaction of their own, which `session` mustn't
+    be in. For the trash endpoint, and for the reviews that trash items."""
     purge_after = now + dt.timedelta(days=settings.trash_retention_days)
 
     def move(item: Item) -> Callable[[], None] | str:
@@ -117,7 +124,7 @@ def trash(
             settings.photo_dir, settings.trash_dir, trash_path, original
         )
 
-    return _move_each(session, body.item_ids, move)
+    return _move_each(session, item_ids, move)
 
 
 @router.post("/trash/restore")

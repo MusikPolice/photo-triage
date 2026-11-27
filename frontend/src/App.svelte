@@ -1,5 +1,6 @@
 <script lang="ts">
   import Activity from "./Activity.svelte";
+  import Duplicates from "./Duplicates.svelte";
   import Home from "./Home.svelte";
   import StatusIndicator from "./StatusIndicator.svelte";
   import Trash from "./Trash.svelte";
@@ -74,6 +75,11 @@
 <header>
   <a class="name" href={ROUTE_HREF.home}>photo-triage</a>
   <nav>
+    <a
+      class="link"
+      href={ROUTE_HREF.duplicates}
+      aria-current={route === "duplicates" ? "page" : undefined}>Duplicates</a
+    >
     <a class="link" href={ROUTE_HREF.trash} aria-current={route === "trash" ? "page" : undefined}
       >Trash</a
     >
@@ -82,14 +88,17 @@
 </header>
 
 <main class:full={route === "home"}>
-  {#if route === "activity"}
+  <!-- Alphabetical after home, so PRs adding different pages edit different lines. -->
+  {#if route === "home"}
+    <Home {feed} {openItem} onOpen={openLightbox} onClose={closeLightbox} />
+  {:else if route === "activity"}
     <Activity {feed} />
-  {:else if route === "writes"}
-    <WriteLog />
+  {:else if route === "duplicates"}
+    <Duplicates />
   {:else if route === "trash"}
     <Trash />
-  {:else if route === "home"}
-    <Home {feed} {openItem} onOpen={openLightbox} onClose={closeLightbox} />
+  {:else if route === "writes"}
+    <WriteLog />
   {:else}
     <h1>No page here</h1>
     <p><a href={ROUTE_HREF.home}>Back to your library</a></p>

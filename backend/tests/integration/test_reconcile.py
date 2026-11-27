@@ -293,7 +293,7 @@ def test_versions_carry_their_settings_fingerprint() -> None:
 def test_the_registered_item_stages(settings: Settings) -> None:
     assert item_stages(settings) == {
         Stage.SCAN: ItemStage(code_version=2),
-        Stage.METADATA_READ: ItemStage(code_version=3, upstream=(Stage.SCAN,)),
+        Stage.METADATA_READ: ItemStage(code_version=4, upstream=(Stage.SCAN,)),
         Stage.FRAMES: ItemStage(
             code_version=2,
             upstream=(Stage.SCAN,),

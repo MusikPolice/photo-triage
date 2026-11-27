@@ -21,6 +21,66 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/duplicates/next": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Next Group
+     * @description The group for this reviewer to look at, now held for them for `LEASE`.
+     */
+    post: operations["next_group_api_duplicates_next_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/duplicates/{group_id}/decide": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Decide
+     * @description Keep the selected members and trash the rest, keep them all, or skip.
+     */
+    post: operations["decide_api_duplicates__group_id__decide_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/duplicates/{group_id}/release": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Release
+     * @description Let another reviewer have the group, if this reviewer holds it.
+     */
+    post: operations["release_api_duplicates__group_id__release_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/events": {
     parameters: {
       query?: never;
@@ -406,6 +466,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /**
+     * Action
+     * @enum {string}
+     */
+    Action: "keep_selected" | "keep_all" | "skip";
     /** Activity */
     Activity: {
       /** Atlas Version */
@@ -427,6 +492,36 @@ export interface components {
       id: number;
       /** Path */
       path: string;
+    };
+    /** DecideRequest */
+    DecideRequest: {
+      action: components["schemas"]["Action"];
+      /**
+       * Keep
+       * @default []
+       */
+      keep: number[];
+      /** Reviewer */
+      reviewer: string;
+    };
+    /** Decided */
+    Decided: {
+      /** Moved */
+      moved: number[];
+      /** Skipped */
+      skipped: components["schemas"]["Skipped"][];
+    };
+    /** Group */
+    Group: {
+      /** Id */
+      id: number;
+      /**
+       * Lease Expires At
+       * Format: date-time
+       */
+      lease_expires_at: string;
+      /** Members */
+      members: components["schemas"]["Member"][];
     };
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -512,6 +607,28 @@ export interface components {
      * @enum {string}
      */
     MediaType: "photo" | "video";
+    /** Member */
+    Member: {
+      /** File Size Bytes */
+      file_size_bytes: number;
+      /** Height */
+      height: number | null;
+      /** Id */
+      id: number;
+      media_type: components["schemas"]["MediaType"];
+      /** Path */
+      path: string;
+      /** Rank */
+      rank: number;
+      /** Taken At Local */
+      taken_at_local: string | null;
+      /** Thumbnail Url */
+      thumbnail_url: string;
+      /** View Url */
+      view_url: string;
+      /** Width */
+      width: number | null;
+    };
     /**
      * Moved
      * @description What a trash or restore request did, item by item.
@@ -536,6 +653,24 @@ export interface components {
       embedded: boolean;
       /** Items */
       items: components["schemas"]["Neighbour"][];
+    };
+    /** NextGroup */
+    NextGroup: {
+      group: components["schemas"]["Group"] | null;
+      /** Pending */
+      pending: number;
+      /** Total */
+      total: number;
+    };
+    /** NextRequest */
+    NextRequest: {
+      /** Reviewer */
+      reviewer: string;
+    };
+    /** ReleaseRequest */
+    ReleaseRequest: {
+      /** Reviewer */
+      reviewer: string;
     };
     /** SearchResults */
     SearchResults: {
@@ -733,6 +868,121 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Activity"];
+        };
+      };
+    };
+  };
+  next_group_api_duplicates_next_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NextRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NextGroup"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  decide_api_duplicates__group_id__decide_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        group_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DecideRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Decided"];
+        };
+      };
+      /** @description No such group */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Decided already, or another reviewer has it */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  release_api_duplicates__group_id__release_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        group_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReleaseRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

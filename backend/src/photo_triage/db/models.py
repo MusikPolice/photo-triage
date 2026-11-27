@@ -67,6 +67,18 @@ class TagSource(StrEnum):
     """Already in the file when it was scanned (plan §6.1)."""
 
 
+class ReviewKind(StrEnum):
+    QUALITY = "quality"
+    DUPLICATE = "duplicate"
+
+
+class Decision(StrEnum):
+    KEEP = "keep"
+    DELETE = "delete"
+    """Moved to the trash."""
+    SKIP = "skip"
+
+
 class GroupStatus(StrEnum):
     PENDING = "pending"
     """Waiting for review."""
@@ -123,6 +135,12 @@ class Item(Base):
     mirror) still counts as a change (`photo_triage.pipeline.metadata`)."""
     taken_at_local: Mapped[dt.datetime | None]
     """Capture time as the camera recorded it: local wall-clock time, no timezone."""
+    reviewed: Mapped[list[str]] = mapped_column(
+        sa.JSON, default=list, server_default=sa.text("'[]'")
+    )
+    """The review kinds the file is marked with (`XMP-phototriage:Reviewed`, plan
+    §6.10), such as `duplicates`, as the last metadata read found them. They outlive
+    the database, so a rebuilt one doesn't queue the item for that review again."""
     damaged: Mapped[bool] = mapped_column(default=False, server_default=sa.false())
     """A photo that decodes only partly, its file cut short: the rest of its
     picture is grey in its thumbnail (`photo_triage.pipeline.pictures`). Set by
@@ -237,6 +255,29 @@ class DuplicateGroup(Base):
     resolved_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
     actor: Mapped[str | None] = mapped_column(sa.String(255))
     """Who resolved or skipped it (plan §10)."""
+    leased_to: Mapped[str | None] = mapped_column(sa.String(64))
+    """The reviewer looking at it now: a token each review page makes for itself,
+    since with no sign-in every actor is the same (plan §10)."""
+    lease_expires_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    """When another reviewer may have it, if this one hasn't decided."""
+
+
+class Review(Base):
+    """A person's decision on an item in a review queue (plan §8, §10): kept, moved
+    to the trash or skipped."""
+
+    __tablename__ = "reviews"
+    __table_args__ = (
+        # An item's decisions.
+        sa.Index("ix_reviews_item_id", "item_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    item_id: Mapped[int] = mapped_column(sa.ForeignKey("items.id", ondelete="CASCADE"))
+    kind: Mapped[ReviewKind] = mapped_column(_enum(ReviewKind, "review_kind"))
+    decision: Mapped[Decision] = mapped_column(_enum(Decision, "decision"))
+    actor: Mapped[str] = mapped_column(sa.String(255))
+    decided_at: Mapped[dt.datetime] = mapped_column(UTCDateTime)
 
 
 class DuplicateMember(Base):

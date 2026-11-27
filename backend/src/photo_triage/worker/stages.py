@@ -74,7 +74,8 @@ def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
         # hashing it again.
         # 2: records the orientation.
         # 3: dates undated files from their elodie filename or folder (#102).
-        Stage.METADATA_READ: ItemStage(code_version=3, upstream=(Stage.SCAN,)),
+        # 4: reads the reviewed marker (#156).
+        Stage.METADATA_READ: ItemStage(code_version=4, upstream=(Stage.SCAN,)),
         # 2: times end where the last frame starts, for clips under a second (#96).
         Stage.FRAMES: ItemStage(
             code_version=2,
