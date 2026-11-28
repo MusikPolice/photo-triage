@@ -264,6 +264,7 @@ def test_bumping_its_version_reads_every_file_again_without_hashing_them(
         Stage.FRAMES: 0,
         Stage.THUMBNAIL: 0,
         Stage.CLIP: 0,
+        Stage.QUALITY: 0,
     }
     assert pipeline.done(Stage.SCAN) == scanned  # no file hashed again
     reread = pipeline.done(Stage.METADATA_READ)

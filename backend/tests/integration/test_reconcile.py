@@ -310,6 +310,10 @@ def test_the_registered_item_stages(settings: Settings) -> None:
             upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES, Stage.THUMBNAIL),
             settings_fingerprint="ViT-B-32",
         ),
+        Stage.QUALITY: ItemStage(
+            code_version=1,
+            upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES, Stage.CLIP),
+        ),
     }
 
 
