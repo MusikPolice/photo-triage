@@ -1,18 +1,27 @@
 """The `quality` stage over the tier-1 fixtures, with the fake embedder (plan §6.8):
-every item scored once, after CLIP, and scored again only when it's due."""
+every item scored once, after CLIP, and scored again only when it's due. The
+aesthetic score comes from a fake head, or stays null without the weights."""
 
+import dataclasses
+import logging
+from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
+from numpy.typing import NDArray
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from test_embeddings import START, SUPPORTED, Pipeline
 
-from photo_triage.db.models import Item, JobStatus, MediaType, Quality
+from photo_triage.db.models import Embedding, Item, JobStatus, MediaType, Quality
 from photo_triage.files import ExifTool
 from photo_triage.ml import FakeClip
+from photo_triage.ml.aesthetic import FakeHead, weights_path
+from photo_triage.pipeline.embed import from_blob
+from photo_triage.pipeline.quality import aesthetic_score
 from photo_triage.settings import Settings
 from photo_triage.worker.__main__ import main
 from photo_triage.worker.queue import Stage
@@ -92,7 +101,7 @@ def test_bumping_its_version_scores_every_item_again(pipeline: Pipeline, library
     pipeline.run()
     pipeline.later()
     stage = item_stages(pipeline.settings)[Stage.QUALITY]
-    bumped = ItemStage(code_version=stage.code_version + 1, upstream=stage.upstream)
+    bumped = dataclasses.replace(stage, code_version=stage.code_version + 1)
 
     pipeline.configure(pipeline.settings, quality=bumped)
     assert pipeline.worker.reconcile() == {
@@ -137,3 +146,103 @@ async def test_the_activity_page_counts_the_quality_stage(
     rows = {row["stage"]: row for row in response.json()["stages"]}
     assert rows["quality"]["kind"] == "item"
     assert (rows["quality"]["done"], rows["quality"]["total"]) == (SUPPORTED, SUPPORTED)
+
+
+def test_the_aesthetic_score_is_the_head_s_rating_mapped_to_0_to_1(
+    pipeline: Pipeline, library: Path
+) -> None:
+    head = FakeHead()
+    pipeline.configure(pipeline.settings, _clip(pipeline), aesthetic=head)
+    pipeline.run()
+
+    with pipeline.sessions() as session:
+        vectors = {e.item_id: from_blob(e.vector) for e in session.scalars(sa.select(Embedding))}
+        rows = list(session.scalars(sa.select(Quality)))
+    assert len(rows) == SUPPORTED
+    scores = {row.item_id: row.aesthetic for row in rows}
+    for item_id, aesthetic in scores.items():
+        assert aesthetic == aesthetic_score(head.rating(vectors[item_id]))
+    assert len(set(scores.values())) > 1  # different items, different ratings
+
+
+def test_without_the_weights_aesthetic_stays_null_and_the_log_says_where_they_go(
+    pipeline: Pipeline, library: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, "photo_triage.worker.stages"):
+        pipeline.run()
+
+    rows = _quality(pipeline)
+    assert len(rows) == SUPPORTED
+    assert all(row.aesthetic is None for row in rows.values())
+    assert all(row.blur is not None and row.exposure is not None for row in rows.values())
+    expected = weights_path(pipeline.settings.models_dir, pipeline.settings.clip_model)
+    warnings = [r.getMessage() for r in caplog.records if "aesthetic" in r.getMessage()]
+    assert len(warnings) == 1  # once per worker, not once per item
+    assert str(expected) in warnings[0]
+
+
+def test_an_embedding_from_another_model_gets_no_aesthetic_score(
+    pipeline: Pipeline, library: Path
+) -> None:
+    pipeline.configure(pipeline.settings, _clip(pipeline), aesthetic=FakeHead())
+    pipeline.run()
+    assert all(row.aesthetic is not None for row in _quality(pipeline).values())
+    with pipeline.sessions.begin() as session:
+        session.execute(sa.update(Embedding).values(model="ViT-B-16"))
+    pipeline.later()
+    pipeline.configure(
+        pipeline.settings, _clip(pipeline), aesthetic=FakeHead(), quality=_bumped(pipeline)
+    )
+    pipeline.worker.reconcile()
+    pipeline.worker.drain()
+
+    assert all(row.aesthetic is None for row in _quality(pipeline).values())
+
+
+def test_putting_the_weights_in_place_scores_the_library_again(
+    pipeline: Pipeline,
+    library: Path,
+    write_linear_pth: Callable[[Path, NDArray[np.float32], float], None],
+) -> None:
+    pipeline.configure(pipeline.settings, _clip(pipeline))
+    pipeline.run()
+    assert all(row.aesthetic is None for row in _quality(pipeline).values())
+    pipeline.later()
+    path = weights_path(pipeline.settings.models_dir, pipeline.settings.clip_model)
+    assert path is not None
+    head = FakeHead()
+    write_linear_pth(path, head.weight, head.bias)
+
+    pipeline.configure(pipeline.settings, _clip(pipeline))
+    assert pipeline.worker.reconcile()[Stage.QUALITY] == SUPPORTED
+    pipeline.worker.drain()
+    assert all(row.aesthetic is not None for row in _quality(pipeline).values())
+
+
+def test_under_worker_fake_clip_the_fake_head_scores_each_item(
+    migrated: Engine, settings: Settings, library: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("PHOTO_DIR", "TRASH_DIR", "DATA_DIR", "MODELS_DIR"):
+        monkeypatch.setenv(name, str(getattr(settings, name.lower())))
+    monkeypatch.setenv("WORKER_FAKE_CLIP", "true")
+
+    assert main(["scan"]) == 0
+    assert main(["--once"]) == 0
+
+    with Session(migrated) as session:
+        vectors = {e.item_id: from_blob(e.vector) for e in session.scalars(sa.select(Embedding))}
+        rows = list(session.scalars(sa.select(Quality)))
+    assert len(rows) == SUPPORTED
+    for row in rows:
+        assert row.aesthetic == aesthetic_score(FakeHead().rating(vectors[row.item_id]))
+
+
+def _clip(pipeline: Pipeline) -> FakeClip:
+    """The fake embedder under `CLIP_MODEL`'s name, as under `WORKER_FAKE_CLIP`, so
+    the head rates its vectors."""
+    return FakeClip(pipeline.settings.clip_model)
+
+
+def _bumped(pipeline: Pipeline) -> ItemStage:
+    stage = item_stages(pipeline.settings)[Stage.QUALITY]
+    return dataclasses.replace(stage, code_version=stage.code_version + 1)

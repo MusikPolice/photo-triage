@@ -145,8 +145,8 @@ class Settings(BaseSettings):
 
     worker_fake_clip: bool = False
     """Embeds with `FakeClip`, which needs no model weights, under `CLIP_MODEL`'s
-    name, for the end-to-end tests' stack (`just e2e`). The API's search uses it
-    too."""
+    name, and rates aesthetics with `FakeHead`, for the end-to-end tests' stack
+    (`just e2e`). The API's search uses it too."""
 
     fake_now: AwareDatetime | None = None
     """Starts the worker's clock at this time (with a UTC offset, e.g.
