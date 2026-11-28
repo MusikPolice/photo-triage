@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from photo_triage.db.models import Embedding, Item, ItemFrame, Job, JobStatus, MediaType
 from photo_triage.files import ExifTool
 from photo_triage.ml import ClipEmbedder, FakeClip
+from photo_triage.ml.aesthetic import AestheticHead
 from photo_triage.pipeline.embed import from_blob, mean_vector
 from photo_triage.pipeline.frames import frame_path
 from photo_triage.settings import Settings
@@ -46,10 +47,11 @@ class Pipeline:
         embedder: ClipEmbedder | None = None,
         *,
         without: Stage | None = None,
+        aesthetic: AestheticHead | None = None,
         **stages: ItemStage,
     ) -> None:
         """`embedder` is `FakeClip()` unless given; `without` leaves a stage's jobs
-        queued."""
+        queued; `aesthetic` rates embeddings, as the worker's default if not given."""
         self.settings = settings
         self.stages = {**item_stages(settings), **stages}
         runners = build_runners(
@@ -59,6 +61,7 @@ class Pipeline:
             self.clock,
             self.exiftool,
             clip=FakeClip() if embedder is None else embedder,
+            aesthetic=aesthetic,
         )
         self.worker = Worker(
             self.engine,

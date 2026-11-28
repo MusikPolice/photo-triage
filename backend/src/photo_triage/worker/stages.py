@@ -27,6 +27,7 @@ from photo_triage.worker.queue import JobQueue, Stage
 
 if TYPE_CHECKING:
     from photo_triage.ml import ClipEmbedder
+    from photo_triage.ml.aesthetic import AestheticHead
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +98,29 @@ def item_stages(settings: Settings) -> Mapping[str, ItemStage]:
             settings_fingerprint=settings.clip_model,
         ),
         # The photo or a video's frames, and its size from the metadata. After CLIP
-        # (plan §6.11), whose embedding the aesthetic and junk signals will read.
+        # (plan §6.11), whose embedding the aesthetic and junk signals read.
         Stage.QUALITY: ItemStage(
-            code_version=1,
+            # 2: the aesthetic score (#171).
+            code_version=2,
             upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES, Stage.CLIP),
+            settings_fingerprint=_quality_fingerprint(settings),
         ),
     }
+
+
+def _quality_fingerprint(settings: Settings) -> str:
+    """`CLIP_MODEL`, and which aesthetic predictor rates its embeddings: the fake,
+    the real one, or none if its weights are missing. So putting the weights in place
+    scores the library again."""
+    # Here, not at the top: see the module docstring.
+    from photo_triage.ml.aesthetic import weights_path
+
+    if settings.worker_fake_clip:
+        return f"{settings.clip_model}, fake aesthetic"
+    path = weights_path(settings.models_dir, settings.clip_model)
+    if path is None or not path.is_file():
+        return f"{settings.clip_model}, no aesthetic"
+    return settings.clip_model
 
 
 NOOP_RUN_S = 0.2
@@ -121,6 +139,7 @@ def build_runners(
     exiftool: MetadataWriter,
     *,
     clip: "ClipEmbedder | None" = None,
+    aesthetic: "AestheticHead | None" = None,
 ) -> Mapping[str, Runner]:
     """The stages this worker runs. Jobs for any other stage stay in the queue.
     The caller owns `exiftool`, which reads and writes metadata, and closes it once
@@ -128,9 +147,16 @@ def build_runners(
 
     `clip` embeds for the `clip` stage. By default it's `CLIP_MODEL` from
     `MODELS_DIR`, loaded by the first `clip` job, so a worker with no models still
-    runs the other stages; each `clip` job fails, saying where the models should be."""
+    runs the other stages; each `clip` job fails, saying where the models should be.
+
+    `aesthetic` rates embeddings for the `quality` stage. By default it's the LAION
+    predictor from `MODELS_DIR`, or `FakeHead` under `WORKER_FAKE_CLIP`, loaded by the
+    first `quality` job. Without its weights, the aesthetic scores stay null, and the
+    first job logs where the weights should be."""
     sessions = sessionmaker(engine)
     embedder = clip
+    head = aesthetic
+    head_loaded = aesthetic is not None
 
     def run_walk(job: Job) -> None:
         with sessions.begin() as session:
@@ -187,9 +213,23 @@ def build_runners(
 
     def run_quality(job: Job) -> bool:
         # Here, not at the top: see the module docstring.
+        from photo_triage.ml import ModelMissingError
+        from photo_triage.ml.aesthetic import FakeHead, LinearHead
         from photo_triage.pipeline import quality
 
-        return quality.score(sessions, job, settings.photo_dir, settings.derived_dir)
+        nonlocal head, head_loaded
+        if not head_loaded:
+            head_loaded = True
+            if settings.worker_fake_clip:
+                head = FakeHead()
+            else:
+                try:
+                    head = LinearHead.load(settings.models_dir, settings.clip_model)
+                except ModelMissingError as e:
+                    logger.warning("%s The aesthetic scores stay empty.", e)
+        return quality.score(
+            sessions, job, settings.photo_dir, settings.derived_dir, head, settings.clip_model
+        )
 
     def run_layout(job: Job) -> None:
         # Here, not at the top: see the module docstring.

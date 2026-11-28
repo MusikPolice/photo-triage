@@ -15,6 +15,13 @@ Each signal is in [0, 1], with 1 the best:
   stored too, so a reason can say which way an exposure is off.
 - **resolution:** a logistic curve in megapixels, 0.5 at `RESOLUTION_MIDPOINT_MP`
   (2 MP), 0.12 at 1 MP and 0.98 at 4 MP.
+- **aesthetic:** the LAION aesthetic predictor's rating of the item's CLIP embedding
+  (`photo_triage.ml.aesthetic`), roughly 1 to 10, mapped linearly to 0 at
+  `AESTHETIC_RATING_ZERO` (2.5) and 1 at `AESTHETIC_RATING_FULL` (6.5), and clamped.
+  So 0.5 is a rating of 4.5, the lowest cut LAION-Aesthetics published, and 1 is
+  6.5, its highest. The ratings bunch up: the tier-1 scenes rate 5.1 to 5.3 (0.65
+  to 0.69), the blurred fixture 4.7 (0.56) and the screenshot 2.7 (0.05). It's null
+  without the predictor's weights, or without an embedding from `CLIP_MODEL`.
 
 Blur and exposure are measured on the picture scaled to `ANALYSIS_LONG_EDGE_PX`, so
 the blur threshold means the same for every camera, and a 48 MP photo costs no more
@@ -28,7 +35,7 @@ import logging
 import math
 import statistics
 from collections.abc import Sequence
-from dataclasses import astuple, dataclass
+from dataclasses import astuple, dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +45,9 @@ from numpy.typing import NDArray
 from PIL import Image
 from sqlalchemy.orm import Session, sessionmaker
 
-from photo_triage.db.models import Item, ItemFrame, Job, MediaType, Quality
+from photo_triage.db.models import Embedding, Item, ItemFrame, Job, MediaType, Quality
+from photo_triage.ml.aesthetic import AestheticHead
+from photo_triage.pipeline.embed import from_blob
 from photo_triage.pipeline.frames import frame_path
 from photo_triage.pipeline.pictures import decode
 
@@ -58,6 +67,8 @@ BRIGHT_MEAN_ZERO = 0.97
 RESOLUTION_MIDPOINT_MP = 2.0
 RESOLUTION_SLOPE_MP = 0.5
 """How fast the resolution curve rises: from 0.27 at 1.5 MP to 0.73 at 2.5 MP."""
+AESTHETIC_RATING_ZERO = 2.5
+AESTHETIC_RATING_FULL = 6.5
 
 
 class QualityError(Exception):
@@ -82,6 +93,7 @@ class Signals:
     bright_clipped_fraction: float
     mean_brightness: float
     resolution: float
+    aesthetic: float | None = None
 
 
 def blur_score(gray: NDArray[np.float32]) -> float:
@@ -124,6 +136,12 @@ def resolution_score(width_px: int, height_px: int) -> float:
     return 1.0 / (1.0 + math.exp(-(megapixels - RESOLUTION_MIDPOINT_MP) / RESOLUTION_SLOPE_MP))
 
 
+def aesthetic_score(rating: float) -> float:
+    """A predicted rating mapped to 0 to 1: linear from 2.5 to 6.5, clamped."""
+    span = AESTHETIC_RATING_FULL - AESTHETIC_RATING_ZERO
+    return min(1.0, max(0.0, (rating - AESTHETIC_RATING_ZERO) / span))
+
+
 def grayscale(image: Image.Image) -> NDArray[np.float32]:
     """The picture in grayscale, 0 to 255, scaled down to the analysis size if larger."""
     image.draft("L", (ANALYSIS_LONG_EDGE_PX, ANALYSIS_LONG_EDGE_PX))  # JPEG only
@@ -149,10 +167,18 @@ def signals(pictures: Sequence[NDArray[np.float32]], width_px: int, height_px: i
     )
 
 
-def score(sessions: sessionmaker[Session], job: Job, photo_dir: Path, derived_dir: Path) -> bool:
+def score(
+    sessions: sessionmaker[Session],
+    job: Job,
+    photo_dir: Path,
+    derived_dir: Path,
+    head: AestheticHead | None,
+    clip_model: str,
+) -> bool:
     """Score `job`'s item and store its signals. Returns whether they changed.
-    Raises `QualityError` if a picture can't be read, so the job is retried and then
-    parked."""
+    `head` rates the item's `clip_model` embedding; without one, or without the
+    embedding, the aesthetic score is null. Raises `QualityError` if a picture can't
+    be read, so the job is retried and then parked."""
     assert job.item_id is not None
     item_id = job.item_id
     with sessions() as session:
@@ -161,6 +187,12 @@ def score(sessions: sessionmaker[Session], job: Job, photo_dir: Path, derived_di
             return False  # deleted since the job was queued
         sources = _sources(session, item, photo_dir, derived_dir)
         size = (item.width, item.height)
+        embedding = session.get(Embedding, item_id)
+        vector = (
+            from_blob(embedding.vector)
+            if embedding is not None and embedding.model == clip_model
+            else None
+        )
     if not all(source.is_file() for source in sources):
         # The next walk deals with a missing file; a video's frames come back with it.
         logger.info("Item %d's pictures are gone before its quality is scored", item_id)
@@ -171,6 +203,8 @@ def score(sessions: sessionmaker[Session], job: Job, photo_dir: Path, derived_di
     if width_px is None or height_px is None:
         height_px, width_px = pictures[0].shape  # the analysis size: a lower bound
     found = signals(pictures, width_px, height_px)
+    if head is not None and vector is not None:
+        found = replace(found, aesthetic=aesthetic_score(head.rating(vector)))
     with sessions.begin() as session:
         if session.get(Item, item_id) is None:
             return False
@@ -186,6 +220,7 @@ def score(sessions: sessionmaker[Session], job: Job, photo_dir: Path, derived_di
                 bright_clipped_fraction=found.bright_clipped_fraction,
                 mean_brightness=found.mean_brightness,
                 resolution=found.resolution,
+                aesthetic=found.aesthetic,
             )
         )
     return True
@@ -199,6 +234,7 @@ def _signals_of(row: Quality) -> Signals:
         bright_clipped_fraction=row.bright_clipped_fraction,
         mean_brightness=row.mean_brightness,
         resolution=row.resolution,
+        aesthetic=row.aesthetic,
     )
 
 
