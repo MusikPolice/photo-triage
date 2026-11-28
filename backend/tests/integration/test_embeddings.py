@@ -253,6 +253,7 @@ def test_a_new_clip_model_embeds_every_item_again(pipeline: Pipeline, library: P
     assert pipeline.worker.reconcile() == {
         **dict.fromkeys(pipeline.stages, 0),
         Stage.CLIP: SUPPORTED,
+        Stage.QUALITY: SUPPORTED,  # the aesthetic score rates the model's embedding
     }
     pipeline.worker.drain()
 

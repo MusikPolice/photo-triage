@@ -311,8 +311,9 @@ def test_the_registered_item_stages(settings: Settings) -> None:
             settings_fingerprint="ViT-B-32",
         ),
         Stage.QUALITY: ItemStage(
-            code_version=1,
+            code_version=2,
             upstream=(Stage.SCAN, Stage.METADATA_READ, Stage.FRAMES, Stage.CLIP),
+            settings_fingerprint="ViT-B-32, no aesthetic",
         ),
     }
 
